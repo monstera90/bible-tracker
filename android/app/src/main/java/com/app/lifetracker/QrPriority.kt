@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.4 (14.11) — карточка события листается: [Snapshot.eventIndex], [eventCards] (до [EVENT_NAV_MAX] ближайших событий), [nextEventKey] берёт событие с этим номером.
+// Версия: 4.0 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -81,7 +81,9 @@ object QrPriority {
         val rpePending: Boolean = false,
         val lastTopKey: String = "",
         /** Какое по счёту из ближайших событий показывает карточка события (0 — первое; нажатие у края карточки листает, без зацикливания). */
-        val eventIndex: Int = 0
+        val eventIndex: Int = 0,
+        /** Какая по счёту из ближайших задач показана на единственной карточке задач (0 — первая; нажатие у края листает, без зацикливания). */
+        val taskIndex: Int = 0
     )
 
     class Scored(val card: Card, val score: Int, val reason: String)
@@ -110,6 +112,7 @@ object QrPriority {
 
     fun build(cfg: Cfg, s: Snapshot): Result {
         val base = visible(cfg, s)
+        val rowTaskAt = taskCards(cfg, s).firstOrNull()?.at ?: 0L // балл карточки задач считается по первой задаче ряда: листание не двигает карточку в стопке
         val main = ArrayList<Scored>()
         var top = ""
         if (!cfg.relevance || base.size < 2) {
@@ -123,7 +126,7 @@ object QrPriority {
             } else {
                 val scored = ArrayList<Scored>()
                 for (c in head) {
-                    val sc = scoreOf(c, s)
+                    val sc = scoreOf(c, s, rowTaskAt)
                     scored.add(Scored(c, sc.first, sc.second))
                 }
                 lift(scored)
@@ -139,7 +142,7 @@ object QrPriority {
         if (s.rpePending) out.add(Scored(rpeCard(), 0, "Ждёт оценки тренировки"))
         out.addAll(main)
         val topKey = if (s.rpePending) QrRpe.KEY else top
-        val next = if (cfg.relevance) nextChange(base, s) else Long.MAX_VALUE
+        val next = if (cfg.relevance) nextChange(base, s, rowTaskAt) else Long.MAX_VALUE
         val topScored: Scored? = if (s.rpePending) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
     }
@@ -213,13 +216,16 @@ object QrPriority {
     private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
 
     /** Ближайший момент, когда порядок меняется сам (без события извне); см. [Result.nextChangeAt]. */
-    private fun nextChange(shown: List<Card>, s: Snapshot): Long {
+    private fun nextChange(shown: List<Card>, s: Snapshot, rowTaskAt: Long): Long {
         var at = nextBoundary(s.now, s.cal)
         val tomorrow = dayStart(s.cal, s.now, 1)
         fun soon(t: Long) { if (t > s.now && t < at) at = t }
         for (c in shown) {
             if (c.dyn == "event") soon(c.at - SOON_MS + 1_000L)
-            if (c.dyn == "task" && c.at >= s.now && c.at < tomorrow) soon(c.at + 1_000L) // станет просроченной
+            if (c.dyn == "task") {
+                val at0 = if (rowTaskAt > 0L) rowTaskAt else c.at
+                if (at0 >= s.now && at0 < tomorrow) soon(at0 + 1_000L) // станет просроченной
+            }
             if (c.alarmId.isNotEmpty()) {
                 s.alarms[c.alarmId]?.let { soon(it - SOON_MS + 1_000L) }
                 if (c.alarmId in s.ringingAlarmIds) soon(s.now + RINGING_POLL_MS)
@@ -264,22 +270,39 @@ object QrPriority {
         return list[s.eventIndex.coerceIn(0, list.size - 1)].key
     }
 
-    /** Карточка задачи видна, пока её время раньше конца окна [DYN_DAYS] суток (просроченная — до отметки); событие — только то, что выбрано [nextEventKey]. */
-    private fun dynShown(c: Card, s: Snapshot, nextEv: String): Boolean = when (c.dyn) {
-        "task" -> c.at < dayStart(s.cal, s.now, DYN_DAYS)
+    /** Сколько ближайших задач можно пролистать на карточке задач. */
+    const val TASK_NAV_MAX = 12
+
+    /** Невыполненные задачи в пределах [DYN_DAYS] суток по возрастанию времени (просроченные первыми; при равном — как их прислала страница), не больше [TASK_NAV_MAX]. */
+    fun taskCards(cfg: Cfg, s: Snapshot): List<Card> {
+        val limit = dayStart(s.cal, s.now, DYN_DAYS)
+        return cfg.cards.filter { it.dyn == "task" && it.at < limit && !(it.tid.isNotEmpty() && it.tid in s.doneTaskIds) }.sortedBy { it.at }.take(TASK_NAV_MAX)
+    }
+
+    /** Ключ задачи, которую сейчас показывает единственная карточка задач: [Snapshot.taskIndex]-я из [taskCards] (номер за краем списка — крайняя); пусто — показывать нечего. */
+    fun nextTaskKey(cfg: Cfg, s: Snapshot): String {
+        val list = taskCards(cfg, s)
+        if (list.isEmpty()) return ""
+        return list[s.taskIndex.coerceIn(0, list.size - 1)].key
+    }
+
+    /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]. */
+    private fun dynShown(c: Card, nextEv: String, nextTask: String): Boolean = when (c.dyn) {
+        "task" -> c.key == nextTask
         "event" -> c.key == nextEv
         else -> true
     }
 
-    private fun isShown(c: Card, s: Snapshot, nextEv: String): Boolean =
+    private fun isShown(c: Card, s: Snapshot, nextEv: String, nextTask: String): Boolean =
         !((c.after == "hide" || c.habit) && c.key in s.hiddenKeys) &&
             !(c.dyn == "task" && c.tid.isNotEmpty() && c.tid in s.doneTaskIds) &&
-            dynShown(c, s, nextEv)
+            dynShown(c, nextEv, nextTask)
 
     /** Карточки, которые видны в стопке: в порядке «как собрал пользователь, перенесённые в конец — после них, по времени переноса». */
     private fun visible(cfg: Cfg, s: Snapshot): List<Card> {
         val nextEv = nextEventKey(cfg, s)
-        val shown = cfg.cards.filter { isShown(it, s, nextEv) }
+        val nextTask = nextTaskKey(cfg, s)
+        val shown = cfg.cards.filter { isShown(it, s, nextEv, nextTask) }
         if (shown.none { it.after == "end" && s.movedAt.containsKey(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") (s.movedAt[it.value.key] ?: 0L) else 0L }.thenBy { it.index }
@@ -295,7 +318,7 @@ object QrPriority {
     // ---------- баллы ----------
 
     /** Балл карточки и причина (для объяснения): максимум по сигналам, не сумма. */
-    private fun scoreOf(c: Card, s: Snapshot): Pair<Int, String> {
+    private fun scoreOf(c: Card, s: Snapshot, rowTaskAt: Long = 0L): Pair<Int, String> {
         var best = 0
         var why = ""
         fun cand(sc: Int, w: String) { if (sc > best) { best = sc; why = w } }
@@ -319,8 +342,9 @@ object QrPriority {
             if (d in 0..SOON_MS) cand(SCORE_EVENT_SOON, "Событие " + inMinutes(d))
         }
         if (c.dyn == "task") {
-            if (c.at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
-            else if (c.at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
+            val at = if (rowTaskAt > 0L) rowTaskAt else c.at // по первой (самой срочной) задаче ряда
+            if (at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
+            else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
         }
         if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
         if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
@@ -402,9 +426,10 @@ object QrPriority {
 
         // 2. и 6. Нет скрытых, выполненных и вне окна; нет дублей; ничего не потеряно
         val nextEv = nextEventKey(cfg, s)
-        for (c in main) if (!isShown(c, s, nextEv)) bad.add("2: лишняя карточка " + c.key)
+        val nextTask = nextTaskKey(cfg, s)
+        for (c in main) if (!isShown(c, s, nextEv, nextTask)) bad.add("2: лишняя карточка " + c.key)
         if (keys.toSet().size != keys.size) bad.add("6: дубли ключей")
-        for (c in cfg.cards) if (isShown(c, s, nextEv) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
+        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
 
         // 3. «В конец», перенесённые сегодня, — подряд в самом конце, в порядке переноса
         val movedIdx = main.indices.filter { movedToday(main[it], s) }

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.3 (14.11) — тест ряда событий (eventIndex, без зацикливания)
+// Версия: 3.4 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -153,7 +153,7 @@ class QrPriorityTest {
         )
         // прежней верхней была просроченная задача (650): гистерезис не должен оставлять её наверху
         val r = run(cfg(cards, true), snap(c, lastTop = "t1"))
-        assertEquals(listOf("e", "t1", "t2", "q"), keys(r))
+        assertEquals(listOf("e", "t1", "q"), keys(r)) // задачи — одна карточка (первая по времени)
         assertEquals("e", r.anchorKey)
         assertEquals(QrPriority.SCORE_TASK_OVERDUE + QrPriority.HYSTERESIS, scoreOf(r, "e"))
     }
@@ -271,11 +271,15 @@ class QrPriorityTest {
             card("over", dyn = "task", at = now - hour, tid = "B"), card("tom", dyn = "task", at = now + 24 * hour, tid = "C")
         )
         val r = run(cfg(cards, true), snap(c))
-        assertEquals(listOf("over", "today", "z", "tom"), keys(r))
+        assertEquals(listOf("over", "z"), keys(r)) // одна карточка задач: первая по времени, просроченные первыми
         assertEquals(QrPriority.SCORE_TASK_OVERDUE, scoreOf(r, "over"))
-        assertEquals(QrPriority.SCORE_TASK_TODAY, scoreOf(r, "today"))
-        assertEquals(0, scoreOf(r, "tom"))
         assertEquals("over", r.topKey)
+        // листание: показана другая задача, а балл карточки — по первой (самой срочной), поэтому в стопке она не прыгает
+        val second = run(cfg(cards, true), snap(c).copy(taskIndex = 1))
+        assertEquals(listOf("today", "z"), keys(second))
+        assertEquals(QrPriority.SCORE_TASK_OVERDUE, scoreOf(second, "today"))
+        assertEquals("today", second.topKey)
+        assertEquals(listOf("tom", "z"), keys(run(cfg(cards, true), snap(c).copy(taskIndex = 2))))
     }
 
     @Test fun signalsOrder_byTable() {
@@ -286,7 +290,7 @@ class QrPriorityTest {
             card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 20 * min), card("al", alarmId = "AL1")
         )
         val r = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to now + 10 * min)))
-        assertEquals(listOf("al", "ev", "over", "today", "sch", "bat"), keys(r))
+        assertEquals(listOf("al", "ev", "over", "sch", "bat"), keys(r)) // задачи — одна карточка: показана «over» (первая по времени)
     }
 
     @Test fun battery_low_raisesOnlyBatteryCards() {
@@ -333,12 +337,12 @@ class QrPriorityTest {
         assertEquals("sch", run(cfg(cards, true), snap(cal(12), battery = 10)).topKey)
     }
 
-    @Test fun hysteresis_diff130_changes() {
+    @Test fun hysteresis_diff150_changes() {
         val now = cal(12).timeInMillis
-        val cards = listOf(card("today", dyn = "task", at = now + 2 * hour, tid = "A"), card("over", dyn = "task", at = now - hour, tid = "B"))
-        val r = run(cfg(cards, true), snap(cal(12), lastTop = "today")) // 520 → 650
+        val cards = listOf(card("sch", times = setOf("d")), card("over", dyn = "task", at = now - hour, tid = "B"))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "sch")) // 500 → 650
         assertEquals("over", r.topKey)
-        assertEquals(listOf("over", "today"), keys(r))
+        assertEquals(listOf("over", "sch"), keys(r))
     }
 
     @Test fun hysteresis_diffExactly100_changes() {
@@ -575,5 +579,27 @@ class QrPriorityTest {
         assertEquals("e2", QrPriority.nextEventKey(cf, s.copy(eventIndex = 7))) // за краем ряда — крайнее, не по кругу
         assertEquals("e0", QrPriority.nextEventKey(cf, s.copy(eventIndex = -3)))
         assertEquals(listOf("e1"), keys(run(cf, s.copy(eventIndex = 1))))
+    }
+    @Test fun taskRow_oneCardNoWrap_doneShifts() {
+        val c = cal(12)
+        val now = c.timeInMillis
+        val cards = listOf(
+            card("t2", dyn = "task", at = now + 2 * hour, tid = "B"), card("t0", dyn = "task", at = now - hour, tid = "A"),
+            card("t1", dyn = "task", at = now + hour, tid = "C"), card("far", dyn = "task", at = now + 8 * 24 * hour, tid = "D")
+        )
+        val cf = cfg(cards, false)
+        val s = snap(c)
+        assertEquals(listOf("t0", "t1", "t2"), QrPriority.taskCards(cf, s).map { it.key }) // по времени; вне окна — нет
+        assertEquals("t0", QrPriority.nextTaskKey(cf, s))
+        assertEquals("t1", QrPriority.nextTaskKey(cf, s.copy(taskIndex = 1)))
+        assertEquals("t2", QrPriority.nextTaskKey(cf, s.copy(taskIndex = 7))) // за краем ряда — крайняя, не по кругу
+        assertEquals("t0", QrPriority.nextTaskKey(cf, s.copy(taskIndex = -3)))
+        assertEquals(listOf("t1"), keys(run(cf, s.copy(taskIndex = 1))))
+        // выполненная задача уходит из ряда, следующая занимает её место
+        val done = snap(c, done = setOf("A"))
+        assertEquals(listOf("t1", "t2"), QrPriority.taskCards(cf, done).map { it.key })
+        assertEquals(listOf("t1"), keys(run(cf, done)))
+        // задач нет — карточки нет
+        assertEquals("", QrPriority.nextTaskKey(cfg(emptyList(), false), s))
     }
 }

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.7 (14.11) — карточка события: три зоны нажатия (левый край — предыдущее событие, правый — следующее, центр — форма события в приложении), точки места в ряду на лице.
+// Версия: 2.8 (14.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -43,9 +43,14 @@ class QrWidgetService : RemoteViewsService() {
                 val list = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
                 val fresh = HashMap<String, Bitmap>()
                 val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
+                val tpos = if (cfg != null && cfg.tasks) QrWidgets.taskPos(ctx, cfg) else Pair(0, 0)
                 for (c in list) {
                     val bmp = QrWidgets.bitmapFor(ctx, c)
-                    fresh[c.key] = if (c.dyn == "event") QrWidgets.withEventDots(bmp, pos.first, pos.second) else bmp
+                    fresh[c.key] = when (c.dyn) {
+                        "event" -> QrWidgets.withEventDots(bmp, pos.first, pos.second)
+                        "task" -> QrWidgets.withEventDots(bmp, tpos.first, tpos.second)
+                        else -> bmp
+                    }
                 }
                 cards = list
                 bitmaps = fresh
@@ -78,7 +83,14 @@ class QrWidgetService : RemoteViewsService() {
             if (isRpe) for (i in RPE_BUTTONS.indices) rv.setOnClickFillInIntent(RPE_BUTTONS[i], Intent().putExtra("rpe", i + 1))
             // карточка события: три зоны поверх лица (видимость задаётся всегда — элемент списка может быть переиспользован)
             val isEv = c.dyn == "event"
-            rv.setViewVisibility(R.id.ev_zones, if (isEv) View.VISIBLE else View.GONE)
+            val isTk = c.dyn == "task"
+            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk) View.VISIBLE else View.GONE)
+            if (isTk) {
+                // карточка задач: края листают ряд задач (QrWidgets.taskNav, без зацикливания), центр — двойное нажатие отмечает показанную задачу (ScanActivity)
+                rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("tknav", -1).putExtra("wid", widgetId))
+                rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("tknav", 1).putExtra("wid", widgetId))
+                if (c.tid.isNotEmpty()) rv.setOnClickFillInIntent(R.id.ev_center, Intent().putExtra("task", c.tid))
+            }
             if (isEv) {
                 // у первого и последнего события нажатие у края ничего не меняет (QrWidgets.eventNav: ряд не зациклен), но intent у зоны всегда один и тот же
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("evnav", -1).putExtra("wid", widgetId))

@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.7 (14.11) — карточка события листается нажатием у левого/правого края (до 10 событий, без зацикливания, [eventNav]), центр открывает форму этого события в приложении (`eid`); через минуту ряд возвращается к первому событию ([EVENT_RESET_MS]).
+// Версия: 14.0 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -57,12 +57,13 @@ import java.util.UUID
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
  * задачи, мс) и ближайшие события (`k`="event") — и до четырёх картинок на каждого: `<ключ>.png` («Сегодня»), `<ключ>_t.png` («Завтра»), `<ключ>_w.png` (день недели — до даты два дня
  * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([QrPriority.build], [dynBitmap]), поэтому надпись и состав меняются без приложения:
- * задача видна, пока её время в пределах [QrPriority.DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]); нет такого —
+ * задачи — одна карточка на все: показана одна невыполненная задача из ближайших (время в пределах [QrPriority.DYN_DAYS] суток, просроченные первыми; время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * Карточка события: нажатие у левого края — предыдущее событие, у правого — следующее (до [QrPriority.EVENT_NAV_MAX] ближайших, ряд не зациклен; номер хранит [eventNav], через [EVENT_RESET_MS]
  * без нажатий ряд сам возвращается к первому событию — [eventIndexOf], [nextDynChange]); внизу карточки точки показывают место в ряду ([withEventDots]); нажатие в центре открывает в приложении форму
  * именно этого события (extra `evopen` → [ScanActivity] → MainActivity.ACTION_OPEN_EVENT → страница `__ltOpenCalendarEvent`).
- * Двойное нажатие на карточку задачи отмечает её выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]).
+ * Карточка задач листается так же, как карточка события: нажатие у левого края — предыдущая задача, у правого — следующая (до [QrPriority.TASK_NAV_MAX], без зацикливания; номер хранит [taskNav] в [K_TKIDX], через [EVENT_RESET_MS] без нажатий ряд возвращается к первой задаче; точки внизу — [withEventDots]).
+ * Двойное нажатие в центре карточки задач отмечает показанную задачу выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]); следующая задача занимает её место.
  * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
@@ -107,6 +108,7 @@ object QrWidgets {
     private const val K_RETFIRST = "retfirst" // id виджета → время первого смахивания в текущей серии (потолок откладывания возврата)
     private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
     private const val K_AEVSEQ = "alarmEvSeq"
+    private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val AEV_MAX = 50
 
@@ -546,26 +548,33 @@ object QrWidgets {
         }
         if (cfg.relevance) at = Math.min(at, plan(ctx, cfg).nextChangeAt)
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
+        if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
         return at
     }
 
     // ---------- ряд событий на карточке события ----------
 
-    private fun evEntry(ctx: Context, cfgId: String): JSONObject? = synchronized(LOCK) { jmap(ctx, K_EVIDX).optJSONObject(cfgId) }
+    private fun rowEntry(ctx: Context, key: String, cfgId: String): JSONObject? = synchronized(LOCK) { jmap(ctx, key).optJSONObject(cfgId) }
 
-    /** Номер события в ряду карточки события виджета [cfgId]: 0 — первое; не нажимали [EVENT_RESET_MS] — снова 0. */
-    private fun eventIndexOf(ctx: Context, cfgId: String, now: Long): Int {
-        val e = evEntry(ctx, cfgId) ?: return 0
+    /** Номер карточки в ряду (события или задач, [key] — K_EVIDX / K_TKIDX) виджета [cfgId]: 0 — первая; не нажимали [EVENT_RESET_MS] — снова 0. */
+    private fun rowIndexOf(ctx: Context, key: String, cfgId: String, now: Long): Int {
+        val e = rowEntry(ctx, key, cfgId) ?: return 0
         val i = e.optInt("i", 0)
         if (i <= 0 || now - e.optLong("t", 0L) >= EVENT_RESET_MS || now < e.optLong("t", 0L)) return 0
         return i
     }
 
-    /** Когда пролистанный ряд вернётся к первому событию (с запасом на неточность будильника); null — ряд и так на первом. */
-    private fun eventResetAt(ctx: Context, cfgId: String, now: Long): Long? {
-        if (eventIndexOf(ctx, cfgId, now) <= 0) return null
-        return (evEntry(ctx, cfgId)?.optLong("t", 0L) ?: return null) + EVENT_RESET_MS + 500L
+    /** Когда пролистанный ряд вернётся к первой карточке (с запасом на неточность будильника); null — ряд и так на первой. */
+    private fun rowResetAt(ctx: Context, key: String, cfgId: String, now: Long): Long? {
+        if (rowIndexOf(ctx, key, cfgId, now) <= 0) return null
+        return (rowEntry(ctx, key, cfgId)?.optLong("t", 0L) ?: return null) + EVENT_RESET_MS + 500L
     }
+
+    /** Номер события в ряду карточки события виджета [cfgId]: 0 — первое; не нажимали [EVENT_RESET_MS] — снова 0. */
+    private fun eventIndexOf(ctx: Context, cfgId: String, now: Long): Int = rowIndexOf(ctx, K_EVIDX, cfgId, now)
+
+    /** Когда пролистанный ряд событий вернётся к первому; null — ряд и так на первом. */
+    private fun eventResetAt(ctx: Context, cfgId: String, now: Long): Long? = rowResetAt(ctx, K_EVIDX, cfgId, now)
 
     /** (номер показанного события, сколько событий в ряду) для виджета [cfg]; в ряду меньше двух событий листать нечего. */
     fun eventPos(ctx: Context, cfg: Cfg): Pair<Int, Int> {
@@ -586,11 +595,38 @@ object QrWidgets {
         val pos = eventPos(app, cfg)
         val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
         if (pos.second == 0 || to == pos.first) return
+        saveRowIndex(app, K_EVIDX, cfg.id, to)
+        refreshAll(app)
+    }
+
+    private fun saveRowIndex(app: Context, key: String, cfgId: String, to: Int) {
         synchronized(LOCK) {
-            val all = jmap(app, K_EVIDX)
-            all.put(cfg.id, JSONObject().put("i", to).put("t", System.currentTimeMillis()))
-            prefs(app).edit().putString(K_EVIDX, all.toString()).apply()
+            val all = jmap(app, key)
+            all.put(cfgId, JSONObject().put("i", to).put("t", System.currentTimeMillis()))
+            prefs(app).edit().putString(key, all.toString()).apply()
         }
+    }
+
+    /** (номер показанной задачи, сколько задач в ряду) для виджета [cfg]; в ряду меньше двух задач листать нечего. */
+    fun taskPos(ctx: Context, cfg: Cfg): Pair<Int, Int> {
+        val s = snapshot(ctx, cfg)
+        val n = QrPriority.taskCards(cfg, s).size
+        return Pair(if (n == 0) 0 else s.taskIndex.coerceIn(0, n - 1), n)
+    }
+
+    /**
+     * Нажатие у края карточки задач в виджете [widgetId] ([dir] = -1 — предыдущая задача, 1 — следующая). Ряд не зациклен: у первой и последней задачи нажатие ничего не меняет.
+     * Стопка не сбрасывается — перерисовывается только карточка задач ([refreshAll] без возврата наверх).
+     */
+    fun taskNav(ctx: Context, widgetId: Int, dir: Int) {
+        if (dir != -1 && dir != 1) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        if (!cfg.tasks) return
+        val pos = taskPos(app, cfg)
+        val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
+        if (pos.second == 0 || to == pos.first) return
+        saveRowIndex(app, K_TKIDX, cfg.id, to)
         refreshAll(app)
     }
 
@@ -804,7 +840,8 @@ object QrWidgets {
             movedAt = moved,
             doneTaskIds = doneTaskIds(ctx),
             rpePending = rpePending(ctx, cfg),
-            eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0
+            eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0,
+            taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0
         )
     }
 

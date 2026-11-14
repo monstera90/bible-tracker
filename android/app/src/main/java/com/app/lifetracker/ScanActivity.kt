@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.0 (14.11) — нажатия на карточку события в виджете (extra `evnav` — листание ряда, `evopen` — форма события в приложении): без окна, [handleEvent].
+// Версия: 13.1 (14.11)
 // Версия: 12.0 (14.11)
 // Версия: 6.0 (26.10) — мост ScanBridge: musicHeadphones (подключены ли наушники; комбо с галочкой «Наушники обязательны»).
 // Версия: 5.0 (26.10) — мост ScanBridge: musicPlayTrack / musicPlayFolder (QR «Комбинированный» из окна ярлыка включает трек или папку через MusicPlayer; приложение не открывается).
@@ -110,14 +110,16 @@ class ScanActivity : ComponentActivity() {
     }
 
     /**
-     * Нажатие на карточку события в виджете (тот же `tok`): `evnav` (-1 / 1, `wid` — id виджета) листает ряд событий ([QrWidgets.eventNav]); `evopen` (id события, `evat` — начало
+     * Нажатие на карточку события в виджете (тот же `tok`): `evnav` (-1 / 1, `wid` — id виджета) листает ряд событий ([QrWidgets.eventNav]), `tknav` — ряд задач ([QrWidgets.taskNav]); `evopen` (id события, `evat` — начало
      * повторения, мс) открывает приложение на форме этого события (MainActivity.ACTION_OPEN_EVENT). Окно и страница сканера не нужны. true — это был такой запрос.
      */
     private fun handleEvent(i: Intent?): Boolean {
-        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen"))) return false
+        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen") || i.hasExtra("tknav"))) return false
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             try {
-                if (i.hasExtra("evnav")) {
+                if (i.hasExtra("tknav")) {
+                    QrWidgets.taskNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("tknav", 0))
+                } else if (i.hasExtra("evnav")) {
                     QrWidgets.eventNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("evnav", 0))
                 } else {
                     val id = i.getStringExtra("evopen") ?: ""
