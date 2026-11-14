@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.0 (14.11)
+// Версия: 12.0 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -7,6 +7,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -21,6 +22,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Base64
+import android.util.Log
 import android.widget.RemoteViews
 import org.json.JSONArray
 import org.json.JSONObject
@@ -54,18 +56,22 @@ import java.util.UUID
  *
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
  * задачи, мс) и ближайшие события (`k`="event") — и до четырёх картинок на каждого: `<ключ>.png` («Сегодня»), `<ключ>_t.png` («Завтра»), `<ключ>_w.png` (день недели — до даты два дня
- * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([dynShown], [dynBitmap]), поэтому надпись и состав меняются без приложения:
- * задача видна, пока её время в пределах [DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([nextEventKey]); нет такого —
+ * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([QrPriority.build], [dynBitmap]), поэтому надпись и состав меняются без приложения:
+ * задача видна, пока её время в пределах [QrPriority.DYN_DAYS] суток (время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * нажатие на карточку события ничего не делает, двойное нажатие на карточку задачи отмечает её выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]).
  * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
+ * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
+ * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
+ * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
+ *
  * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
- * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([rpeCard], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
- * по тому же правилу, что и рекомендованная ([topAnchor]), даже без «релевантности»; порядок остальных карточек от неё не зависит; слайд-шоу на это время стоит ([rotate]).
+ * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([QrPriority.build], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
+ * по тому же правилу, что и рекомендованная ([QrPriority.Result.anchorKey]), даже без «релевантности»; порядок остальных карточек от неё не зависит; слайд-шоу на это время стоит ([rotate]).
  *
  * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
- * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([anchorKey]), то через минуту
+ * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([QrPriority.Result.anchorKey]), то через минуту
  * после последнего смахивания стопка снова показывает верхнюю карточку порядка [order]. Данные от страницы (`sync`), не менявшие настройки
  * виджета (только состав задач и событий), положение стопки не трогают ([structSig]). Смахивание система оболочке не сообщает, его видно только по запросу фабрики
  * ([QrWidgetService]: счётчик в `VIRT` раз больше числа карточек), см. [onPossibleSwipe].
@@ -112,18 +118,7 @@ object QrWidgets {
     private const val BT_ASK_EVERY_MS = 24 * 3_600_000L
     private const val MAX_CARDS = 50
     private const val MAX_DYN = 24
-    private const val DYN_DAYS = 7 // окно задач и событий: сегодня и ещё шесть дней (совпадает с FEED_DAYS в widgets.js)
     private val KEY_RE = Regex("^[A-Za-z0-9_-]{1,40}$")
-
-    // Интервалы времени суток (минуты от полуночи, [начало; конец)). Те же значения показывает страница (widgets.js, WINDOWS).
-    private val WINDOWS = mapOf("m" to (5 * 60 to 11 * 60), "d" to (11 * 60 to 15 * 60), "e" to (17 * 60 to 23 * 60))
-    private val BOUNDARIES = intArrayOf(0, 5 * 60, 11 * 60, 15 * 60, 17 * 60, 23 * 60)
-
-    // Важность занятий, если виджет включён «по релевантности»: тренировка > помодоро > таймер/секундомер.
-    private const val RANK_WORKOUT = 40
-    private const val RANK_POMODORO = 30
-    private const val RANK_TIMER = 20
-    private const val RANK_STOPWATCH = 10
 
     private val LOCK = Any()
     private val main = Handler(Looper.getMainLooper())
@@ -208,7 +203,7 @@ object QrWidgets {
                         }
                         val times = HashSet<String>()
                         val ta = c.optJSONArray("times")
-                        if (ta != null) for (x in 0 until ta.length()) ta.optString(x)?.let { if (WINDOWS.containsKey(it)) times.add(it) }
+                        if (ta != null) for (x in 0 until ta.length()) ta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) times.add(it) }
                         val days = HashSet<Int>()
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
@@ -492,33 +487,6 @@ object QrWidgets {
 
     // ---------- порядок карточек ----------
 
-    private fun liveRank(ctx: Context, c: Card): Int {
-        var best = 0
-        for (l in c.live) {
-            val r = when (l.k) {
-                "workout" -> if (WorkoutTracker.status == WorkoutTracker.ST_SEARCH || WorkoutTracker.status == WorkoutTracker.ST_RUN || WorkoutTracker.status == WorkoutTracker.ST_PAUSE) RANK_WORKOUT else 0
-                "pomodoro" -> if (PomodoroTimer.isActive(ctx)) RANK_POMODORO else 0
-                "timer" -> if (l.id.isNotEmpty() && CardTimers.hasId(ctx, l.id)) RANK_TIMER else 0
-                "stopwatch" -> if (StopwatchTimer.isActive(ctx)) RANK_STOPWATCH else 0
-                else -> 0
-            }
-            if (r > best) best = r
-        }
-        return best
-    }
-
-    private fun scheduledNow(c: Card, cal: Calendar): Boolean {
-        if (c.times.isEmpty() && c.days.isEmpty()) return false
-        val dow = cal.get(Calendar.DAY_OF_WEEK)
-        val wd = if (dow == Calendar.SUNDAY) 7 else dow - 1
-        if (c.days.isNotEmpty() && wd !in c.days) return false
-        if (c.times.isNotEmpty()) {
-            val m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-            if (c.times.none { k -> WINDOWS[k]?.let { m >= it.first && m < it.second } == true }) return false
-        }
-        return true
-    }
-
     // ---------- «после срабатывания»: скрытые и перенесённые в конец ----------
 
     private fun dayKey(): Int {
@@ -533,24 +501,6 @@ object QrWidgets {
         c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
         if (days != 0) c.add(Calendar.DAY_OF_YEAR, days)
         return c.timeInMillis
-    }
-
-    /** Ключ события, которое сейчас показывает карточка «события календаря»: ближайшее из ещё не начавшихся в пределах [DYN_DAYS] суток; пусто — показывать нечего. */
-    private fun nextEventKey(cfg: Cfg, now: Long): String {
-        val limit = dayStart(now, DYN_DAYS)
-        var best: Card? = null
-        for (c in cfg.cards) {
-            if (c.dyn != "event" || c.at <= now || c.at >= limit) continue
-            if (best == null || c.at < best.at) best = c
-        }
-        return best?.key ?: ""
-    }
-
-    /** Карточка задачи видна, пока её время раньше конца окна [DYN_DAYS] суток (просроченная — до отметки); событие — только то, что выбрал [nextEventKey]. */
-    private fun dynShown(c: Card, now: Long, nextEv: String): Boolean = when (c.dyn) {
-        "task" -> c.at < dayStart(now, DYN_DAYS)
-        "event" -> c.key == nextEv
-        else -> true
     }
 
     /** Когда пора перерисовать карточки задач и событий: полночь (день недели → «Завтра» → «Сегодня», задача → «Просрочено») или начало ближайшего события/задачи. */
@@ -698,12 +648,6 @@ object QrWidgets {
     /** Двойное нажатие на карточку-привычку в виджете: карточка убирается из стопки до полуночи, что бы ни стояло в «после срабатывания». */
     fun hideHabitToday(ctx: Context, cardKey: String) = onCardFired(ctx, cardKey, true)
 
-    private fun startOfToday(): Long {
-        val c = Calendar.getInstance()
-        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 0); c.set(Calendar.MILLISECOND, 0)
-        return c.timeInMillis
-    }
-
     /** Состояние виджета конструктора: {"day":ГГГГММДД,"hidden":[ключи],"moved":{ключ:мс}}; скрытое действует только в день записи. */
     private fun firedOf(ctx: Context, cfgId: String): JSONObject {
         val st = jmap(ctx, K_FIRED).optJSONObject(cfgId) ?: return JSONObject()
@@ -718,31 +662,58 @@ object QrWidgets {
         return out
     }
 
-    /** Карточки, которые сейчас видны в стопке, в порядке «как собрал пользователь, перенесённые в конец — после них, по времени переноса». */
-    private fun visibleCards(ctx: Context, cfg: Cfg): List<Card> {
-        val st = firedOf(ctx, cfg.id)
-        val hidden = hiddenKeys(ctx, cfg)
-        val moved = st.optJSONObject("moved") ?: JSONObject()
+    /** «Как тренировка?» ждёт оценки: у виджета включено «Спрашивать о тренировке» и есть запись без оценки. */
+    private fun rpePending(ctx: Context, cfg: Cfg): Boolean = cfg.rpeAsk && QrRpe.pendingId(ctx).isNotEmpty()
+
+    /** Собирает из источников оболочки всё, что нужно [QrPriority] для расчёта порядка виджета [cfg]. Живые занятия читаются только при «релевантности». */
+    private fun snapshot(ctx: Context, cfg: Cfg): QrPriority.Snapshot {
         val now = System.currentTimeMillis()
-        val nextEv = nextEventKey(cfg, now)
-        val doneTasks = doneTaskIds(ctx)
-        val shown = cfg.cards.filter { !((it.after == "hide" || it.habit) && it.key in hidden) && !(it.dyn == "task" && it.tid.isNotEmpty() && it.tid in doneTasks) && dynShown(it, now, nextEv) }
-        if (shown.none { it.after == "end" && moved.has(it.key) }) return shown
-        return shown.withIndex().sortedWith(
-            compareBy<IndexedValue<Card>> { if (it.value.after == "end") moved.optLong(it.value.key, 0L) else 0L }.thenBy { it.index }
-        ).map { it.value }
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = now
+        val rel = cfg.relevance
+        val timers = HashSet<String>()
+        if (rel) for (c in cfg.cards) for (l in c.live) if (l.k == "timer" && l.id.isNotEmpty() && CardTimers.hasId(ctx, l.id)) timers.add(l.id)
+        val moved = HashMap<String, Long>()
+        val mv = firedOf(ctx, cfg.id).optJSONObject("moved")
+        if (mv != null) {
+            val ks = mv.keys()
+            while (ks.hasNext()) {
+                val k = ks.next()
+                moved[k] = mv.optLong(k, 0L)
+            }
+        }
+        val st = WorkoutTracker.status
+        return QrPriority.Snapshot(
+            now = now, cal = cal,
+            workoutActive = rel && (st == WorkoutTracker.ST_SEARCH || st == WorkoutTracker.ST_RUN || st == WorkoutTracker.ST_PAUSE),
+            pomodoroActive = rel && PomodoroTimer.isActive(ctx),
+            stopwatchActive = rel && StopwatchTimer.isActive(ctx),
+            activeTimerIds = timers,
+            hiddenKeys = hiddenKeys(ctx, cfg),
+            movedAt = moved,
+            doneTaskIds = doneTaskIds(ctx),
+            rpePending = rpePending(ctx, cfg)
+        )
     }
 
-    fun visibleCount(ctx: Context, cfg: Cfg): Int = visibleCards(ctx, cfg).size + (if (rpeCard(ctx, cfg) != null) 1 else 0)
+    /** Порядок стопки по [QrPriority]; в отладочной сборке результат ещё проверяется ([QrPriority.check]), нарушение пишется в лог и показ не ломает. */
+    private fun plan(ctx: Context, cfg: Cfg): QrPriority.Result {
+        val s = snapshot(ctx, cfg)
+        val res = QrPriority.build(cfg, s)
+        if ((ctx.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            try {
+                for (v in QrPriority.check(res, cfg, s)) Log.e("QrPriority", cfg.id + ": " + v)
+            } catch (e: Exception) {
+                Log.e("QrPriority", "check: " + e)
+            }
+        }
+        return res
+    }
+
+    fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.rpeAsk) && visibleCards(ctx, cfg).isEmpty() && rpeCard(ctx, cfg) == null
-
-    private fun movedToday(ctx: Context, cfg: Cfg, c: Card): Boolean {
-        if (c.after != "end") return false
-        val at = (firedOf(ctx, cfg.id).optJSONObject("moved") ?: return false).optLong(c.key, 0L)
-        return at >= startOfToday()
-    }
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.rpeAsk) && visibleCount(ctx, cfg) == 0
 
     /**
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
@@ -784,58 +755,15 @@ object QrWidgets {
     }
 
     /**
-     * Порядок стопки. Без «релевантности» — как собрал пользователь (скрытые убраны, перенесённые в конец — в конце). С ней сверху то, что идёт
-     * сейчас (важнее — выше: тренировка, помодоро, таймер, секундомер), затем карточки, у которых сейчас «их» время суток и день, затем
-     * остальные в исходном порядке. Карточки, перенесённые «в конец» сегодня, всегда в самом конце (по времени переноса) — даже если они идут
-     * сейчас или у них «их» время; со следующего дня они снова участвуют в подборе.
+     * Порядок стопки (считает [QrPriority.build]). Без «релевантности» — как собрал пользователь (скрытые убраны, перенесённые в конец — в конце). С ней сверху то,
+     * что идёт сейчас (важнее — выше: тренировка, помодоро, таймер, секундомер), затем карточки, у которых сейчас «их» время суток и день, затем остальные в
+     * исходном порядке. Карточки, перенесённые «в конец» сегодня, всегда в самом конце (по времени переноса) — даже если они идут сейчас или у них «их» время;
+     * со следующего дня они снова участвуют в подборе. Над всеми — «Как тренировка?», пока она ждёт оценки.
      * [Ordered.topKey] — ключ карточки наверху, если она поднята по релевантности (иначе пусто).
      */
     fun order(ctx: Context, cfg: Cfg): Ordered {
-        val ord = orderBase(ctx, cfg)
-        val rpe = rpeCard(ctx, cfg) ?: return ord
-        return Ordered(listOf(rpe) + ord.cards, rpe.key) // «Как тренировка?» — самая важная: над всеми, остальные стоят как стояли
-    }
-
-    /** Карточка «Как тренировка?», пока у виджета включено «Спрашивать о тренировке» и есть запись без оценки; иначе null. */
-    private fun rpeCard(ctx: Context, cfg: Cfg): Card? {
-        if (!cfg.rpeAsk || QrRpe.pendingId(ctx).isEmpty()) return null
-        return Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", QrRpe.DEFAULT_COLOR)
-    }
-
-    private fun orderBase(ctx: Context, cfg: Cfg): Ordered {
-        val base = visibleCards(ctx, cfg)
-        if (!cfg.relevance || base.size < 2) return Ordered(base, "")
-        val cal = Calendar.getInstance()
-        val tail = base.filter { movedToday(ctx, cfg, it) } // уже стоят в порядке переноса
-        val head = base.filter { !movedToday(ctx, cfg, it) }
-        if (head.isEmpty()) return Ordered(tail, "")
-        val scored = head.mapIndexed { i, c ->
-            val live = liveRank(ctx, c)
-            val s = if (live > 0) 1000 + live else if (scheduledNow(c, cal)) 500 else 0
-            Triple(c, s, i)
-        }
-        val sorted = scored.sortedWith(compareByDescending<Triple<Card, Int, Int>> { it.second }.thenBy { it.third })
-        val top = sorted.first()
-        return Ordered(sorted.map { it.first } + tail, if (top.second > 0) top.first.key else "")
-    }
-
-    /**
-     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: рекомендованная по релевантности ([Ordered.topKey]),
-     * а если такой нет — верхняя карточка события или задачи календаря (событие всегда выше задач). Пусто — «своего места» у стопки нет.
-     */
-    private fun anchorKey(ord: Ordered): String {
-        if (ord.topKey.isNotEmpty()) return ord.topKey
-        val first = ord.cards.firstOrNull() ?: return ""
-        return if (first.dyn.isNotEmpty()) first.key else ""
-    }
-
-    /**
-     * Карточка, на которой стопка «стоит наверху» и к которой возвращается: «Как тренировка?» (у любого виджета с этой галочкой), иначе — [anchorKey]
-     * (только «по релевантности»). Пусто — своего места у стопки нет.
-     */
-    private fun topAnchor(cfg: Cfg, ord: Ordered): String {
-        if (ord.topKey == QrRpe.KEY) return QrRpe.KEY
-        return if (cfg.relevance) anchorKey(ord) else ""
+        val res = plan(ctx, cfg)
+        return Ordered(res.cards.map { it.card }, res.topKey)
     }
 
     // ---------- обновление ----------
@@ -881,7 +809,7 @@ object QrWidgets {
             clearReturn(app, id)
         }
         if (cfg != null && (cfg.relevance || cfg.rpeAsk)) {
-            val topNew = topAnchor(cfg, order(app, cfg))
+            val topNew = plan(app, cfg).anchorKey
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
             if (resetTop || topNew != topOld) {
                 rv.setDisplayedChild(R.id.qr_stack, 0)
@@ -1073,15 +1001,7 @@ object QrWidgets {
         rotatePi(ctx, id, false)?.let { am(ctx).cancel(it); it.cancel() }
     }
 
-    private fun nextBoundary(): Long {
-        val now = Calendar.getInstance()
-        val cur = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
-        val next = BOUNDARIES.firstOrNull { it > cur } ?: (24 * 60)
-        val c = Calendar.getInstance()
-        c.set(Calendar.HOUR_OF_DAY, 0); c.set(Calendar.MINUTE, 0); c.set(Calendar.SECOND, 5); c.set(Calendar.MILLISECOND, 0)
-        c.add(Calendar.MINUTE, next)
-        return c.timeInMillis
-    }
+    private fun nextBoundary(): Long = QrPriority.nextBoundary(System.currentTimeMillis(), Calendar.getInstance())
 
     private fun scheduleAll(app: Context, ids: IntArray, force: Boolean) {
         var anyRel = false
@@ -1190,7 +1110,7 @@ object QrWidgets {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.rotate || visibleCount(app, cfg) < 2) return
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (screenOn(pm) && rpeCard(app, cfg) == null) { // пока висит «Как тренировка?», слайд-шоу стопку не листает
+        if (screenOn(pm) && !rpePending(app, cfg)) { // пока висит «Как тренировка?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showNext(R.id.qr_stack)
             suppressSwipe(id)
@@ -1261,8 +1181,8 @@ object QrWidgets {
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance && !cfg.rpeAsk) return
-        val ord = order(app, cfg)
-        if (topAnchor(cfg, ord).isEmpty() || ord.cards.size < 2) return
+        val res = plan(app, cfg)
+        if (res.anchorKey.isEmpty() || res.cards.size < 2) return
         val due = System.currentTimeMillis() + RETURN_AFTER_MS
         synchronized(LOCK) {
             val m = jmap(app, K_RETURN)
@@ -1317,9 +1237,9 @@ object QrWidgets {
     private fun returnToTop(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.relevance && !cfg.rpeAsk) return
-        val ord = order(app, cfg)
-        val anchor = topAnchor(cfg, ord)
-        if (anchor.isEmpty() || ord.cards.size < 2) return
+        val res = plan(app, cfg)
+        val anchor = res.anchorKey
+        if (anchor.isEmpty() || res.cards.size < 2) return
         suppressSwipe(id)
         dotsOn.remove(id)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)

@@ -60,4 +60,6 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-ktx:1.11.0")
+    // JVM-тесты чистой логики (QrPriorityTest); в сборку APK не попадают
+    testImplementation("junit:junit:4.13.2")
 }
