@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.4 (14.11) — «Сегодня, <день>» и «Как настроение?» того же размера, что на карточке события календаря (образец `moodFaceHtml`; в виджете — QrMood.kt).
    Версия: 6.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» (оболочка, QrMood.kt; в форме — образец `moodFaceHtml`, цвет `RPE_COLOR`); ответ из виджета страница вносит в журнал настроения (mood.js `drainWidgetMood`, мост ≥37).
    Версия: 6.2 (14.11)
    Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
@@ -628,15 +629,16 @@
       }
       return '<div class="wg-card wg-bat-card" style="background:' + hex + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
     }
-    // Карточка «Как настроение?» в форме: образец лица (в виджете её рисует оболочка, QrMood.kt; числа — доли ширины карточки ×100: значок «смайлик в круге» (клетка 0,756), «Сегодня, <день недели>», заголовок, сетка кнопок-эмодзи 2×4; значок и надписи сдвинуты на 4 вниз, к кнопкам)
+    // Карточка «Как настроение?» в форме: образец лица (в виджете её рисует оболочка, QrMood.kt; числа — доли ширины карточки ×100: значок «смайлик в круге» (клетка 0,756), «Сегодня, <день недели>», заголовок, сетка кнопок-эмодзи 2×4; значок сдвинут на 4 вниз, к кнопкам; надписи — того же размера, что на карточке события календаря)
     var MOOD_EMOJI = ["😌", "😊", "🙄", "😕", "😰", "😡", "🥱", "😔"]; // как CHECKIN_ORDER в mood.js: Внутренний мир, Радость, Спокойствие, Грусть, Тревожность, Раздражительность, Сонливость, Подавленность
     function moodFaceHtml(){
       var hex = RPE_COLOR, shade = cardsOf().cardShade(hex), serif = "font-family=\"'Palatino Linotype',Georgia,serif\"";
       var day = WEEKDAYS_FULL[new Date().getDay()].toLowerCase();
       var t = '<g transform="translate(50 17.8) scale(0.756)" fill="none" stroke="#fff" stroke-width="0.97" stroke-linecap="round" stroke-linejoin="round">' +
         '<circle cx="0" cy="0" r="9"/><path d="M-3 -2h.01"/><path d="M3 -2h.01"/><path d="M-2.5 3a3.5 3.5 0 0 0 5 0"/></g>';
-      t += '<text x="50" y="33.1" font-size="4.67" text-anchor="middle" fill="#fff" font-family="sans-serif">' + DYN_LABELS.today + ', ' + esc(day) + '</text>';
-      t += '<text x="50" y="42.3" font-size="8.65" text-anchor="middle" fill="#fff" font-weight="700" textLength="71" lengthAdjust="spacingAndGlyphs" ' + serif + '>Как настроение?</text>';
+      var lbl = DYN_LABELS.today + ', ' + day; // надписи — того же размера, что у карточки события календаря (DYN.labelFsMax / DYN.titleFs); длинные ужимаются до 86 (как maxW там)
+      t += '<text x="50" y="37.2" font-size="' + (DYN.labelFsMax * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-family="sans-serif"' + (lbl.length * 5.2 > 86 ? ' textLength="86" lengthAdjust="spacingAndGlyphs"' : '') + '>' + esc(lbl) + '</text>';
+      t += '<text x="50" y="48.2" font-size="' + (DYN.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" textLength="86" lengthAdjust="spacingAndGlyphs" ' + serif + '>Как настроение?</text>';
       for(var i = 0; i < 8; i++){
         var cx = 15.35 + (i % 4) * 23.09, cy = i < 4 ? 63.8 : 86.93;
         t += '<circle cx="' + cx.toFixed(2) + '" cy="' + cy.toFixed(2) + '" r="10.07" fill="none" stroke="#fff" stroke-width="0.82"/>';

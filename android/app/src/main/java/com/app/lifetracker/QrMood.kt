@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (14.11)
+// Версия: 1.1 (14.11) — «Сегодня, <день>» и «Как настроение?» того же размера, что на карточке события календаря (0,1 и 0,108 ширины); надписи переставлены между значком и кнопками
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -179,12 +179,14 @@ object QrMood {
     private const val ICON_CY = 0.138f      // центр значка в макете (до сдвига)
     private const val ICON_U = 0.00756f     // клетка значка (сетка 24): радиус круга 9 клеток
     private const val ICON_STROKE = 0.0073f
-    private const val SUB_FS = 0.0467f
-    private const val SUB_Y = 0.2914f       // базовая линия «Сегодня, суббота» (до сдвига)
-    private const val TITLE_FS = 0.0865f
-    private const val TITLE_Y = 0.3825f     // базовая линия «Как настроение?» (до сдвига)
-    private const val TITLE_W = 0.71f       // ширина заголовка в макете
-    private const val TITLE_MAXW = 0.84f
+    // Размер надписей — как на карточке события календаря (widgets.js `DYN`: labelFsMax / labelFs / titleFs, fitTitle, maxW), чтобы обе карточки читались одинаково.
+    private const val SUB_FS = 0.1f         // «Сегодня, суббота»: до этого размера, длинная строка ужимается (не меньше SUB_FS_MIN)
+    private const val SUB_FS_MIN = 0.076f
+    private const val SUB_Y = 0.332f        // базовая линия «Сегодня, суббота» (до сдвига)
+    private const val TITLE_FS = 0.108f     // «Как настроение?»: до этого размера, ужимается до TITLE_FS_MIN
+    private const val TITLE_FS_MIN = 0.088f
+    private const val TITLE_Y = 0.442f      // базовая линия «Как настроение?» (до сдвига)
+    private const val TEXT_MAXW = 0.86f     // предельная ширина надписи (как maxW у карточки календаря)
     private const val BTN_CX0 = 0.1535f
     private const val BTN_STEP = 0.2309f
     private const val BTN_CY1 = 0.638f
@@ -212,8 +214,10 @@ object QrMood {
         sub.color = 0xFFFFFFFF.toInt()
         sub.textAlign = Paint.Align.CENTER
         sub.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        val subText = subtitle(now)
         sub.textSize = w * SUB_FS
-        g.drawText(subtitle(now), w / 2f, w * (SUB_Y + SHIFT_DOWN), sub)
+        while (sub.textSize > w * SUB_FS_MIN && sub.measureText(subText) > w * TEXT_MAXW) sub.textSize = sub.textSize * 0.97f
+        g.drawText(subText, w / 2f, w * (SUB_Y + SHIFT_DOWN), sub)
 
         val t = Paint(Paint.ANTI_ALIAS_FLAG)
         t.color = 0xFFFFFFFF.toInt()
@@ -223,15 +227,9 @@ object QrMood {
         t.style = Paint.Style.FILL_AND_STROKE
         t.strokeWidth = w * 0.0022f
         val title = "Как настроение?"
+        while (t.textSize > w * TITLE_FS_MIN && t.measureText(title) > w * TEXT_MAXW) t.textSize = t.textSize * 0.96f
         val tw = t.measureText(title)
-        val want = w * TITLE_W
-        if (tw > 0f && Math.abs(tw - want) > w * 0.01f) { // шрифт устройства шире или уже образца — ужимаем или растим до ширины макета, не выходя за разумные пределы
-            val k = (want / tw).coerceIn(0.85f, 1.15f)
-            t.textSize = t.textSize * k
-        }
-        val tw2 = t.measureText(title)
-        val maxW = w * TITLE_MAXW
-        if (tw2 > maxW) t.textSize = t.textSize * maxW / tw2
+        if (tw > w * TEXT_MAXW) t.textSize = t.textSize * w * TEXT_MAXW / tw // шрифт устройства шире Palatino — на крайний случай
         g.drawText(title, w / 2f, w * (TITLE_Y + SHIFT_DOWN), t)
 
         val ring = Paint(Paint.ANTI_ALIAS_FLAG)
