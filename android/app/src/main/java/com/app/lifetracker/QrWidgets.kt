@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.1 (14.11)
+// Версия: 13.2 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -76,8 +76,8 @@ import java.util.UUID
  * карточка [QrRpe.KEY] «Как тренировка?» с кнопками 1…10 ([QrPriority.build], [order]); ответ ложится в очередь [QrRpe.answer], карточка исчезает. Наверх она возвращается
  * по тому же правилу, что и рекомендованная ([QrPriority.Result.anchorKey]), даже без «релевантности»; порядок остальных карточек от неё не зависит; слайд-шоу на это время стоит ([rotate]).
  *
- * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
- * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([QrPriority.Result.anchorKey]), то через минуту
+ * Возврат наверх ([armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
+ * карточка («по релевантности»: идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря (с «релевантностью» и без неё, не слайд-шоу; [QrPriority.Result.anchorKey]), то через минуту
  * после последнего смахивания стопка снова показывает верхнюю карточку порядка [order]. Данные от страницы (`sync`), не менявшие настройки
  * виджета (только состав задач и событий), положение стопки не трогают ([structSig]). Смахивание система оболочке не сообщает, его видно только по запросу фабрики
  * ([QrWidgetService]: счётчик в `VIRT` раз больше числа карточек), см. [onPossibleSwipe].
@@ -870,7 +870,7 @@ object QrWidgets {
             rv.setDisplayedChild(R.id.qr_stack, 0) // тем же обновлением, что и данные: стопка показывает первую карточку
             clearReturn(app, id)
         }
-        if (cfg != null && (cfg.relevance || cfg.rpeAsk)) {
+        if (cfg != null && (cfg.relevance || cfg.rpeAsk || cfg.tasks || cfg.events)) { // у кого может быть «своё место» наверху ([QrPriority.Result.anchorKey])
             val topNew = plan(app, cfg).anchorKey
             val topOld = jmap(app, K_TOP).optString(id.toString(), "")
             if (resetTop || topNew != topOld) {
@@ -1248,10 +1248,9 @@ object QrWidgets {
 
     // ---------- возврат наверх ----------
 
-    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
+    /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только если у стопки есть «своё место» наверху ([QrPriority.Result.anchorKey]: рекомендованная карточка или первая карточка календаря). */
     private fun armReturn(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance && !cfg.rpeAsk) return
         val res = plan(app, cfg)
         if (res.anchorKey.isEmpty() || res.cards.size < 2) return
         val due = System.currentTimeMillis() + RETURN_AFTER_MS
@@ -1307,7 +1306,6 @@ object QrWidgets {
     /** Показывает в стопке верхнюю карточку порядка [order] — рекомендованную или более важную, чем та, на которой остановился пользователь. */
     private fun returnToTop(app: Context, id: Int) {
         val cfg = cfgFor(app, id) ?: return
-        if (!cfg.relevance && !cfg.rpeAsk) return
         val res = plan(app, cfg)
         val anchor = res.anchorKey
         if (anchor.isEmpty() || res.cards.size < 2) return

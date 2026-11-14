@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 3.0 (14.11)
+// Версия: 3.1 (14.11)
 
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
@@ -217,12 +217,14 @@ object QrPriority {
 
     /**
      * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: «Как тренировка?» (у любого виджета с этой галочкой);
-     * иначе (только «по релевантности») рекомендованная карточка, а если такой нет — верхняя карточка события или задачи календаря. Пусто — своего места нет.
+     * иначе рекомендованная карточка (только «по релевантности»), а если такой нет — верхняя карточка события или задачи календаря,
+     * И ПРИ «РЕЛЕВАНТНОСТИ», И БЕЗ НЕЁ: виджет «календарь и задачи» часто собирают без этой галочки (порядок «событие, потом задачи» и так фиксирован),
+     * и возврат наверх не должен зависеть от неё. Слайд-шоу ([Cfg.rotate]) само листает стопку — своего места у него нет. Пусто — своего места нет.
      */
     private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String): String {
         if (s.rpePending) return QrRpe.KEY
-        if (!cfg.relevance) return ""
-        if (top.isNotEmpty()) return top
+        if (cfg.rotate) return ""
+        if (cfg.relevance && top.isNotEmpty()) return top
         val first = main.firstOrNull()?.card ?: return ""
         return if (first.dyn.isNotEmpty()) first.key else ""
     }
