@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.5 (14.11)
+// Версия: 2.6 (14.11)
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -34,6 +34,7 @@ class QrWidgetService : RemoteViewsService() {
 
         override fun onCreate() {
             quietUntil = SystemClock.uptimeMillis() + QUIET_MS
+            QrWidgets.ensureGuard(ctx)
         }
 
         override fun onDataSetChanged() {

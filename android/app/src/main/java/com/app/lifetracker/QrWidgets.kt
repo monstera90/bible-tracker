@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.5 (14.11)
+// Версия: 13.6 (14.11)
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -120,6 +120,8 @@ object QrWidgets {
     private const val RETURN_AFTER_MS = 60_000L
     /** Возврат наверх не откладывается дольше этого от первого смахивания серии, сколько бы раз фабрику ни дёргали. */
     private const val RETURN_MAX_DEFER_MS = 3 * 60_000L
+    /** Страховка возврата: шаг проверки и минимальное время от последней постановки стопки наверх (пока смахивание хоть раз не было замечено). */
+    private const val GUARD_MS = 75_000L
     private const val SWIPE_QUIET_MS = 4_000L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
 
@@ -145,6 +147,15 @@ object QrWidgets {
 
     /** До какого момента (uptime) запросы фабрики не считаются смахиванием: стопку только что переставили мы сами. */
     private val swipeQuiet = HashMap<Int, Long>()
+
+    /** id виджета → когда мы в последний раз сами поставили стопку на верхнюю карточку (uptime). */
+    private val placedAt = HashMap<Int, Long>()
+
+    /** Виджеты, у которых точный возврат ([armReturn] → [fireReturn]) хоть раз сработал до конца: страховка им не нужна. */
+    private val returnWorked: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
+
+    @Volatile private var guardOn = false
+    private val guardToken = Any()
 
     /** Версия адаптера стопки у виджета (extra `rev` в intent службы): смена версии заставляет систему создать адаптер заново, с пустым кэшем карточек. */
     private val adapterRev = HashMap<Int, Int>()
@@ -889,6 +900,7 @@ object QrWidgets {
                 prefs(app).edit().putString(K_TOP, t.toString()).apply()
             }
         }
+        if (doRebuild) synchronized(placedAt) { placedAt[id] = SystemClock.uptimeMillis() }
         suppressSwipe(id) // перерисовка и перезагрузка карточек — не смахивание
         dotsOn.remove(id)
         mgr.updateAppWidget(id, rv)
@@ -1258,6 +1270,52 @@ object QrWidgets {
         }
     }
 
+    // ---------- страховка возврата ----------
+
+    /**
+     * Смахивание стопки система нам напрямую не сообщает; если фабрику на смахивании не позвали (карточки уже в кэше системы), точный возврат
+     * ([armReturn]) не взведётся и стопка останется где её оставили. Пока точный возврат у виджета ни разу не сработал, раз в [GUARD_MS] при включённом
+     * экране стопка, которую мы не ставили наверх дольше [GUARD_MS], возвращается наверх без всякого признака смахивания. Сработал точный возврат — страховка
+     * у этого виджета выключается, дальше работает точный возврат через минуту.
+     */
+    fun ensureGuard(ctx: Context) {
+        if (guardOn) return
+        val app = ctx.applicationContext
+        guardOn = true
+        main.removeCallbacksAndMessages(guardToken)
+        main.postAtTime({ guardTick(app) }, guardToken, SystemClock.uptimeMillis() + GUARD_MS)
+    }
+
+    private fun guardTick(app: Context) {
+        var again = false
+        try {
+            val mgr = AppWidgetManager.getInstance(app)
+            val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
+            val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+            val on = screenOn(pm)
+            for (id in ids) {
+                val cfg = cfgFor(app, id) ?: continue
+                if (!cfg.relevance && !cfg.rpeAsk) continue
+                again = true
+                if (!on || id in returnWorked) continue
+                val pending = synchronized(LOCK) { jmap(app, K_RETURN).optLong(id.toString(), 0L) > 0L }
+                if (pending) continue
+                val placed = synchronized(placedAt) { placedAt[id] ?: 0L }
+                if (SystemClock.uptimeMillis() - placed < GUARD_MS) continue
+                try {
+                    Log.d("QrReturn", "guard id=" + id)
+                    returnToTop(app, id)
+                } catch (e: Exception) {
+                    Log.e("QrReturn", "guard: " + e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("QrReturn", "guardTick: " + e)
+        }
+        guardOn = false
+        if (again) ensureGuard(app)
+    }
+
     // ---------- возврат наверх ----------
 
     /** Взводит возврат стопки наверх через [RETURN_AFTER_MS] (каждое новое смахивание отодвигает его). Только «по релевантности» и только если есть рекомендованная карточка. */
@@ -1328,6 +1386,7 @@ object QrWidgets {
         if (due == 0L) return
         Log.d("QrReturn", "fire id=" + id)
         returnToTop(app, id)
+        returnWorked.add(id) // точный возврат дошёл до конца — страховка этому виджету больше не нужна
     }
 
     /** Показывает в стопке верхнюю карточку порядка [order] — рекомендованную или более важную, чем та, на которой остановился пользователь. */
