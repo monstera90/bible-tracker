@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 11.0 (10.11)
+// Версия: 12.0 (15.11)
 // Версия: 8.1 (10.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
 // Версия: 7.0 (27.10) — остров записи тренировки: `workoutExtras` (метка-диод красная/жёлтая/зелёная, время и дистанция, кнопки «Пауза» и «Стоп»), `workoutDotBitmap`, `elapsedText`. Откат: XiaomiIsland.kt 6.0.
@@ -105,6 +105,22 @@ object XiaomiIsland {
         }
     }
 
+    /**
+     * Extras острова сработавшего таймера: та же раскладка, что у идущего (значок, название, время), красный значок, время «0:00»;
+     * без тайм-аутов — остров висит, пока уведомление не нажмут или не смахнут.
+     */
+    fun doneExtras(ctx: Context, title: String, endAt: Long, totalMs: Long, stopAction: Notification.Action?): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val now = System.currentTimeMillis()
+            val timer = JSONObject().put("timerType", -1).put("timerWhen", endAt)
+                .put("timerTotal", totalMs.coerceAtLeast(1L)).put("timerSystemCurrent", now)
+            build(ctx, title, "Таймер закончился", timer, endAt, now, false, STAGE_RED, stopAction, null, true)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Время для заголовка раскрытого острова: М:СС или Ч:ММ:СС (округление вверх, как на карточке). */
     fun clockText(leftMs: Long): String {
         val s = ((leftMs + 999) / 1000).coerceAtLeast(0)
@@ -131,7 +147,7 @@ object XiaomiIsland {
         }
     }
 
-    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int, stopAction: Notification.Action?, pauseAction: Notification.Action?): Bundle {
+    private fun build(ctx: Context, title: String, status: String, timer: JSONObject?, endAt: Long, now: Long, float: Boolean, stage: Int, stopAction: Notification.Action?, pauseAction: Notification.Action?, done: Boolean = false): Bundle {
         // у каждого этапа свой ключ картинки: система не подставит старую (фиолетовую) из кэша
         val picKey = PIC_KEY + stage
         val bigKey = PIC_BIG_KEY + stage
@@ -146,7 +162,7 @@ object XiaomiIsland {
             .put("dismissIsland", false)
             .put("bigIslandArea", big)
             .put("smallIslandArea", JSONObject().put("picInfo", pic))
-        if (timer != null) {
+        if (timer != null && !done) {
             val sec = ((endAt - now) / 1000).coerceAtLeast(1) + 5
             island.put("islandTimeout", sec)
         }
@@ -168,7 +184,7 @@ object XiaomiIsland {
             .put("aodTitle", title)
             .put("param_island", island)
             .put("iconTextInfo", base)
-        if (timer != null) {
+        if (timer != null && !done) {
             val minutes = ((endAt - now) / 60000).coerceAtLeast(1) + 1
             v2.put("timeout", minutes)
         }

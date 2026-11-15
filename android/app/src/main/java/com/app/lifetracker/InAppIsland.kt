@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 23.0 (10.11)
+// Версия: 23.1 (15.11)
 
 import android.app.Activity
 import android.app.AlertDialog
@@ -68,9 +68,10 @@ private class Item(val key: String, val kind: Int) {
     var modeKey = "" // кнопка режима вместо значка карточки (видео: фон / фон с плавающим окном); меняется, когда её надо перерисовать
     var modeFn: (() -> Bitmap)? = null
     var onMode: (() -> Unit)? = null // null — у занятия обычный значок, кнопки режима нет
+    var onDone: (() -> Unit)? = null // сработавший таймер: капсула висит прежнего размера, одинарное нажатие гасит вибрацию и убирает её; карточки нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
-    val expandable: Boolean get() = true
+    val expandable: Boolean get() = onDone == null
 
     /** Карточка с крупными цифрами (таймер, помодоро, секундомер, тренировка); у музыки и видео — название одной строкой. */
     val digitCard: Boolean get() = kind != K_MUSIC && kind != K_VIDEO
@@ -809,6 +810,13 @@ class InAppIsland private constructor(private val appCtx: Context) {
      * у помодоро, музыки, видео и тренировки открывает вкладку занятия ([openTab]), у таймеров и секундомера — ничего; долгое нажатие на капсулу любого занятия — «Стоп», см. [longStopTask].
      */
     private fun activate(m: Item) {
+        val done = m.onDone
+        if (done != null) { // сработавший таймер: одинарное нажатие — вибрация стихает, капсула исчезает
+            done()
+            handler.postDelayed({ refresh() }, 150L)
+            refresh()
+            return
+        }
         // состояние «раскрыта», хотя карточка давно свёрнута (прервалась анимация/пересборка окна) — считаем свёрнутой
         if (expanded && !animating && progress <= 0.001f) expanded = false
         if (expanded) collapse() else expand(m.key)
@@ -985,6 +993,21 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val out = ArrayList<Item>(6)
         val now = System.currentTimeMillis()
         val ctx = appCtx
+        val timerInfos = CardTimers.allInfos(ctx)
+        for (inf in timerInfos) {
+            if (!inf.done) continue
+            // сработавший таймер: тот же значок (красный) и тот же образец ширины, что у идущего, — размер капсулы не меняется
+            val m = Item("t:" + inf.id, K_TIMER)
+            m.iconKey = "t" + XiaomiIsland.STAGE_RED
+            m.iconFn = { s -> XiaomiIsland.iconBitmap(XiaomiIsland.STAGE_RED, s) }
+            m.time = XiaomiIsland.clockText(0L)
+            m.samples = listOf(if (inf.totalMs >= 3_600_000L) "8:88:88" else if (inf.totalMs >= 600_000L) "88:88" else "8:88")
+            m.name = inf.title
+            val id = inf.id
+            m.onDone = { CardTimers.silence(ctx, id) }
+            m.onStop = m.onDone
+            out.add(m)
+        }
         val pomo = PomodoroTimer.islandInfo(ctx)
         if (pomo != null) {
             val m = Item("pomo", K_POMO)
@@ -1010,7 +1033,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             if (!pomoWait) m.onExtra = { PomodoroTimer.plus5(ctx) } // в ожидании после перерыва продлевать нечего
             out.add(m)
         }
-        for (inf in CardTimers.allInfos(ctx)) {
+        for (inf in timerInfos) {
+            if (inf.done) continue
             val m = Item("t:" + inf.id, K_TIMER)
             val stage = XiaomiIsland.stageFor(inf.leftMs)
             val paused = !inf.running

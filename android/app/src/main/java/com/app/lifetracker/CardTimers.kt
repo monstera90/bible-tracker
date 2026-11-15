@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.1 (10.11)
+// Версия: 9.0 (15.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
 // Версия: 5.5 (22.10) — эксперимент с чёрным фоном уведомления (`setColorized`) откачен: HyperOS не меняет цвет карточки. Прежнее: `tickIsland` не перепоставляет уведомления, пока приложение на экране (`NotifyStore.appForeground`): время тогда показывает плашка внутри приложения, а перепост раз в секунду заставлял настоящий остров всплывать и мигать под ней. Откат: CardTimers.kt 5.2.
@@ -58,6 +58,7 @@ object CardTimers {
     const val FG_NOTIFICATION_ID = 3 // уведомление главного таймера, пока работает служба тика (оно же её уведомление переднего плана)
     private const val PREFS = "card_timers"
     private const val KEY = "timers"
+    private const val KEY_DONE = "done" // сработавшие таймеры, чей остров и плашка висят, пока по ним не нажмут
     private const val ACCENT = 0xFF8F7FB8.toInt()
     private const val MAX_SECONDS = 359_999L // 99:59:59
     private val ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
@@ -119,6 +120,29 @@ object CardTimers {
             )
         }
         prefs(ctx).edit().putString(KEY, o.toString()).apply()
+    }
+
+    // ---------- сработавшие таймеры ----------
+    private fun loadDone(ctx: Context): LinkedHashMap<String, Timer> {
+        val out = LinkedHashMap<String, Timer>()
+        try {
+            val o = JSONObject(prefs(ctx).getString(KEY_DONE, "{}") ?: "{}")
+            val it = o.keys()
+            while (it.hasNext()) {
+                val id = it.next()
+                val t = o.optJSONObject(id) ?: continue
+                out[id] = Timer(id, t.optString("title", ""), t.optLong("durationMs", 0L), false, t.optLong("endAt", 0L), 0L)
+            }
+        } catch (e: Exception) {
+            // повреждённая запись — начинаем с пустого списка
+        }
+        return out
+    }
+
+    private fun saveDone(ctx: Context, map: Map<String, Timer>) {
+        val o = JSONObject()
+        for ((id, t) in map) o.put(id, JSONObject().put("title", t.title).put("durationMs", t.durationMs).put("endAt", t.endAt))
+        prefs(ctx).edit().putString(KEY_DONE, o.toString()).apply()
     }
 
     /** Снимок для страницы: [{id, title, durationMs, running, endAt, remainingMs, now}]. Закончившиеся убираются. */
@@ -237,7 +261,11 @@ object CardTimers {
     /** Погасить вибрацию конца и убрать уведомление «Таймер закончился» (нажатие на него, смахивание, открытие приложения). */
     fun silence(ctx: Context, id: String) {
         stopVibration(ctx)
-        cancelDone(ctx, id)
+        cancelDone(ctx, id) // вместе с уведомлением уходит и остров Xiaomi
+        synchronized(LOCK) {
+            val done = loadDone(ctx)
+            if (done.remove(id) != null) saveDone(ctx, done) // и плашка в приложении
+        }
     }
 
     /** Сработал будильник этапа (за 2 минуты / за минуту до конца): уведомление перепоставляется — значок меняет цвет. */
@@ -264,13 +292,22 @@ object CardTimers {
         save(ctx, map)
         cancelRunning(ctx, id)
         vibrate(ctx)
-        postDone(ctx, t)
+        // остров и плашка не убираются: остаются тем же размером, пока по ним не нажмут (скрытый и смахнутый таймеры острова не имеют)
+        val island = !t.hidden && !t.dismissed
+        if (island) {
+            val done = loadDone(ctx)
+            done[id] = t
+            saveDone(ctx, done)
+        }
+        postDone(ctx, t, island)
+        if (island) InAppIsland.ensureBackground(ctx)
         QrWidgets.onActivityChanged(ctx)
     }
 
     /** После перезагрузки, смены времени и обновления приложения: будильники и уведомления — заново. */
     fun restore(ctx: Context) {
         val now = System.currentTimeMillis()
+        synchronized(LOCK) { saveDone(ctx, LinkedHashMap()) } // уведомлений «закончился» после перезагрузки уже нет — висеть плашке не на чем
         val items = synchronized(LOCK) { load(ctx).values.toList() }
         for (t in items) {
             if (t.running) {
@@ -431,7 +468,7 @@ object CardTimers {
         load(ctx).values.filter { !it.hidden && !it.dismissed && it.running && it.endAt > now }.minByOrNull { it.endAt }?.id
     }
 
-    class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long, val totalMs: Long = 0L)
+    class Info(val id: String, val title: String, val running: Boolean, val leftMs: Long, val totalMs: Long = 0L, val done: Boolean = false)
 
     /** Главный таймер для плашки в приложении: самый ранний из идущих, иначе первый приостановленный; null — таймеров нет. */
     fun primaryInfo(ctx: Context): Info? = synchronized(LOCK) {
@@ -445,7 +482,7 @@ object CardTimers {
 
     /**
      * Все таймеры для плашки в приложении: идущие по близости конца, затем приостановленные. Скрытые и смахнутые, как в
-     * [primaryInfo], не входят. Плашка показывает до трёх занятий сразу (несколько таймеров — каждый отдельно).
+     * [primaryInfo], не входят. Сработавшие (`Info.done`) идут первыми. Плашка показывает до трёх занятий сразу (несколько таймеров — каждый отдельно).
      */
     fun allInfos(ctx: Context): List<Info> = synchronized(LOCK) {
         val now = System.currentTimeMillis()
@@ -453,7 +490,8 @@ object CardTimers {
         val running = all.filter { it.running && it.endAt > now }.sortedBy { it.endAt }
             .map { Info(it.id, titleOf(it), true, it.endAt - now, it.durationMs) }
         val paused = all.filter { !it.running }.map { Info(it.id, titleOf(it), false, it.remainingMs, it.durationMs) }
-        running + paused
+        val done = loadDone(ctx).values.map { Info(it.id, titleOf(it), false, 0L, it.durationMs, true) } // сработавшие — первыми: висят, пока по ним не нажмут
+        done + running + paused
     }
 
     /**
@@ -557,10 +595,10 @@ object CardTimers {
     }
 
     @SuppressLint("MissingPermission")
-    private fun postDone(ctx: Context, t: Timer) {
+    private fun postDone(ctx: Context, t: Timer, island: Boolean) {
         try {
             ensureChannels(ctx)
-            val n = NotificationCompat.Builder(ctx, CHANNEL_DONE)
+            val b = NotificationCompat.Builder(ctx, CHANNEL_DONE)
                 .setSmallIcon(R.drawable.ic_stat_notify)
                 .setColor(ACCENT)
                 .setContentTitle("Таймер закончился")
@@ -570,8 +608,12 @@ object CardTimers {
                 .setAutoCancel(true)
                 .setContentIntent(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
                 .setDeleteIntent(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
-                .build()
-            NotificationManagerCompat.from(ctx).notify(TAG_DONE + t.id, NOTIFICATION_ID, n)
+            if (island && XiaomiIsland.available(ctx)) {
+                // остров остаётся таким же, как у идущего таймера (значок, название, время «0:00»); нажатие на него — contentIntent выше
+                val stop = XiaomiIsland.stopAction(actionIntent(ctx, CardTimerReceiver.ACTION_STOP_VIBRATE, t.id))
+                XiaomiIsland.doneExtras(ctx, titleOf(t), t.endAt, t.durationMs, stop)?.let { b.addExtras(it) }
+            }
+            NotificationManagerCompat.from(ctx).notify(TAG_DONE + t.id, NOTIFICATION_ID, b.build())
         } catch (e: Exception) {
             // уведомления выключены: вибрация уже была
         }
