@@ -1,6 +1,7 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 24.0 (13.11)
+   Версия: 24.1 (15.11)
+   Версия: 24.1 (15.11) — белый экран после ухода в другое приложение и возврата: `flushPendingSyncNow` (my.js) при сворачивании звал `flushPendingMdEditorEdit`, а та уничтожала CodeMirror (`destroyEditor`, cmView = null) при том, что экран заметки оставался на месте; возврат целиком зависел от перемонтирования по таймерам, а `rememberScrollBeforeHide` в `onAppPause` не видел редактора (editorIsShown требует cmView). Новая `flushOnAppPause` только сохраняет и отправляет правки, редактор не трогает; экспорт `MdEditor.flushOnAppPause`. Откат: mdeditor.js 24.0.
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
    Версия: 16.1 (27.10) — `bindNoteHoldMarker`: в режиме кода (`codeMode`) удержание/протяжка не подчёркивает и не оборачивает слова в «==».
@@ -5746,6 +5747,14 @@ window.initMdEditorModule = function(deps){
     noteInfoOpen = false; // экран «i» при уходе на другую вкладку не запоминается
   }
 
+  // Сворачивание/блокировка приложения (my.js flushPendingSyncNow): правки сохраняются и уходят в облако, но редактор остаётся
+  // живым — экран заметки на месте, и после возврата рисовать нечего заново. В отличие от flushPendingMdEditorEdit (уход
+  // со вкладки) здесь нет destroyEditor, удаления пустой заметки и сброса экрана «i».
+  function flushOnAppPause(){
+    flushAutosaveNow();
+    binding.pushNow({keepalive:true});
+  }
+
   // Календарь на сегодня в ежедневной заметке (заметка с именем сегодняшней даты `дд.мм.гггг`): плавающая колонка справа, текст её обтекает
   // (calendar.js `mountDayColumn`, стили `.cal-daycol`/`.daycal-on` в components.css). Колонка живёт, пока жив host редактора.
   var dayCal = null;
@@ -6930,6 +6939,7 @@ window.initMdEditorModule = function(deps){
     // renderSettingsTabForgottenNotes выше
     renderSettingsTabForgottenNotes: renderSettingsTabForgottenNotes,
     flushPendingMdEditorEdit: flushPendingMdEditorEdit,
+    flushOnAppPause: flushOnAppPause,
     openNoteExternally: openNoteExternally,
     // используются вкладкой "Поиск" (search.js, ТЗ пользователя от 08.09):
     // openNoteByIdExternally — открыть найденную заметку без лишнего шага

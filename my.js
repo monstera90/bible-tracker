@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
    Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
    Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
    Версия: 149.2 (13.11)
@@ -4549,7 +4550,9 @@
     flushPendingYearCommentEdits();
     flushPendingTaskEdits();
     flushPendingCommentEdits();
-    flushPendingMdEditorEdit();
+    // сворачивание — не уход со вкладки: редактор заметки остаётся живым (см. MdEditor.flushOnAppPause)
+    if(typeof flushMdEditorOnAppPause === "function") flushMdEditorOnAppPause();
+    else if(typeof flushPendingMdEditorEdit === "function") flushPendingMdEditorEdit();
     if(saveTimer){
       clearTimeout(saveTimer);
       saveTimer = null;
@@ -7451,6 +7454,7 @@
   var renderSettingsTabMdBookmarks = MdEditor.renderSettingsTabMdBookmarks;
   var renderSettingsTabForgottenNotes = MdEditor.renderSettingsTabForgottenNotes;
   var flushPendingMdEditorEdit = MdEditor.flushPendingMdEditorEdit;
+  var flushMdEditorOnAppPause = MdEditor.flushOnAppPause;
   // перенос старых комментариев дней в заметки (см. migrateHourNotesToNotes — раздел о счётчике часов ниже)
   setTimeout(function(){ migrateHourNotesWhenReady(0); }, 4000);
 
