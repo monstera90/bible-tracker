@@ -1,5 +1,6 @@
 /* ===========================================================================
    mood.js
+   Версия: 1.4 (15.11) — `hasMoodMarkToday` (есть ли сегодня отметка настроения, в т.ч. из виджета; экспорт для подсветки вкладки «Настроение» в my.js 149.6).
    Версия: 1.3 (14.11) — карточка «Как настроение?» в виджетах рабочего стола (мост ≥37): `syncWidgetMood` / `syncWidgetMoodSoon` сообщают оболочке время последней отметки настроения, `drainWidgetMood` вносит в журнал (`moodlog:`) настроения, отмеченные кнопками карточки в виджете; `commitMoodTabCheckin` сразу сообщает о новой отметке.
    Версия: 1.2 (02.10) — новое чувство «Подавленность» (ключ `dejected`, эмодзи 😔): запись в `moodCategoriesResolved`, цвет в `computeMoodPalette` (средний тон, не тёмный), кнопка в сетке отметок после «Сонливости» (`CHECKIN_ORDER`). Диаграммы и список по дням берут категории из `moodCategoriesResolved`, отдельных правок не потребовали.
    Версия: 1.1 (29.09) — `--mood-joy` на <html> (цвет «Радости» для отметок задач), `window.syncMoodJoyColor`.
@@ -576,6 +577,12 @@
     });
     return last;
   }
+  // есть ли сегодня хотя бы одна отметка настроения (с приложения или из виджета; после сброса данных — только новее сброса)
+  function hasMoodMarkToday(){
+    var dayStart = startOfDay(Date.now());
+    var at = lastMoodMarkAt();
+    return at > 0 && at >= dayStart;
+  }
   // сообщить оболочке время последней отметки; только при изменении (force — всегда)
   function syncWidgetMood(force){
     var n = widgetMoodBridge();
@@ -721,7 +728,8 @@
       getMoodsByDay: getMoodsByDay,
       syncWidgetMood: syncWidgetMood,
       syncWidgetMoodSoon: syncWidgetMoodSoon,
-      drainWidgetMood: drainWidgetMood
+      drainWidgetMood: drainWidgetMood,
+      hasMoodMarkToday: hasMoodMarkToday
     };
   }
 

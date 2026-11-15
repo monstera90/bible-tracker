@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
    Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
    Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
    Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
@@ -10498,6 +10499,7 @@
   // Карточка «Как настроение?» в виджете (мост ≥37): отметки, нажатые на ней, вносятся в журнал настроения
   function drainWidgetMood(){
     if(Mood && Mood.drainWidgetMood) Mood.drainWidgetMood();
+    updateMoodTabIcon(); // отметка из виджета снимает подсветку вкладки «Настроение»
   }
   function renderSettingsTabWidgets(){
     var container = document.getElementById("settingsTabContent");
@@ -17249,7 +17251,9 @@
   function updateMoodTabIcon(){
     var btn = document.getElementById("settingsTabMoodBtn");
     if(!btn) return;
-    btn.classList.toggle("mood-tab-unread", !isMoodOpenedToday());
+    var moodMarked = false;
+    try{ moodMarked = !!(Mood && Mood.hasMoodMarkToday && Mood.hasMoodMarkToday()); }catch(e){}
+    btn.classList.toggle("mood-tab-unread", !isMoodOpenedToday() && !moodMarked);
     stripDecorClasses();
   }
   // Разница в календарных днях между двумя ключами вида "YYYY-MM-DD" (см. ipkdTodayDateKey) — обе
