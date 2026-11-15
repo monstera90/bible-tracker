@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.4 (15.11) — карточка привычек одна (hab_0), привычки листаются нажатием у края, а не смахиванием.
 // Версия: 4.3 (15.11) — круг равных заменён постоянным порядком при равном балле (tie_*): календарь → привычки → задачи → будильники → остальные → заряд.
 // Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
 // Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
@@ -772,8 +773,8 @@ class QrPriorityTest {
         val hs = listOf(hab("water", setOf("e")), hab("run", setOf("m")), hab("read", setOf("m")))
         val cf = cfgH(hs, listOf(card("cal")))
         val s = snap(cal(8))
-        // утро: календарь, затем бег и чтение (каждая своей карточкой); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
-        assertEquals(listOf("cal", "hab_0", "hab_1"), keys(run(cf, s)))
+        // утро: календарь, затем ОДНА карточка привычек (бег и чтение листаются нажатием у края); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
+        assertEquals(listOf("cal", "hab_0"), keys(run(cf, s)))
         assertEquals(listOf("run", "read", "water"), QrPriority.habitList(cf, s).map { it.key })
     }
 
@@ -796,7 +797,7 @@ class QrPriorityTest {
         assertEquals(emptyList<String>(), keys(run(cf, all)))
         assertEquals(0, QrPriority.visibleCount(cf, all))
         // отметка вчерашним днём сегодня ничего не скрывает
-        assertEquals(listOf("hab_0", "hab_1"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8)))))
+        assertEquals(listOf("hab_0"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8))))) // привычек две, карточка одна
     }
 
     // ---------- равный балл: постоянный порядок (календарь → привычки → задачи → будильники → остальные → заряд) ----------
@@ -811,11 +812,10 @@ class QrPriorityTest {
         // порядок один и тот же в любую минуту: время суток в нём не участвует
         for (m in 0..5) {
             val r = run(cf, snap(cal(18, m)))
-            assertEquals(listOf("e", "hab_0", "hab_1", "t", "q"), keys(r)) // «утренняя» привычка не в своё время: слота под неё нет
+            assertEquals(listOf("e", "hab_0", "t", "q"), keys(r)) // «утренняя» привычка не в своё время: слота под неё нет
             assertEquals("e", r.topKey)
             assertEquals(SCORE, scoreOf(r, "e"))
             assertEquals(SCORE, scoreOf(r, "hab_0"))
-            assertEquals(SCORE, scoreOf(r, "hab_1"))
         }
     }
 
@@ -823,7 +823,7 @@ class QrPriorityTest {
         val c = cal(18, 0)
         val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("t", dyn = "task", at = c.timeInMillis + hour, tid = "T")))
         val r = run(cf, snap(c))
-        assertEquals(listOf("hab_0", "hab_1", "t", "q"), keys(r))
+        assertEquals(listOf("hab_0", "t", "q"), keys(r))
         assertEquals("hab_0", r.topKey)
         assertEquals("hab_0", r.anchorKey)
     }
@@ -855,7 +855,7 @@ class QrPriorityTest {
         val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 20 * min)))
         val r = run(cf, snap(c))
         assertEquals("e", r.topKey) // событие через 20 минут (750) выше привычек (500)
-        assertEquals(listOf("e", "hab_0", "hab_1", "q"), keys(r))
+        assertEquals(listOf("e", "hab_0", "q"), keys(r))
         assertEquals(cal(23, 0).timeInMillis + 5_000L, run(cfgTie(listOf(hab("run", setOf("e"))), listOf(card("q"))), snap(c)).nextChangeAt) // ради порядка пересчёта по таймеру нет: ближайшее — граница окон времени суток
     }
 
@@ -865,7 +865,7 @@ class QrPriorityTest {
         val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 5 * hour),
             card("t", dyn = "task", at = now - hour, tid = "T")))
         val r = run(cf, snap(c))
-        assertEquals(listOf("e", "hab_0", "hab_1", "t", "q"), keys(r)) // задача (даже просроченная) — после календаря и всех привычек
+        assertEquals(listOf("e", "hab_0", "t", "q"), keys(r)) // задача (даже просроченная) — после календаря и всех привычек
         assertTrue(QrPriority.SCORE_TASK_OVERDUE < QrPriority.SCORE_CAL_HABIT && QrPriority.SCORE_TASK_TODAY < QrPriority.SCORE_CAL_HABIT)
     }
 
@@ -925,3 +925,4 @@ class QrPriorityTest {
 
     private val SCORE = QrPriority.SCORE_CAL_HABIT
 }
+
