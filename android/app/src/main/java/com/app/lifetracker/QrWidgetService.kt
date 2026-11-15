@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.12 (15.11) — карточки-группы («Привычки» «hab_0», «Будильники» «alm_0») обслуживаются одним кодом: лицо и нажатие в центре берутся из показанного элемента ([QrWidgets.GroupView]), края листают элементы группы (`habnav` + ключ карточки), внизу точки по всем элементам.
 // Версия: 2.11 (14.11) — карточка «Привычки» (dyn = "habit", слоты «hab_N»): края листают привычки (`habnav`), нажатие в центре — как у обычной привычки (одно открывает карту дней, двойное отмечает), внизу точки.
 // Версия: 2.10 (14.11) — направление смахивания поменяно: смахивание снизу вверх ведёт ко второй карточке (позиции стопки отданы в обратном порядке, см. [getViewAt]).
 // Версия: 2.9 (14.11) — карточка «Будильники» (dyn = "alarm"): края листают будильники (`alnav`), центр заводит/выключает показанный (`alarm`), внизу точки.
@@ -31,7 +32,7 @@ class QrWidgetService : RemoteViewsService() {
 
         private var cards: List<QrWidgets.Card> = emptyList()
         private var bitmaps: Map<String, Bitmap> = emptyMap()
-        private var habitViews: Map<String, QrWidgets.HabitView> = emptyMap()
+        private var groupViews: Map<String, QrWidgets.GroupView> = emptyMap()
 
         // Первые обращения после загрузки данных — не смахивание: точки показываем только после этой паузы.
         @Volatile private var quietUntil = 0L
@@ -48,22 +49,20 @@ class QrWidgetService : RemoteViewsService() {
                 val fresh = HashMap<String, Bitmap>()
                 val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
                 val tpos = if (cfg != null && cfg.tasks) QrWidgets.taskPos(ctx, cfg) else Pair(0, 0)
-                val apos = if (cfg != null && cfg.alarms) QrWidgets.alarmPos(ctx, cfg) else Pair(0, 0)
-                val hviews = if (cfg != null && cfg.habits) QrWidgets.habitViews(ctx, cfg) else emptyMap()
+                val gviews = if (cfg != null) QrWidgets.groupViews(ctx, cfg) else emptyMap()
                 for (c in list) {
-                    val hv = if (c.dyn == "habit") hviews[c.key] else null
-                    val bmp = QrWidgets.bitmapFor(ctx, hv?.card ?: c) // слот привычек рисует лицо той привычки, которую показывает
-                    fresh[c.key] = when (c.dyn) {
-                        "event" -> QrWidgets.withEventDots(bmp, pos.first, pos.second)
-                        "task" -> QrWidgets.withEventDots(bmp, tpos.first, tpos.second)
-                        "alarm" -> QrWidgets.withEventDots(bmp, apos.first, apos.second)
-                        "habit" -> if (hv != null) QrWidgets.withEventDots(bmp, hv.index, hv.total) else bmp
+                    val gv = if (QrPriority.isGroupKey(c.key)) gviews[c.key] else null
+                    val bmp = QrWidgets.bitmapFor(ctx, gv?.card ?: c) // карточка-группа рисует лицо того элемента, который показывает
+                    fresh[c.key] = when {
+                        gv != null -> QrWidgets.withEventDots(bmp, gv.index, gv.total) // точки — по всем элементам группы
+                        c.dyn == "event" -> QrWidgets.withEventDots(bmp, pos.first, pos.second)
+                        c.dyn == "task" -> QrWidgets.withEventDots(bmp, tpos.first, tpos.second)
                         else -> bmp
                     }
                 }
                 cards = list
                 bitmaps = fresh
-                habitViews = hviews
+                groupViews = gviews
             } catch (e: Throwable) {
                 // не хватило памяти или сбой данных — остаются прежние карточки
             }
@@ -100,28 +99,24 @@ class QrWidgetService : RemoteViewsService() {
             // карточка события: три зоны поверх лица (видимость задаётся всегда — элемент списка может быть переиспользован)
             val isEv = c.dyn == "event"
             val isTk = c.dyn == "task"
-            val isAl = c.dyn == "alarm"
-            val isHb = c.dyn == "habit"
-            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk || isAl || isHb) View.VISIBLE else View.GONE)
-            if (isHb) {
-                // карточка привычек: края листают ряд привычек (QrWidgets.habitNav, без зацикливания); центр и вся карточка — как у обычной привычки: ScanActivity ждёт второго нажатия
-                // (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
+            val isGr = QrPriority.isGroupKey(c.key)
+            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk || isGr) View.VISIBLE else View.GONE)
+            if (isGr) {
+                // карточка-группа (привычки, будильники): края листают ВСЕ элементы группы (QrWidgets.groupNav, без зацикливания); центр и вся карточка — действие показанного элемента
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("habnav", -1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("habnav", 1).putExtra("wid", widgetId).putExtra("slot", c.key))
-                val hv = habitViews[c.key]
-                if (hv != null) {
-                    val tap = Intent().putExtra("key", hv.card.key).putExtra("habit", true).putExtra("code", hv.card.code)
+                val item = groupViews[c.key]?.card
+                if (item != null) {
+                    val tap = if (c.dyn == "habit") {
+                        // привычка: ScanActivity ждёт второго нажатия (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
+                        Intent().putExtra("key", item.key).putExtra("habit", true).putExtra("code", item.code)
+                    } else {
+                        // будильник: завести/выключить показанный будильник (ScanActivity)
+                        if (item.alarmSpec != null) Intent().putExtra("alarm", item.key) else Intent().putExtra("code", "alarmmark:" + item.key)
+                    }
                     rv.setOnClickFillInIntent(R.id.ev_center, tap)
                     rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(tap))
                 }
-            }
-            if (isAl) {
-                // карточка будильников: края листают ряд будильников (QrWidgets.alarmNav, без зацикливания), центр и вся карточка — завести/выключить показанный будильник (ScanActivity)
-                rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("alnav", -1).putExtra("wid", widgetId))
-                rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("alnav", 1).putExtra("wid", widgetId))
-                val toggle = if (c.alarmSpec != null) Intent().putExtra("alarm", c.key) else Intent().putExtra("code", "alarmmark:" + c.key)
-                rv.setOnClickFillInIntent(R.id.ev_center, toggle)
-                rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(toggle))
             }
             if (isTk) {
                 // карточка задач: края листают ряд задач (QrWidgets.taskNav, без зацикливания), центр — двойное нажатие отмечает показанную задачу (ScanActivity)

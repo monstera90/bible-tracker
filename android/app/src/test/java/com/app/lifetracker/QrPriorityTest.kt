@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.3 (15.11) — единая модель круга равных и карточек-групп: будильники — группа «alm_0» (элементы со своими баллами, alarmRow_*, alarmGroup_*), лицо группы в Result.faces вместо habitIdx; в круг входит любая карточка верхнего яруса (cycle_ordinaryCards_*), равные баллы гистерезис не держит (cycle_equalScoreNotHeld_*).
 // Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
 // Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
 // Версия: 4.0 (14.11) — будильник «скоро» за 30 минут, а не за час; будильник «скоро» перебивает событие (alarmSoon_beatsEventSoon_*, alarmRow_soonBeatsEvent_*).
@@ -632,56 +633,59 @@ class QrPriorityTest {
         dyn = "alarm", alarmId = "id_" + key, alarmSpec = QrWidgets.AlarmSpec(h, m, 0, 0, key)
     )
 
+    private fun alarmGroupOf(cf: Cfg, s: QrPriority.Snapshot) = QrPriority.groups(cf, s).first { it.key == QrPriority.ALARM_SLOT_KEY }
+
     @Test fun alarmRow_oneCardByClock_defaultRingingThenNearestArmed() {
         val c = cal(12)
         val now = c.timeInMillis
         val cf = cfg(listOf(alarmCard("a9", 21, 0), alarmCard("a7", 7, 0), alarmCard("a8", 8, 30)))
         val s = snap(c)
         assertEquals(listOf("a7", "a8", "a9"), QrPriority.alarmCards(cf, s).map { it.key }) // по времени суток, не по порядку присылки
-        assertEquals("a7", QrPriority.nextAlarmKey(cf, s)) // ничего не заведено — первый по времени
+        assertEquals(0, alarmGroupOf(cf, s).defaultIdx) // ничего не заведено — первый по времени
         val armed = snap(c, alarms = mapOf("id_a8" to now + 20 * hour, "id_a9" to now + 9 * hour))
-        assertEquals("a9", QrPriority.nextAlarmKey(cf, armed)) // заведённый с ближайшим звонком
-        assertEquals("a8", QrPriority.nextAlarmKey(cf, snap(c, alarms = armed.alarms, ringing = setOf("id_a8")))) // звонящий важнее
-        assertEquals("a8", QrPriority.nextAlarmKey(cf, armed.copy(alarmIndex = 1))) // листали — показан выбранный
-        assertEquals("a9", QrPriority.nextAlarmKey(cf, s.copy(alarmIndex = 7))) // за краем ряда — крайний, не по кругу
-        assertEquals("a7", QrPriority.nextAlarmKey(cf, s.copy(alarmIndex = 0)))
-        assertEquals(listOf("a8"), keys(run(cf, s.copy(alarmIndex = 1)))) // в стопке одна карточка на все будильники
-        assertEquals("", QrPriority.nextAlarmKey(cfg(emptyList()), s)) // будильников нет — карточки нет
+        assertEquals(2, alarmGroupOf(cf, armed).defaultIdx) // заведённый с ближайшим звонком (a9)
+        assertEquals(1, alarmGroupOf(cf, snap(c, alarms = armed.alarms, ringing = setOf("id_a8"))).defaultIdx) // звонящий важнее (a8)
+        assertEquals(listOf(QrPriority.ALARM_SLOT_KEY), keys(run(cf, s))) // в стопке одна карточка на все будильники
+        assertEquals(emptyList<QrPriority.Group>(), QrPriority.groups(cfg(emptyList()), s)) // будильников нет — карточки нет
+        assertEquals(emptyList<String>(), keys(run(cfg(emptyList()), s)))
     }
 
     @Test fun alarmRow_scoreFromAllAlarms_notFromShownOne() {
         val c = cal(12)
         val now = c.timeInMillis
         val cf = cfg(listOf(card("a"), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
-        // показан a7 (листали), а зазвонит a9 через 30 минут: карточка всё равно поднимается
-        val s = snap(c, alarms = mapOf("id_a9" to now + 30 * 60_000L)).copy(alarmIndex = 0)
+        // зазвонит a9 через 30 минут: карточка «Будильники» поднимается и показывает именно его
+        val s = snap(c, alarms = mapOf("id_a9" to now + 30 * 60_000L))
         val r = run(cf, s)
-        assertEquals(listOf("a7", "a"), keys(r))
-        assertEquals("a7", r.topKey)
+        assertEquals(listOf("alm_0", "a"), keys(r))
+        assertEquals("alm_0", r.topKey)
         assertEquals("Будильник через 30 мин", r.topReason)
-        // до звонка дальше 30 минут — карточка не выделена
-        val mid = run(cf, snap(c, alarms = mapOf("id_a9" to now + 45 * 60_000L)).copy(alarmIndex = 0))
-        assertEquals(listOf("a", "a7"), keys(mid)) // 45 минут: раньше (за час) уже поднималась
+        assertEquals("a9", r.topTitle) // объяснение называет показанный будильник, а не заголовок карточки
+        assertEquals(1, r.faces["alm_0"])
+        // до звонка дальше 30 минут — карточка не выделена, на ней будильник по умолчанию (ближайший заведённый)
+        val mid = run(cf, snap(c, alarms = mapOf("id_a9" to now + 45 * 60_000L)))
+        assertEquals(listOf("a", "alm_0"), keys(mid)) // 45 минут: раньше (за час) уже поднималась
         assertEquals("", mid.topKey)
-        val far = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
-        assertEquals(listOf("a", "a7"), keys(far))
+        val far = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)))
+        assertEquals(listOf("a", "alm_0"), keys(far))
         assertEquals("", far.topKey)
-        // нет релевантности — порядок пользователя, баллов нет
-        assertEquals(listOf("a", "a7"), keys(run(cfg(cf.cards, false), s)))
+        // нет релевантности — порядок пользователя (карточка будильников на месте первого будильника), баллов нет
+        assertEquals(listOf("a", "alm_0"), keys(run(cfg(cf.cards, false), s)))
     }
 
     @Test fun alarmRow_ringingBeatsHysteresis_andNextChange() {
         val c = cal(12)
         val now = c.timeInMillis
         val cf = cfg(listOf(card("b", times = setOf("d")), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
-        // прежде наверху была «b» (её время суток), зазвонил a9 — звонящий забирает верх сразу, хотя показан a7
-        val ring = snap(c, alarms = mapOf("id_a9" to now - 1000L), ringing = setOf("id_a9"), lastTop = "b").copy(alarmIndex = 0, alarmRowRinging = true)
+        // прежде наверху была «b» (её время суток), зазвонил a9 — звонящий забирает верх сразу
+        val ring = snap(c, alarms = mapOf("id_a9" to now - 1000L), ringing = setOf("id_a9"), lastTop = "b").copy(alarmRowRinging = true)
         val r = run(cf, ring)
-        assertEquals("a7", r.topKey)
+        assertEquals("alm_0", r.topKey)
         assertEquals("Звонит будильник", r.topReason)
+        assertEquals("a9", r.topTitle)
         assertEquals(now + 60_000L, r.nextChangeAt) // пока звонит — перепроверка через минуту
         // заведённый на 15:00 а9 зазвонит позже: «скоро» наступит в 14:30:01 (раньше границы окон 15:00:05)
-        val soon = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)).copy(alarmIndex = 0))
+        val soon = run(cf, snap(c, alarms = mapOf("id_a9" to now + 3 * hour)))
         assertEquals(now + 2 * hour + 30 * min + 1_000L, soon.nextChangeAt)
     }
 
@@ -689,15 +693,46 @@ class QrPriorityTest {
         val c = cal(12)
         val now = c.timeInMillis
         val cf = cfg(listOf(card("ev", dyn = "event", at = now + 20 * min), alarmCard("a7", 7, 0), alarmCard("a9", 21, 0)), relevance = true)
-        // событие наверху, показан a7 (листали), а зазвонит a9 через 20 минут: карточка будильников забирает верх у календаря
-        val s = snap(c, alarms = mapOf("id_a9" to now + 20 * min), lastTop = "ev").copy(alarmIndex = 0)
+        // событие наверху, а зазвонит a9 через 20 минут: карточка будильников забирает верх у календаря
+        val s = snap(c, alarms = mapOf("id_a9" to now + 20 * min), lastTop = "ev")
         val r = run(cf, s)
-        assertEquals(listOf("a7", "ev"), keys(r))
-        assertEquals("a7", r.topKey)
+        assertEquals(listOf("alm_0", "ev"), keys(r))
+        assertEquals("alm_0", r.topKey)
         assertEquals("Будильник через 20 мин", r.topReason)
         // будильник дальше 30 минут — календарь остаётся наверху
-        val later = run(cf, snap(c, alarms = mapOf("id_a9" to now + 40 * min), lastTop = "ev").copy(alarmIndex = 0))
+        val later = run(cf, snap(c, alarms = mapOf("id_a9" to now + 40 * min), lastTop = "ev"))
         assertEquals("ev", later.topKey)
+    }
+
+    @Test fun alarmGroup_twoSoonTakeTurns_outOfWindowNever() {
+        val cf = cfg(listOf(alarmCard("a7", 7, 0), alarmCard("a8", 8, 30), alarmCard("a9", 21, 0)), relevance = true)
+        // a8 и a9 зазвонят в ближайшие полчаса, a7 заведён на завтра: на единственной карточке по очереди a8 и a9, a7 — никогда
+        val rs = (0..5).map { m ->
+            val c = cal(12, m)
+            run(cf, snap(c, alarms = mapOf("id_a7" to c.timeInMillis + 18 * hour, "id_a8" to c.timeInMillis + 10 * min, "id_a9" to c.timeInMillis + 20 * min)))
+        }
+        for (r in rs) assertEquals("alm_0", r.topKey) // карточка одна и стоит на месте
+        assertEquals(setOf(1, 2), rs.map { it.faces["alm_0"] }.toSet())
+        assertTrue(rs[0].faces["alm_0"] != rs[1].faces["alm_0"]) // меняется каждую минуту
+        assertEquals(rs[0].faces["alm_0"], rs[2].faces["alm_0"])
+        for (m in rs.indices) assertEquals(QrPriority.nextCycleAt(cal(12, m).timeInMillis), rs[m].cycleAt) // круг идёт: перерисовка на ближайшей минуте
+    }
+
+    @Test fun alarmGroup_ringingStaysVisible_untilSwitchedOff() {
+        val cf = cfg(listOf(card("q"), alarmCard("a7", 7, 0), alarmCard("a8", 8, 30), alarmCard("a9", 21, 0)), relevance = true)
+        for (m in 0..4) {
+            val c = cal(12, m)
+            // a9 звонит, a8 «скоро»: в круг входит только верхний ярус — звонящий; «скоро» ему не мешает
+            val r = run(cf, snap(c, alarms = mapOf("id_a9" to c.timeInMillis - 1000L, "id_a8" to c.timeInMillis + 10 * min), ringing = setOf("id_a9")).copy(alarmRowRinging = true))
+            assertEquals(2, r.faces["alm_0"])
+            assertEquals(Long.MAX_VALUE, r.cycleAt) // одна очередь — круга нет
+        }
+        // звонят два: сменяют друг друга
+        val two = (0..3).map { m ->
+            val c = cal(12, m)
+            run(cf, snap(c, ringing = setOf("id_a7", "id_a9"), alarms = mapOf("id_a7" to c.timeInMillis - 1000L, "id_a9" to c.timeInMillis - 1000L)).copy(alarmRowRinging = true)).faces["alm_0"]
+        }
+        assertEquals(setOf(0, 2), two.toSet())
     }
 
     // ---------- «Как настроение?» (служебная карточка, как «Как тренировка?») ----------
@@ -774,7 +809,7 @@ class QrPriorityTest {
         // утро: календарь и ОДНА карточка привычек (бег и чтение сменяют друг друга на ней); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
         assertEquals(listOf("cal", "hab_0"), keys(run(cf, s)))
         assertEquals(listOf("run", "read", "water"), QrPriority.habitList(cf, s).map { it.key })
-        assertEquals(2, QrPriority.habitSlots(cf, s)[0].cycleN) // очередей в круге — по числу привычек «в своё время»
+        assertEquals(2, QrPriority.groups(cf, s)[0].turns) // очередей в круге — по числу привычек «в своё время»
     }
 
     @Test fun habits_manyDue_stillExactlyOneCard() {
@@ -782,7 +817,7 @@ class QrPriorityTest {
         val cf = cfgH(hs, listOf(card("cal"), card("x")))
         val s = snap(cal(8))
         assertEquals(listOf("cal", "x", "hab_0"), keys(run(cf, s))) // свайп по стопке — только по группам, привычки не размножают карточки
-        assertEquals(4, QrPriority.habitSlots(cf, s)[0].cycleN)
+        assertEquals(4, QrPriority.groups(cf, s)[0].turns)
     }
 
     @Test fun habits_noneDue_oneSlotShowsFirstInUserOrder() {
@@ -821,9 +856,9 @@ class QrPriorityTest {
         // круг из трёх очередей (календарь, бег, чтение): за три минуты календарь наверху один раз, карточка «Привычки» — два, и на ней разные привычки
         val three = rs.take(3)
         assertEquals(1, three.count { it.topKey == "e" })
-        assertEquals(setOf(0, 1), three.filter { it.topKey == "hab_0" }.map { it.habitIdx }.toSet())
+        assertEquals(setOf(0, 1), three.filter { it.topKey == "hab_0" }.map { it.faces["hab_0"] }.toSet())
         assertEquals(rs[0].topKey, rs[3].topKey) // через три минуты — снова то же
-        assertEquals(rs[0].habitIdx, rs[3].habitIdx)
+        assertEquals(rs[0].faces["hab_0"], rs[3].faces["hab_0"])
         for (m in 0..2) assertEquals(SCORE, rs[m].cards[0].score)
     }
 
@@ -831,14 +866,14 @@ class QrPriorityTest {
         val two = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
         val rs = (0..3).map { run(two, snap(cal(18, it))) }
         for (r in rs) assertEquals("hab_0", r.topKey) // карточка одна и стоит на месте
-        assertEquals(setOf(0, 1), rs.map { it.habitIdx }.toSet())
-        assertTrue(rs[0].habitIdx != rs[1].habitIdx) // а привычка на ней меняется каждую минуту
-        assertEquals(rs[0].habitIdx, rs[2].habitIdx)
+        assertEquals(setOf(0, 1), rs.map { it.faces["hab_0"] }.toSet())
+        assertTrue(rs[0].faces["hab_0"] != rs[1].faces["hab_0"]) // а привычка на ней меняется каждую минуту
+        assertEquals(rs[0].faces["hab_0"], rs[2].faces["hab_0"])
         val one = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("m"))), listOf(card("q")))
         for (m in 0..3) {
             val r = run(one, snap(cal(18, m)))
             assertEquals("hab_0", r.topKey) // привычка «в своё время» одна — наверху всегда она
-            assertEquals(0, r.habitIdx)
+            assertEquals(0, r.faces["hab_0"])
         }
     }
 
@@ -847,7 +882,7 @@ class QrPriorityTest {
         val rs = (0..3).map { run(cf, snap(cal(18, it))) }
         assertEquals(listOf("hab_0"), keys(rs[0]))
         for (r in rs) assertEquals("hab_0", r.topKey)
-        assertEquals(setOf(0, 1), rs.map { it.habitIdx }.toSet())
+        assertEquals(setOf(0, 1), rs.map { it.faces["hab_0"] }.toSet())
         assertEquals(rs[0].cycleAt, cal(18, 0).timeInMillis + 60_000L + 1_000L) // круг идёт: виджет перерисуется на следующей минуте
     }
 
@@ -859,7 +894,7 @@ class QrPriorityTest {
             val prev = run(cf, snap(cal(18, m - 1))).topKey
             val held = run(cf, snap(cal(18, m), lastTop = prev))
             assertEquals(free.topKey, held.topKey) // прежняя верхняя карточка круг не удерживает
-            assertEquals(free.habitIdx, held.habitIdx)
+            assertEquals(free.faces["hab_0"], held.faces["hab_0"])
             assertEquals(held.topKey, held.mainTopKey)
         }
     }
@@ -894,6 +929,68 @@ class QrPriorityTest {
         val r = run(cf, snap(cal(18, 0))) // вечер, обе привычки утренние: слот один, балла нет; наверху календарь
         assertEquals("e", r.topKey)
         assertEquals(0, scoreOf(r, "hab_0"))
+    }
+
+    // ---------- единая модель круга: обычные карточки, несколько групп, равные баллы ----------
+
+    @Test fun cycle_ordinaryCards_equalScoreTakeTurnsEveryMinute() {
+        val names = listOf("q1", "q2", "q3")
+        val cf = cfg(names.map { card(it, times = setOf("d")) }, relevance = true) // в 12:00 у всех троих «их» время: балл одинаковый
+        for (m in 0..6) {
+            val c = cal(12, m)
+            val r = run(cf, snap(c))
+            val turn = Math.floorMod(c.timeInMillis / QrPriority.CYCLE_MS, 3L).toInt() // номер очереди = минута по модулю числа очередей
+            assertEquals(names[turn], r.topKey)
+            assertEquals(names[turn], keys(r)[0])
+            assertEquals(QrPriority.nextCycleAt(c.timeInMillis), r.cycleAt)
+        }
+    }
+
+    @Test fun cycle_equalScoreNotHeld() { // а отрыв меньше HYSTERESIS по-прежнему удерживает прежнюю верхнюю — см. hysteresis_diff50_keepsPrev и hysteresis_diffExactly100_changes
+        val cf = cfg(listOf(card("q1", times = setOf("d")), card("q2", times = setOf("d"))), relevance = true)
+        for (m in 0..3) {
+            val c = cal(12, m)
+            val free = run(cf, snap(c))
+            val other = if (free.topKey == "q1") "q2" else "q1"
+            val held = run(cf, snap(c, lastTop = other))
+            assertEquals(free.topKey, held.topKey) // равные баллы прежнюю верхнюю не удерживают
+        }
+    }
+
+    @Test fun cycle_groupEventAndOrdinaryCard_turnsAreSummed_oneCardPerGroup() {
+        val ev = card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)
+        val hs = listOf(hab("run", setOf("e")), hab("read", setOf("e")), hab("swim", setOf("e")))
+        val cf = cfgCycle(hs, listOf(card("q", times = setOf("e")), ev)) // обычная карточка с её временем (1) + календарь (1) + «Привычки» (3 привычки)
+        val rs = (0..9).map { run(cf, snap(cal(18, it))) }
+        for (r in rs) assertEquals(1, keys(r).count { it == "hab_0" }) // группа — одна карточка, сколько бы элементов ни было
+        val period = rs.take(5)
+        assertEquals(1, period.count { it.topKey == "q" })
+        assertEquals(1, period.count { it.topKey == "e" })
+        assertEquals(setOf(0, 1, 2), period.filter { it.topKey == "hab_0" }.map { it.faces["hab_0"] }.toSet()) // пять очередей: 1 + 1 + 3
+        assertEquals(rs[0].topKey, rs[5].topKey) // через пять минут — снова то же
+    }
+
+    @Test fun cycle_ringingAlarmGroup_interruptsHabitCircle() {
+        val c = cal(18, 0)
+        val alm = alarmCard("a9", 21, 0)
+        val cf = Cfg(id = "w", name = "w", rotate = false, rotateMin = 1, relevance = true, cards = listOf(alm), habits = true,
+            habitCards = listOf(hab("run", setOf("e")), hab("read", setOf("e"))))
+        val r = run(cf, snap(c, alarms = mapOf("id_a9" to c.timeInMillis - 1000L), ringing = setOf("id_a9")).copy(alarmRowRinging = true))
+        assertEquals("alm_0", r.topKey) // звонящий (1100) выше круга привычек (500): круг прерван
+        assertEquals(Long.MAX_VALUE, r.cycleAt)
+        assertEquals(listOf("alm_0", "hab_0"), keys(r))
+        val calm = run(cf, snap(c)) // будильник далеко: наверху «Привычки» и круг идёт
+        assertEquals("hab_0", calm.topKey)
+        assertEquals(c.timeInMillis + 60_000L + 1_000L, calm.cycleAt)
+    }
+
+    @Test fun cycle_groupNotInTopTier_showsDefaultItem() {
+        val c = cal(18, 0)
+        val cf = cfgCycle(listOf(hab("run", setOf("m")), hab("read", setOf("m"))), listOf(card("e", dyn = "event", at = c.timeInMillis + 5 * hour)))
+        for (m in 0..3) {
+            val r = run(cf, snap(cal(18, m)))
+            assertEquals(0, r.faces["hab_0"]) // обе привычки утренние: группа не в ярусе, показана первая
+        }
     }
 
     private val SCORE = QrPriority.SCORE_CYCLE

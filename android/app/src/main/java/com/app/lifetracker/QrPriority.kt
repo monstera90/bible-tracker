@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.9 (15.11) — единая модель круга равных и карточек-групп: в круг входит любая карточка верхнего яруса (не только привычки и события); карточка-группа (привычки «hab_0», будильники «alm_0» — [groups]) всегда одна в стопке, у каждого её элемента свой балл, балл карточки — балл лучшего элемента, очередей у неё столько, сколько элементов с верхним баллом ([Card.cycleN]); какой элемент показать, отдаёт [Result.faces] (вместо одиночного habitIdx). Будильники больше не отдельные карточки: [alarmCards] — элементы группы [ALARM_SLOT_KEY], снимок без alarmIndex, [alarmRowScore] заменён баллами элементов.
 // Версия: 4.8 (15.11) — карточка «Привычки» в стопке всегда одна ([habitSlots], ключ [HABIT_SLOT_KEY]): свайп листает группы, привычки листаются только нажатием у края. Привычки «в своё время» по-прежнему сменяют друг друга и календарь раз в минуту, но очередь каждой — очередь на одной карточке ([Card.cycleN], [Result.habitIdx]), а не отдельная карточка стопки.
 // Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CYCLE]), в круг равных входят только слоты привычек и событие.
 // Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие) имеют один балл [SCORE_CYCLE] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
@@ -109,8 +110,6 @@ object QrPriority {
         val eventIndex: Int = 0,
         /** Какая по счёту из ближайших задач показана на единственной карточке задач (0 — первая; нажатие у края листает, без зацикливания). */
         val taskIndex: Int = 0,
-        /** Какой по счёту будильник показывает карточка «Будильники» (по времени суток, [alarmCards]); -1 — не листали: показан главный ([defaultAlarmIndex]: звонящий, иначе ближайший заведённый). */
-        val alarmIndex: Int = -1,
         /** Звонит какой-нибудь из будильников карточки «Будильники» (карточка при этом не отдаёт верх устойчивостью, как звонящий будильник обычной карточки). */
         val alarmRowRinging: Boolean = false
     )
@@ -137,22 +136,26 @@ object QrPriority {
         val topReason: String = "",
         /** Когда круг равных ([cycleOrder]) выставит наверх следующую карточку; [Long.MAX_VALUE] — круга нет (равных меньше двух). В [nextChangeAt] не входит (будильник каждую минуту при погашенном экране не нужен): оболочка ставит для него обработчик на время, пока экран включён ([QrWidgets]). */
         val cycleAt: Long = Long.MAX_VALUE,
-        /** Какую из привычек «в своё время» ([habitList], с нуля) круг равных сейчас выставляет на единственной карточке «Привычки»; 0 — круга нет. Показ слота решает оболочка ([QrWidgets.habitViews]). */
-        val habitIdx: Int = 0
+        /**
+         * Карточка-группа ([groups]: «Привычки», «Будильники») → номер её элемента ([Group.items], с нуля), который показывает расчёт: элемент по очереди круга, если карточка в верхнем ярусе,
+         * иначе элемент по умолчанию ([Group.defaultIdx]). Выбор нажатием у края и его срок (60 с) накладывает оболочка ([QrWidgets.groupViews]).
+         */
+        val faces: Map<String, Int> = emptyMap()
     )
 
     // ---------- построение ----------
 
     fun build(cfg: Cfg, s: Snapshot): Result {
-        val base = visible(cfg, s)
+        val gs = groups(cfg, s)
+        val base = visible(cfg, s, gs)
         val rowTaskAt = taskCards(cfg, s).firstOrNull()?.at ?: 0L // балл карточки задач считается по первой задаче ряда: листание не двигает карточку в стопке
-        val rowAlarm = alarmRowScore(cfg, s) // то же для карточки будильников: балл по всем будильникам ряда, а не по показанному
         val main = ArrayList<Scored>()
         var top = ""
         var cyc = false
-        var habitIdx = 0
-        // одна карточка «Привычки» с двумя и больше привычками «в своё время» — тоже круг (привычки сменяют друг друга на ней), поэтому считается и при одной карточке в стопке
-        if (!cfg.relevance || (base.size < 2 && base.sumOf { cycleWeight(it) } < 2)) {
+        var turn = 0
+        var start: Map<String, Int> = emptyMap()
+        // единственная карточка-группа с двумя и больше элементами верхнего яруса — тоже круг (меняется её лицо), поэтому считается и при одной карточке в стопке
+        if (!cfg.relevance || (base.size < 2 && base.sumOf { turnsOf(it) } < 2)) {
             for (c in base) main.add(Scored(c, 0, ""))
         } else {
             val head = ArrayList<Card>()
@@ -163,21 +166,24 @@ object QrPriority {
             } else {
                 val scored = ArrayList<Scored>()
                 for (c in head) {
-                    val sc = scoreOf(c, s, rowTaskAt, rowAlarm)
+                    val sc = scoreOf(c, s, rowTaskAt)
                     scored.add(Scored(c, sc.first, sc.second))
                 }
                 lift(scored)
                 // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
                 val cycled = cycleOrder(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })), s.now)
                 val sorted = ArrayList(cycled.order)
-                habitIdx = cycled.habitIdx
-                cyc = cycleSize(sorted) >= 2
+                turn = cycled.turn
+                start = cycled.start
+                cyc = cycled.circle
                 if (sorted.first().score > 0) top = sorted.first().card.key
                 top = keepPrevTop(sorted, top, s)
                 main.addAll(sorted)
                 for (c in tail) main.add(Scored(c, 0, ""))
             }
         }
+        val faces = HashMap<String, Int>()
+        for (g in gs) if (main.any { it.card.key == g.key }) faces[g.key] = faceOf(g, start[g.key], turn)
         val out = ArrayList<Scored>()
         if (s.rpePending) out.add(Scored(rpeCard(cfg), 0, "Ждёт оценки тренировки"))
         if (s.moodPending) out.add(Scored(moodCard(cfg), 0, "Сегодня настроение ещё не отмечено"))
@@ -187,7 +193,26 @@ object QrPriority {
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
         val topScored: Scored? = if (serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "", cycleAt, habitIdx)
+        // у группы наверху называем тот элемент, который она на самом деле показывает (а не заголовок слота)
+        var topTitle = topScored?.card?.title ?: ""
+        var topReason = topScored?.reason ?: ""
+        val topGroup = if (topScored != null) gs.firstOrNull { it.key == topScored.card.key } else null
+        if (topGroup != null && top.isNotEmpty() && serviceKey.isEmpty()) {
+            val i = (faces[topGroup.key] ?: topGroup.defaultIdx).coerceIn(0, topGroup.items.size - 1)
+            topTitle = topGroup.items[i].title
+            if (topGroup.reasons[i].isNotEmpty()) topReason = topGroup.reasons[i]
+        }
+        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topTitle, topReason, cycleAt, faces)
+    }
+
+    /**
+     * Элемент группы [g], который показывает расчёт. Карточка в верхнем ярусе (её очереди начинаются с [from]): элемент с верхним баллом по очереди круга —
+     * `clamp(turn - from, 0, число очередей - 1)`-й из них, а вне своей очереди (до неё и после) — ближайший крайний. Карточка вне яруса: элемент по умолчанию.
+     */
+    private fun faceOf(g: Group, from: Int?, turn: Int): Int {
+        val tops = g.topIdx
+        if (from == null || tops.isEmpty()) return g.defaultIdx.coerceIn(0, g.items.size - 1)
+        return tops[(turn - from).coerceIn(0, tops.size - 1)]
     }
 
     /**
@@ -212,8 +237,8 @@ object QrPriority {
         val ps = sorted[idx].score
         val first = sorted[0].score
         if (ps <= 0 || first >= ps + HYSTERESIS) return top
-        if (ps == first && isCycleMember(sorted[idx].card) && isCycleMember(sorted[0].card)) return top
-        if (sorted[idx].card.dyn == "task" && isCycleMember(sorted[0].card)) return top // календарь и привычка выше задач: прежняя верхняя задача их не удерживает // круг равных: смена верха по очереди, гистерезис её не держит
+        if (ps == first) return top // круг равных: смена верха по очереди, гистерезис её не держит
+        if (sorted[idx].card.dyn == "task" && (sorted[0].card.dyn == "event" || isGroup(sorted[0].card))) return top // календарь и группы выше задач: прежняя верхняя задача их не удерживает
         if (isRinging(sorted[0].card, s) && !isRinging(sorted[idx].card, s)) return top
         sorted.add(0, sorted.removeAt(idx))
         return prev
@@ -244,59 +269,53 @@ object QrPriority {
         return out
     }
 
-    /** Участник круга равных: слот привычки или карточка события календаря. Задачи в круг не входят: они ниже календаря и привычек по приоритету. */
-    private fun isCycleMember(c: Card): Boolean = c.dyn == "habit" || c.dyn == "event"
+    /** Сколько очередей круга занимает карточка: у карточки-группы — число её элементов с верхним баллом ([Card.cycleN]), у любой другой (обычная, календарь, задачи, заряд) — одна. */
+    private fun turnsOf(c: Card): Int = Math.max(1, c.cycleN)
 
-    /** Сколько участников круга равных в верхней группе [sorted] (карточки с баллом, как у первой; балл должен быть больше нуля). */
-    private fun cycleSize(sorted: List<Scored>): Int {
+    /** Сколько карточек верхнего яруса в [sorted] (карточки с баллом, как у первой; балл должен быть больше нуля); 0 — яруса нет. */
+    private fun tierEnd(sorted: List<Scored>): Int {
         if (sorted.isEmpty() || sorted[0].score <= 0) return 0
-        val top = sorted[0].score
         var n = 0
-        for (x in sorted) { if (x.score != top) break; if (isCycleMember(x.card)) n += cycleWeight(x.card) }
+        while (n < sorted.size && sorted[n].score == sorted[0].score) n++
         return n
     }
 
-    /**
-     * Сколько очередей круга занимает карточка. Привычки «в своё время» все на ОДНОЙ карточке «Привычки» (свайп листает группы, а не привычки), но очередь у каждой своя:
-     * у слота привычек вес — число таких привычек ([Card.cycleN]), у остальных участников — один.
-     */
-    private fun cycleWeight(c: Card): Int = if (c.dyn == "habit") Math.max(1, c.cycleN) else 1
+    /** Сколько очередей круга равных во всём верхнем ярусе [sorted]: сумма очередей его карточек. Меньше двух — круга нет. */
+    private fun cycleSize(sorted: List<Scored>): Int {
+        val end = tierEnd(sorted)
+        var n = 0
+        for (i in 0 until end) n += turnsOf(sorted[i].card)
+        return n
+    }
 
-    /** Итог [cycleOrder]: порядок карточек и номер привычки (среди «в своё время»), чья очередь на карточке «Привычки». */
-    private class Cycled(val order: List<Scored>, val habitIdx: Int)
+    /** Итог [cycleOrder]: порядок карточек, номер очереди [turn], с какой очереди начинается каждая карточка яруса ([start]) и идёт ли круг ([circle]: очередей две и больше). */
+    private class Cycled(val order: List<Scored>, val turn: Int, val start: Map<String, Int>, val circle: Boolean)
 
     /**
-     * Круг равных. Привычки, у которых сейчас «их» время, и карточки календаря (событие, задача на сегодня) имеют один балл ([SCORE_CYCLE]) и равные права:
-     * если их очередей в верхней группе (с баллом, как у первой карточки) две и больше, наверху по очереди стоит каждая — по [CYCLE_MS] (60 с), номер очереди — `now / CYCLE_MS`.
-     * Все привычки «в своё время» — на одной карточке «Привычки» ([habitSlots]): у неё несколько очередей подряд, и меняется не карточка, а привычка на ней ([Cycled.habitIdx]).
-     * Остальные карточки верхней группы (например, обычная карточка с её временем) идут после участников круга; всё ниже по баллу не трогается.
-     * Привычка не в своё время балла круга не имеет и в круг не входит. Одна карточка в группе — ничего не меняется.
+     * Круг равных. Все карточки верхнего яруса (с баллом, как у первой; балл больше нуля) встают наверх по очереди, каждая на [CYCLE_MS] (60 с). Очередей у карточки столько,
+     * сколько у неё элементов с верхним баллом ([turnsOf]): у обычной карточки, календаря и задач — одна, у карточки-группы ([groups]) — несколько подряд, и тогда меняется не карточка,
+     * а её элемент ([faceOf]). Очередей всего [cycleSize]; номер очереди — `floorMod(now / CYCLE_MS, всего)`; карточка, в чей диапазон он попал, идёт наверх, остальные яруса
+     * сдвигаются циклически за ней; всё ниже яруса по баллу не трогается. Очередей меньше двух — порядок прежний.
      */
     private fun cycleOrder(sorted: List<Scored>, now: Long): Cycled {
-        if (cycleSize(sorted) < 2) return Cycled(sorted, 0)
-        val top = sorted[0].score
-        var end = 0
-        while (end < sorted.size && sorted[end].score == top) end++
+        val end = tierEnd(sorted)
+        if (end == 0) return Cycled(sorted, 0, emptyMap(), false)
         val tier = sorted.subList(0, end)
-        val members = tier.filter { isCycleMember(it.card) }
+        val start = HashMap<String, Int>()
         var total = 0
-        for (m in members) total += cycleWeight(m.card)
-        val turn = Math.floorMod(now / CYCLE_MS, total.toLong()).toInt() // номер очереди среди всех очередей круга (у слота привычек их несколько)
+        for (m in tier) { start[m.card.key] = total; total += turnsOf(m.card) }
+        if (total < 2) return Cycled(sorted, 0, start, false)
+        val turn = Math.floorMod(now / CYCLE_MS, total.toLong()).toInt()
         var shift = 0
-        var habitIdx = 0
-        var from = 0
-        for (i in members.indices) {
-            val w = cycleWeight(members[i].card)
-            if (turn >= from && turn < from + w) shift = i
-            if (members[i].card.dyn == "habit") habitIdx = (turn - from).coerceIn(0, w - 1) // до своей очереди и после неё слот показывает ближайшую крайнюю привычку
-            from += w
+        for (i in tier.indices) {
+            val from = start[tier[i].card.key] ?: 0
+            if (turn >= from && turn < from + turnsOf(tier[i].card)) shift = i
         }
         val out = ArrayList<Scored>(sorted.size)
-        out.addAll(members.drop(shift))
-        out.addAll(members.take(shift))
-        out.addAll(tier.filter { !isCycleMember(it.card) })
+        out.addAll(tier.drop(shift))
+        out.addAll(tier.take(shift))
         out.addAll(sorted.subList(end, sorted.size))
-        return Cycled(out, habitIdx)
+        return Cycled(out, turn, start, true)
     }
 
     /** Когда начнётся следующая очередь круга равных (граница минуты плюс секунда). */
@@ -422,41 +441,74 @@ object QrPriority {
         return if (best >= 0) best else 0
     }
 
-    /** Номер показанного будильника в [alarmCards] (когда ряд листали — [Snapshot.alarmIndex], иначе [defaultAlarmIndex]). */
-    fun alarmShownIndex(list: List<Card>, s: Snapshot): Int =
-        if (list.isEmpty()) 0 else if (s.alarmIndex < 0) defaultAlarmIndex(list, s) else s.alarmIndex.coerceIn(0, list.size - 1)
-
-    /** Ключ будильника, который сейчас показывает карточка «Будильники»; пусто — показывать нечего. */
-    fun nextAlarmKey(cfg: Cfg, s: Snapshot): String {
-        val list = alarmCards(cfg, s)
-        if (list.isEmpty()) return ""
-        return list[alarmShownIndex(list, s)].key
-    }
+    // ---------- карточки-группы ----------
 
     /**
-     * Балл карточки «Будильники» (один на весь ряд, чтобы листание не двигало карточку в стопке): звонит любой — [SCORE_ALARM_RINGING], иначе какой-то
-     * заведённый зазвонит в ближайшие [ALARM_SOON_MS] — [SCORE_ALARM_SOON]; null — сигналов нет.
+     * Карточка-группа: ОДНА карточка стопки ([key], «hab_0» / «alm_0»), у которой несколько элементов ([items]) и у каждого свой балл ([scores], с причиной в [reasons]).
+     * Балл карточки — балл самого важного элемента ([best]); очередей в круге равных у неё столько, сколько элементов с верхним баллом ([topIdx]). Какой элемент показан,
+     * решает [Result.faces] (очередь круга), а при нажатии у края — оболочка ([QrWidgets.groupViews]). Новая группа подключается тем, что сообщает эти списки в [groups].
      */
-    private fun alarmRowScore(cfg: Cfg, s: Snapshot): Pair<Int, String>? {
+    class Group(val key: String, val dyn: String, val items: List<Card>, val scores: List<Int>, val reasons: List<String>, val defaultIdx: Int) {
+        /** Балл лучшего элемента; 0 — ни один элемент не поднимает карточку. */
+        val best: Int get() { var b = 0; for (x in scores) if (x > b) b = x; return b }
+        /** Номера элементов с верхним баллом (в порядке ряда); пусто, если баллов нет. */
+        val topIdx: List<Int> get() { val b = best; return if (b <= 0) emptyList() else scores.indices.filter { scores[it] == b } }
+        /** Сколько очередей круга занимает карточка. */
+        val turns: Int get() = Math.max(1, topIdx.size)
+    }
+
+    /** Ключ карточки «Привычки» в стопке; префикс проверяется при нажатии у края карточки. */
+    const val HABIT_SLOT_PREFIX = "hab_"
+    const val HABIT_SLOT_KEY = HABIT_SLOT_PREFIX + "0"
+
+    /** Ключ карточки «Будильники» в стопке (одна на все будильники пользователя). */
+    const val ALARM_SLOT_PREFIX = "alm_"
+    const val ALARM_SLOT_KEY = ALARM_SLOT_PREFIX + "0"
+
+    /** Ключ карточки-группы? Один список на все виды: оболочка и [check] различают по нему слот и обычную карточку. */
+    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY
+
+    private fun isGroup(c: Card): Boolean = isGroupKey(c.key)
+
+    /** Все карточки-группы виджета с их элементами и баллами (пустые группы — нет карточки). Единственное место, где перечислены виды групп. */
+    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(alarmGroup(cfg, s), habitGroup(cfg, s))
+
+    /** Карточка группы в стопке: лицо элемента по умолчанию, [Card.cycleN] — очередей круга, [Card.gscore] / [Card.greason] — балл и причина. */
+    private fun slotOf(g: Group): Card {
+        val b = g.items[g.defaultIdx.coerceIn(0, g.items.size - 1)]
+        val tops = g.topIdx
+        return Card(g.key, b.code, b.title, emptyList(), emptySet(), emptySet(), "none", b.color, g.dyn, 0L, habit = g.dyn == "habit",
+            cycleN = g.turns, gscore = g.best, greason = if (tops.isEmpty()) "" else g.reasons[tops[0]])
+    }
+
+    /** Будильники: элемент — один будильник (серия: первый звонок и повторы). Звонит сейчас — [SCORE_ALARM_RINGING]; ближайший звонок серии через [ALARM_SOON_MS] или раньше — [SCORE_ALARM_SOON]; иначе 0. */
+    private fun alarmGroup(cfg: Cfg, s: Snapshot): Group? {
         val list = alarmCards(cfg, s)
         if (list.isEmpty()) return null
-        if (list.any { it.alarmId in s.ringingAlarmIds }) return Pair(SCORE_ALARM_RINGING, "Звонит будильник")
-        var soonest = Long.MAX_VALUE
+        val scores = ArrayList<Int>()
+        val reasons = ArrayList<String>()
         for (c in list) {
-            val d = (s.alarms[c.alarmId] ?: continue) - s.now
-            if (d in 0..ALARM_SOON_MS && d < soonest) soonest = d
+            val d = (s.alarms[c.alarmId] ?: Long.MAX_VALUE) - s.now
+            if (c.alarmId in s.ringingAlarmIds) { scores.add(SCORE_ALARM_RINGING); reasons.add("Звонит будильник") }
+            else if (d in 0..ALARM_SOON_MS) { scores.add(SCORE_ALARM_SOON); reasons.add("Будильник " + inMinutes(d)) }
+            else { scores.add(0); reasons.add("") }
         }
-        return if (soonest == Long.MAX_VALUE) null else Pair(SCORE_ALARM_SOON, "Будильник " + inMinutes(soonest))
+        return Group(ALARM_SLOT_KEY, "alarm", list, scores, reasons, defaultAlarmIndex(list, s))
+    }
+
+    /** Привычки: элемент — одна не отмеченная сегодня привычка ([habitList]); «в своё время» — [SCORE_CYCLE], остальные 0 (в круг не входят, доступны краем). */
+    private fun habitGroup(cfg: Cfg, s: Snapshot): Group? {
+        val list = habitList(cfg, s)
+        if (list.isEmpty()) return null
+        val scores = list.map { if (habitDue(it, s)) SCORE_CYCLE else 0 }
+        val reasons = list.map { if (habitDue(it, s)) "Сейчас её время" + windowName(it, s.cal) else "" }
+        return Group(HABIT_SLOT_KEY, "habit", list, scores, reasons, 0)
     }
 
     // ---------- карточка «Привычки» ----------
 
     /** Сколько привычек (кандидатов) принимает карточка «Привычки» (то же число — MAX_HABITS в widgets.js). */
     const val HABIT_NAV_MAX = 24
-
-    /** Ключ карточки «Привычки» в стопке: «hab_0» ([habitSlots]); префикс проверяется при нажатии у края карточки. */
-    const val HABIT_SLOT_PREFIX = "hab_"
-    const val HABIT_SLOT_KEY = HABIT_SLOT_PREFIX + "0"
 
     private fun dayKeyOf(cal: Calendar): Int = cal.get(Calendar.YEAR) * 10000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
 
@@ -473,51 +525,42 @@ object QrPriority {
         return open.filter { habitDue(it, s) } + open.filter { !habitDue(it, s) }
     }
 
-    /**
-     * Карточка «Привычки» в стопке — ВСЕГДА одна, сколько бы привычек ни было «в своё время»: свайп листает группы карточек, а привычки листаются только нажатием у края.
-     * Очередей в круге у неё столько, сколько привычек «в своё время» ([Card.cycleN]): они сменяют друг друга на этой же карточке раз в [CYCLE_MS] ([Result.habitIdx]).
-     * Нет таких — карточка с первой привычкой списка, в круг не входит. Все привычки отмечены — карточки нет совсем.
-     * Карточка копирует время суток и дни первой привычки списка (при «своих» привычках это та, чьё время сейчас), поэтому «по релевантности» поднимается как обычная карточка с временем.
-     * Какую привычку она показывает на самом деле (очередь круга или нажатие у края), решает оболочка ([QrWidgets.habitViews]).
-     */
-    fun habitSlots(cfg: Cfg, s: Snapshot): List<Card> {
-        val list = habitList(cfg, s)
-        if (list.isEmpty()) return emptyList()
-        val b = list[0]
-        val due = list.count { habitDue(it, s) }
-        return listOf(Card(HABIT_SLOT_KEY, b.code, b.title, emptyList(), b.times, b.days, "none", b.color, "habit", 0L, habit = true, cycleN = Math.max(1, due)))
-    }
-
-    /** Карточка «Привычки» встаёт после остальных карточек и перед карточками заряда. */
-    private fun withHabitSlots(shown: List<Card>, cfg: Cfg, s: Snapshot): List<Card> {
-        if (!cfg.habits) return shown
-        val slots = habitSlots(cfg, s)
-        if (slots.isEmpty()) return shown
-        val at = shown.indexOfFirst { isBattery(it.key) }
+    /** Карточки-группы встают после остальных карточек и перед карточками заряда; «Будильники» — на месте первого из своих будильников в порядке пользователя. */
+    private fun withGroups(shown: List<Card>, gs: List<Group>, alarmAt: Int): List<Card> {
+        if (gs.isEmpty()) return shown
         val out = ArrayList<Card>(shown)
-        out.addAll(if (at < 0) out.size else at, slots)
+        for (g in gs) {
+            if (g.dyn == "alarm") { out.add(if (alarmAt in 0..out.size) alarmAt else out.size, slotOf(g)); continue }
+            val at = out.indexOfFirst { isBattery(it.key) }
+            out.add(if (at < 0) out.size else at, slotOf(g))
+        }
         return out
     }
 
-    /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]; будильник — [nextAlarmKey]. */
-    private fun dynShown(c: Card, nextEv: String, nextTask: String, nextAlarm: String): Boolean = when (c.dyn) {
+    /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]; будильник — только слот группы ([ALARM_SLOT_KEY]), сами будильники карточками не стоят. */
+    private fun dynShown(c: Card, nextEv: String, nextTask: String): Boolean = when (c.dyn) {
         "task" -> c.key == nextTask
         "event" -> c.key == nextEv
-        "alarm" -> c.key == nextAlarm
+        "alarm" -> isGroup(c)
         else -> true
     }
 
-    private fun isShown(c: Card, s: Snapshot, nextEv: String, nextTask: String, nextAlarm: String): Boolean =
+    private fun isShown(c: Card, s: Snapshot, nextEv: String, nextTask: String): Boolean =
         !((c.after == "hide" || c.habit) && c.key in s.hiddenKeys) &&
             !(c.dyn == "task" && c.tid.isNotEmpty() && c.tid in s.doneTaskIds) &&
-            dynShown(c, nextEv, nextTask, nextAlarm)
+            dynShown(c, nextEv, nextTask)
 
     /** Карточки, которые видны в стопке: в порядке «как собрал пользователь, перенесённые в конец — после них, по времени переноса». */
-    private fun visible(cfg: Cfg, s: Snapshot): List<Card> {
+    private fun visible(cfg: Cfg, s: Snapshot, gs: List<Group> = groups(cfg, s)): List<Card> {
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
-        val nextAlarm = nextAlarmKey(cfg, s)
-        val shown = withHabitSlots(cfg.cards.filter { isShown(it, s, nextEv, nextTask, nextAlarm) }, cfg, s)
+        val plain = ArrayList<Card>()
+        var alarmAt = -1
+        for (c in cfg.cards) {
+            if (c.dyn == "alarm") { if (alarmAt < 0) alarmAt = plain.size; continue } // будильники — элементы группы, место карточки — на месте первого
+            if (isShown(c, s, nextEv, nextTask)) plain.add(c)
+        }
+        val shown = withGroups(plain, gs, alarmAt)
         if (shown.none { it.after == "end" && s.movedAt.containsKey(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") (s.movedAt[it.value.key] ?: 0L) else 0L }.thenBy { it.index }
@@ -532,40 +575,42 @@ object QrPriority {
 
     // ---------- баллы ----------
 
-    /** Балл карточки и причина (для объяснения): максимум по сигналам, не сумма. */
-    private fun scoreOf(c: Card, s: Snapshot, rowTaskAt: Long = 0L, rowAlarm: Pair<Int, String>? = null): Pair<Int, String> {
+    /** Балл карточки и причина (для объяснения): максимум по сигналам, не сумма. У карточки-группы — балл самого важного элемента ([Card.gscore]). */
+    private fun scoreOf(c: Card, s: Snapshot, rowTaskAt: Long = 0L): Pair<Int, String> {
         var best = 0
         var why = ""
         fun cand(sc: Int, w: String) { if (sc > best) { best = sc; why = w } }
-        for (l in c.live) {
-            when (l.k) {
-                "workout" -> if (s.workoutActive) cand(SCORE_WORKOUT, "Идёт тренировка")
-                "pomodoro" -> if (s.pomodoroActive) cand(SCORE_POMODORO, "Идёт помодоро")
-                "timer" -> if (l.id.isNotEmpty() && l.id in s.activeTimerIds) cand(SCORE_TIMER, "Идёт таймер")
-                "stopwatch" -> if (s.stopwatchActive) cand(SCORE_STOPWATCH, "Идёт секундомер")
+        if (isGroup(c)) {
+            cand(c.gscore, c.greason)
+        } else {
+            for (l in c.live) {
+                when (l.k) {
+                    "workout" -> if (s.workoutActive) cand(SCORE_WORKOUT, "Идёт тренировка")
+                    "pomodoro" -> if (s.pomodoroActive) cand(SCORE_POMODORO, "Идёт помодоро")
+                    "timer" -> if (l.id.isNotEmpty() && l.id in s.activeTimerIds) cand(SCORE_TIMER, "Идёт таймер")
+                    "stopwatch" -> if (s.stopwatchActive) cand(SCORE_STOPWATCH, "Идёт секундомер")
+                }
             }
-        }
-        if (c.dyn == "alarm") {
-            rowAlarm?.let { cand(it.first, it.second) }
-        } else if (c.alarmId.isNotEmpty()) {
-            if (c.alarmId in s.ringingAlarmIds) cand(SCORE_ALARM_RINGING, "Звонит будильник")
-            else s.alarms[c.alarmId]?.let { at ->
-                val d = at - s.now
-                if (d in 0..ALARM_SOON_MS) cand(SCORE_ALARM_SOON, "Будильник " + inMinutes(d))
+            if (c.alarmId.isNotEmpty()) {
+                if (c.alarmId in s.ringingAlarmIds) cand(SCORE_ALARM_RINGING, "Звонит будильник")
+                else s.alarms[c.alarmId]?.let { at ->
+                    val d = at - s.now
+                    if (d in 0..ALARM_SOON_MS) cand(SCORE_ALARM_SOON, "Будильник " + inMinutes(d))
+                }
             }
+            if (c.dyn == "event") {
+                val d = c.at - s.now
+                if (d in 0..SOON_MS) cand(SCORE_EVENT_SOON, "Событие " + inMinutes(d))
+                cand(SCORE_CYCLE, "Календарь: по очереди с равными") // событие в окне — наравне с привычкой «в своё время» и другими карточками того же балла (круг равных)
+            }
+            if (c.dyn == "task") {
+                val at = if (rowTaskAt > 0L) rowTaskAt else c.at // по первой (самой срочной) задаче ряда
+                if (at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
+                else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
+            }
+            if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
+            if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
         }
-        if (c.dyn == "event") {
-            val d = c.at - s.now
-            if (d in 0..SOON_MS) cand(SCORE_EVENT_SOON, "Событие " + inMinutes(d))
-            cand(SCORE_CYCLE, "Календарь: по очереди с привычками") // событие в окне — наравне с привычкой «в своё время» (круг равных)
-        }
-        if (c.dyn == "task") {
-            val at = if (rowTaskAt > 0L) rowTaskAt else c.at // по первой (самой срочной) задаче ряда
-            if (at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
-            else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
-        }
-        if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
-        if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
         if (c.prio == "top") {
             best += PRIO_TOP_BONUS
             why = if (why.isEmpty()) "Приоритет «наверх»" else why + " · приоритет «наверх»"
@@ -650,10 +695,10 @@ object QrPriority {
         // 2. и 6. Нет скрытых, выполненных и вне окна; нет дублей; ничего не потеряно
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
-        val nextAlarm = nextAlarmKey(cfg, s)
-        for (c in main) if (!isShown(c, s, nextEv, nextTask, nextAlarm)) bad.add("2: лишняя карточка " + c.key)
+        for (c in main) if (!isShown(c, s, nextEv, nextTask)) bad.add("2: лишняя карточка " + c.key)
         if (keys.toSet().size != keys.size) bad.add("6: дубли ключей")
-        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask, nextAlarm) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
+        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
+        for (g in groups(cfg, s)) if (main.count { it.key == g.key } != 1) bad.add("6: у группы " + g.key + " не одна карточка") // группа — всегда одна карточка, сколько бы элементов ни было
 
         // 3. «В конец», перенесённые сегодня, — подряд в самом конце, в порядке переноса
         val movedIdx = main.indices.filter { movedToday(main[it], s) }
@@ -697,8 +742,8 @@ object QrPriority {
             val prev = result.cards.firstOrNull { it.card.key == s.lastTopKey && !movedToday(it.card, s) }
             val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && !isService(it.card.key) }
             if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
-                !(isCycleMember(prev.card) && isCycleMember(topS.card) && prev.score == topS.score) &&
-                !(prev.card.dyn == "task" && isCycleMember(topS.card)) &&
+                prev.score != topS.score && // равные баллы: верх меняет круг равных, гистерезис его не держит
+                !(prev.card.dyn == "task" && (topS.card.dyn == "event" || isGroup(topS.card))) &&
                 !(isRinging(topS.card, s) && !isRinging(prev.card, s))) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
 
             // 10. и 11. Ручной приоритет: «вниз» — балл не выше нуля, «наверх» — не ниже прибавки (баллы считаются, только когда в основной части две карточки и больше)

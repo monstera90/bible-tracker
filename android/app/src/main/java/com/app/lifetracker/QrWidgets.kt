@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.12 (15.11) — единая модель круга равных и карточек-групп (QrPriority 4.9): «Привычки» и «Будильники» — одна карточка-группа каждая (ключи «hab_0» / «alm_0»), элемент на ней выбирает круг равных ([QrPriority.Result.faces]) или нажатие у края (на [EVENT_RESET_MS], одинаково для всех групп — [GroupView], [groupViews], [groupNav]; хранится в [K_HABIDX]). Минутная смена элемента меняет только лицо карточки, адаптер стопки не пересоздаётся. Объяснение «Сейчас сверху» называет показанный элемент группы ([whyOf]).
 // Версия: 14.11 (15.11) — карточка «Привычки» в стопке одна (QrPriority 4.8): привычки «в своё время» сменяют друг друга на ней по кругу, а не лежат отдельными карточками; свайп листает группы, привычки листаются нажатием у края ([habitNav]). Выбор нажатием держится [EVENT_RESET_MS] (60 с) после последнего нажатия.
 // Версия: 14.10 (15.11) — круг равных ([QrPriority.cycleOrder]): привычки «в своё время» и календарь встают наверх по очереди, каждая на минуту; минутный обработчик [armCycle] перерисовывает виджет, пока экран включён. Страховка возврата стала точной: [GUARD_MS] = 60 с (было 75), проверка каждые [GUARD_TICK_MS] (15 с), а не раз в 75 с; при погашенном экране настройки виджетов не читаются.
 // Версия: 14.9 (15.11) — галочка «Показывать только мероприятия на сегодня и на завтра» (`eventsSoon`, под «Показывать события календаря», по умолчанию выключена): окно карточки события — сегодня и завтра вместо [QrPriority.DYN_DAYS] суток; нет событий в окне — карточки календаря в стопке нет ([QrPriority.eventCards]).
@@ -77,19 +78,20 @@ import java.util.UUID
  * Двойное нажатие в центре карточки задач отмечает показанную задачу выполненной ([completeTask], ждёт [ScanActivity.HABIT_DOUBLE_MS]); следующая задача занимает её место.
  * Среди этих карточек события всегда стоят перед задачами (событие важнее).
  *
- * Галочка «Показывать будильники» (`alarms` у виджета, `alm` — все будильники пользователя: ключ карточки, id и настройки будильника): одна карточка на все будильники,
- * показан один из них ([QrPriority.alarmCards] по времени суток). Нажатие у левого края — предыдущий, у правого — следующий (без зацикливания; номер хранит [alarmNav] в [K_ALIDX],
- * через [EVENT_RESET_MS] без нажатий ряд возвращается к главному будильнику: звонящему, иначе заведённому с ближайшим звонком — [QrPriority.defaultAlarmIndex]; точки внизу — [withEventDots]);
- * нажатие в центре заводит показанный будильник или выключает его ([toggleAlarm], показанный будильник при этом не меняется). Лицо — `<ключ>.png` / `<ключ>_on.png` («Заведён»), как у прежней карточки-будильника.
- * Балл карточки по релевантности считается по всем будильникам ряда: звонит любой — выше всего, зазвонит в ближайший час — «скоро». Карточка стоит после карточек задач и перед карточками заряда.
+ * Карточки-группы (привычки, будильники; в будущем другие — [QrPriority.groups]): каждая ВСЕГДА одна карточка в стопке, сколько бы у неё ни было элементов; свайп листает карточки, а элементы листаются нажатием
+ * у левого и правого края ([groupNav]: ВСЕ элементы группы, без зацикливания; точки внизу — [withEventDots]). У каждого элемента свой балл, балл карточки — балл лучшего; очередей в круге равных у неё столько,
+ * сколько элементов с верхним баллом. Что показать на карточке: (а) выбранный нажатием у края элемент, пока с последнего нажатия не прошло [EVENT_RESET_MS] (хранит [K_HABIDX]); (б) элемент по очереди круга
+ * ([QrPriority.Result.faces]), если карточка в верхнем ярусе; (в) элемент по умолчанию. Смена элемента — только перерисовка лица ([groupViews]), стопка не сбрасывается.
+ *
+ * Галочка «Показывать будильники» (`alarms` у виджета, `alm` — все будильники пользователя: ключ карточки, id и настройки будильника): группа «Будильники» ([QrPriority.ALARM_SLOT_KEY]), элемент — один будильник
+ * (серия: первый звонок и до четырёх повторов). Балл элемента: звонит сейчас — выше всего, ближайший звонок серии в ближайшие [QrPriority.ALARM_SOON_MS] — «скоро», иначе 0. Звонящие (а если таких нет — «скоро»)
+ * сменяют друг друга на карточке раз в минуту; по умолчанию показан звонящий, иначе заведённый с ближайшим звонком ([QrPriority.defaultAlarmIndex]). Нажатие в центре заводит показанный будильник или выключает его
+ * ([toggleAlarm], показанный будильник при этом не меняется — [holdAlarmRow]). Лицо — `<ключ>.png` / `<ключ>_on.png` («Заведён»). Карточка стоит на месте первого из своих будильников в порядке пользователя.
  *
  * Галочка «Отображать карточки привычек» (`habits` у виджета, `hab` — все привычки пользователя: ключ карточки, код, название, время суток и дни недели привычки в этом виджете,
- * `last` — последний отмеченный день): в стопке ВСЕГДА одна карточка привычек ([QrPriority.habitSlots]) — свайп листает группы карточек, а не привычки. Привычка, у которой сейчас «её» время ([QrPriority.habitDue]),
- * участвует в круге наравне с календарём (календарь → бег → чтение → календарь …, каждая наверху по минуте — [QrPriority.cycleOrder], только «по релевантности»), но очередь привычки — это очередь
- * на той же карточке: меняется её лицо, сама карточка стоит на месте ([QrPriority.Result.habitIdx], [habitViewsOf]); привычки не в своё время в круг не попадают. Если ни у одной привычки сейчас нет её времени, на карточке первая привычка.
- * Нажатие у левого края — предыдущая привычка, у правого — следующая (по ряду: сначала «в своё время», затем остальные; без зацикливания; выбор держит [habitNav] в [K_HABIDX]
- * [EVENT_RESET_MS], точки внизу — [withEventDots]); одно нажатие в центре открывает карту дней привычки, двойное — отмечает сегодня и убирает из стопки до полуночи
- * только эту привычку ([hideHabitToday]). Привычка, отмеченная в приложении, пропадает по `last`. Все привычки отмечены — карточки привычек в стопке нет совсем ([QrPriority.habitSlots]).
+ * `last` — последний отмеченный день): группа «Привычки» ([QrPriority.HABIT_SLOT_KEY]), элемент — одна не отмеченная сегодня привычка. Привычка, у которой сейчас «её» время ([QrPriority.habitDue]), имеет балл
+ * [QrPriority.SCORE_CYCLE], остальные 0 (в круг не входят, доступны краем; в ряду «в своё время» стоят впереди). Одно нажатие в центре открывает карту дней показанной привычки, двойное — отмечает сегодня
+ * и убирает из стопки до полуночи только эту привычку ([hideHabitToday]). Привычка, отмеченная в приложении, пропадает по `last`. Все привычки отмечены — карточки привычек в стопке нет совсем.
  *
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
  * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
@@ -139,8 +141,7 @@ object QrWidgets {
     private const val K_AEVSEQ = "alarmEvSeq"
     private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
-    private const val K_ALIDX = "alidx"         // id виджета конструктора → {i: номер будильника в ряду карточки будильников (0 — первый по времени), t: время последнего нажатия, мс}
-    private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ слота «hab_N»: {h: id выбранной привычки, t: время последнего нажатия, мс}}
+    private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ карточки-группы («hab_0», «alm_0»): {h: ключ выбранного элемента, t: время последнего нажатия, мс}}
     private const val AEV_MAX = 50
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
@@ -215,7 +216,7 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "")
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -636,8 +637,7 @@ object QrWidgets {
         if (cfg.moodAsk) at = Math.min(at, QrMood.nextChangeAt(now)) // 20:30 — «Как настроение?» появится, полночь — уйдёт
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
-        if (cfg.alarms) alarmResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для ряда будильников
-        if (cfg.habits) habitResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для слотов привычек
+        if (cfg.habits || cfg.alarms) groupResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для выбранных нажатием элементов карточек-групп (привычки, будильники)
         return at
     }
 
@@ -719,83 +719,51 @@ object QrWidgets {
         refreshAll(app)
     }
 
-    /** Номер будильника, выбранный нажатием у края карточки будильников (или нажатием в центре); нет нажатий за [EVENT_RESET_MS] — -1 (показан главный будильник). */
-    private fun alarmIndexOf(ctx: Context, cfgId: String, now: Long): Int {
-        val e = rowEntry(ctx, K_ALIDX, cfgId) ?: return -1
-        val t = e.optLong("t", 0L)
-        if (now - t >= EVENT_RESET_MS || now < t) return -1
-        return e.optInt("i", -1).let { if (it < 0) -1 else it }
-    }
+    /**
+     * Нажатие у края карточки «Будильники» в виджете [widgetId]: листает будильники так же, как привычки ([groupNav]; ScanActivity по-прежнему шлёт `alnav`).
+     */
+    fun alarmNav(ctx: Context, widgetId: Int, dir: Int) = groupNav(ctx, widgetId, QrPriority.ALARM_SLOT_KEY, dir)
 
-    /** Когда пролистанный ряд будильников вернётся к главному; null — ряд и так на главном. */
-    private fun alarmResetAt(ctx: Context, cfgId: String, now: Long): Long? {
-        if (alarmIndexOf(ctx, cfgId, now) < 0) return null
-        return (rowEntry(ctx, K_ALIDX, cfgId)?.optLong("t", 0L) ?: return null) + EVENT_RESET_MS + 500L
-    }
+    // ---------- карточки-группы («Привычки», «Будильники») ----------
 
-    /** (номер показанного будильника, сколько будильников в ряду) для виджета [cfg]; в ряду меньше двух будильников листать нечего. */
-    fun alarmPos(ctx: Context, cfg: Cfg): Pair<Int, Int> {
-        val s = snapshot(ctx, cfg)
-        val list = QrPriority.alarmCards(cfg, s)
-        return Pair(QrPriority.alarmShownIndex(list, s), list.size)
-    }
+    /** Что показывает карточка-группа: сам элемент [card] и его номер [index] в ряду из [total] элементов (по ним рисуются точки внизу). */
+    class GroupView(val card: Card, val index: Int, val total: Int)
 
     /**
-     * Нажатие у края карточки будильников в виджете [widgetId] ([dir] = -1 — предыдущий будильник, 1 — следующий). Ряд не зациклен: у первого и последнего будильника нажатие ничего не меняет.
-     * Стопка не сбрасывается — перерисовывается только карточка будильников ([refreshAll] без возврата наверх).
+     * Ключ карточки-группы → элемент, который она показывает. Приоритет: (а) элемент, выбранный нажатием у края, пока с последнего нажатия не прошло [EVENT_RESET_MS]
+     * (и пока он есть в ряду: отмеченная привычка из ряда пропадает); (б) элемент по очереди круга равных, если карточка в верхнем ярусе ([QrPriority.Result.faces]);
+     * (в) элемент по умолчанию ([QrPriority.Group.defaultIdx]). Без «релевантности» круга нет: выбор краем или элемент по умолчанию.
      */
-    fun alarmNav(ctx: Context, widgetId: Int, dir: Int) {
-        if (dir != -1 && dir != 1) return
-        val app = ctx.applicationContext
-        val cfg = cfgFor(app, widgetId) ?: return
-        if (!cfg.alarms) return
-        val pos = alarmPos(app, cfg)
-        val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
-        if (pos.second == 0 || to == pos.first) return
-        saveRowIndex(app, K_ALIDX, cfg.id, to)
-        refreshAll(app)
-    }
-
-    // ---------- карточка «Привычки» ----------
-
-    /** Что показывает слот карточки «Привычки»: сама привычка [card] и её номер [index] в ряду из [total] привычек. */
-    class HabitView(val card: Card, val index: Int, val total: Int)
-
-    /**
-     * (ряд привычек, что показывает карточка «Привычки»). Карточка показывает привычку, выбранную нажатием у края (не дольше [EVENT_RESET_MS] после последнего нажатия
-     * и пока она не отмечена), иначе — ту, чья очередь в круге равных сейчас ([QrPriority.Result.habitIdx]); без «релевантности» круга нет — первая из ряда («в своё время» стоят впереди).
-     */
-    private fun habitViewsOf(ctx: Context, cfg: Cfg, s: QrPriority.Snapshot): Pair<List<Card>, Map<String, HabitView>> {
-        val list = QrPriority.habitList(cfg, s)
-        val out = HashMap<String, HabitView>()
-        if (list.isEmpty()) return Pair(list, out)
+    private fun groupViewsOf(ctx: Context, cfg: Cfg, s: QrPriority.Snapshot, res: QrPriority.Result = QrPriority.build(cfg, s)): Map<String, GroupView> {
+        val out = HashMap<String, GroupView>()
+        val gs = QrPriority.groups(cfg, s)
+        if (gs.isEmpty()) return out
         val over = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfg.id) }
-        val turn = if (cfg.relevance) QrPriority.build(cfg, s).habitIdx else 0
-        for (slot in QrPriority.habitSlots(cfg, s)) {
-            var idx = turn
-            val e = over?.optJSONObject(slot.key)
+        for (g in gs) {
+            var idx = res.faces[g.key] ?: g.defaultIdx
+            val e = over?.optJSONObject(g.key)
             if (e != null) {
                 val t = e.optLong("t", 0L)
                 if (s.now >= t && s.now - t < EVENT_RESET_MS) {
-                    val i = list.indexOfFirst { it.key == e.optString("h", "") }
+                    val i = g.items.indexOfFirst { it.key == e.optString("h", "") }
                     if (i >= 0) idx = i
                 }
             }
-            idx = idx.coerceIn(0, list.size - 1)
-            out[slot.key] = HabitView(list[idx], idx, list.size)
+            idx = idx.coerceIn(0, g.items.size - 1)
+            out[g.key] = GroupView(g.items[idx], idx, g.items.size)
         }
-        return Pair(list, out)
+        return out
     }
 
-    /** Ключ слота → привычка, которую он показывает (пусто, если у виджета нет галочки или все привычки отмечены). */
-    fun habitViews(ctx: Context, cfg: Cfg): Map<String, HabitView> {
-        if (!cfg.habits) return emptyMap()
+    /** Ключ карточки-группы → элемент, который она показывает (пусто, если групп нет: нет галочек или нет элементов). */
+    fun groupViews(ctx: Context, cfg: Cfg): Map<String, GroupView> {
+        if (!cfg.habits && !cfg.alarms) return emptyMap()
         val app = ctx.applicationContext
-        return habitViewsOf(app, cfg, snapshot(app, cfg)).second
+        return groupViewsOf(app, cfg, snapshot(app, cfg))
     }
 
-    /** Когда выбранные нажатием привычки вернутся к привычкам «по умолчанию»; null — ничего не выбрано. */
-    private fun habitResetAt(ctx: Context, cfgId: String, now: Long): Long? {
+    /** Когда выбранные нажатием элементы групп вернутся к тем, что решает круг равных; null — ничего не выбрано. */
+    private fun groupResetAt(ctx: Context, cfgId: String, now: Long): Long? {
         val per = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfgId) } ?: return null
         var at = Long.MAX_VALUE
         val ks = per.keys()
@@ -806,29 +774,38 @@ object QrWidgets {
         return if (at == Long.MAX_VALUE) null else at
     }
 
-    /**
-     * Нажатие у края слота [slotKey] карточки «Привычки» в виджете [widgetId] ([dir] = -1 — предыдущая привычка, 1 — следующая). Ряд не зациклен: у первой и последней
-     * привычки нажатие ничего не меняет. Выбор запоминается за слотом на [EVENT_RESET_MS]; стопка не сбрасывается — перерисовывается только лицо слота.
-     */
-    fun habitNav(ctx: Context, widgetId: Int, slotKey: String, dir: Int) {
-        if (dir != -1 && dir != 1) return
-        if (!slotKey.startsWith(QrPriority.HABIT_SLOT_PREFIX) || !KEY_RE.matches(slotKey)) return
-        val app = ctx.applicationContext
-        val cfg = cfgFor(app, widgetId) ?: return
-        if (!cfg.habits) return
-        val st = habitViewsOf(app, cfg, snapshot(app, cfg))
-        val view = st.second[slotKey] ?: return
-        val to = (view.index + dir).coerceIn(0, Math.max(0, st.first.size - 1))
-        if (to == view.index) return
+    /** Запоминает выбранный элемент [itemKey] карточки-группы [slotKey] виджета [cfgId] на [EVENT_RESET_MS]. */
+    private fun saveGroupPick(app: Context, cfgId: String, slotKey: String, itemKey: String) {
         synchronized(LOCK) {
             val all = jmap(app, K_HABIDX)
-            val per = all.optJSONObject(cfg.id) ?: JSONObject()
-            per.put(slotKey, JSONObject().put("h", st.first[to].key).put("t", System.currentTimeMillis()))
-            all.put(cfg.id, per)
+            val per = all.optJSONObject(cfgId) ?: JSONObject()
+            per.put(slotKey, JSONObject().put("h", itemKey).put("t", System.currentTimeMillis()))
+            all.put(cfgId, per)
             prefs(app).edit().putString(K_HABIDX, all.toString()).apply()
         }
+    }
+
+    /**
+     * Нажатие у края карточки-группы [slotKey] в виджете [widgetId] ([dir] = -1 — предыдущий элемент, 1 — следующий). Листаются ВСЕ элементы группы, а не только верхнего яруса.
+     * Ряд не зациклен: у первого и последнего элемента нажатие ничего не меняет. Выбор держится [EVENT_RESET_MS] после последнего нажатия, затем снова решает круг равных;
+     * стопка не сбрасывается — перерисовывается только лицо карточки.
+     */
+    fun groupNav(ctx: Context, widgetId: Int, slotKey: String, dir: Int) {
+        if (dir != -1 && dir != 1) return
+        if (!QrPriority.isGroupKey(slotKey) || !KEY_RE.matches(slotKey)) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        val s = snapshot(app, cfg)
+        val g = QrPriority.groups(cfg, s).firstOrNull { it.key == slotKey } ?: return
+        val view = groupViewsOf(app, cfg, s)[slotKey] ?: return
+        val to = (view.index + dir).coerceIn(0, Math.max(0, g.items.size - 1))
+        if (to == view.index) return
+        saveGroupPick(app, cfg.id, slotKey, g.items[to].key)
         refreshAll(app)
     }
+
+    /** Нажатие у края карточки «Привычки» (ScanActivity шлёт `habnav` с ключом карточки; так же приходит и нажатие у края «Будильников»): см. [groupNav]. */
+    fun habitNav(ctx: Context, widgetId: Int, slotKey: String, dir: Int) = groupNav(ctx, widgetId, slotKey, dir)
 
     /** Копия лица карточки события с рядом точек внизу: сколько событий в ряду и какое показано (светлее). Событие одно — картинка без изменений. */
     fun withEventDots(src: Bitmap, index: Int, total: Int): Bitmap {
@@ -952,15 +929,14 @@ object QrWidgets {
     }
 
     /**
-     * Нажатие в центре карточки будильников: будильник заведён/выключен, а «главный» будильник ряда ([QrPriority.defaultAlarmIndex]) от этого меняется —
-     * чтобы карточка не перескочила на другой будильник, номер нажатого запоминается как выбранный (на [EVENT_RESET_MS], как после нажатия у края).
+     * Нажатие в центре карточки будильников: будильник заведён/выключен, а то, какой элемент группы «главный» ([QrPriority.defaultAlarmIndex]) и чья очередь в круге, от этого меняется —
+     * чтобы карточка не перескочила на другой будильник, нажатый запоминается как выбранный (на [EVENT_RESET_MS], как после нажатия у края).
      */
     private fun holdAlarmRow(app: Context, cardKey: String) {
         for (cfg in configs(app)) {
             if (!cfg.alarms) continue
             val list = QrPriority.alarmCards(cfg, snapshot(app, cfg))
-            val i = list.indexOfFirst { it.key == cardKey }
-            if (i >= 0) saveRowIndex(app, K_ALIDX, cfg.id, i)
+            if (list.any { it.key == cardKey }) saveGroupPick(app, cfg.id, QrPriority.ALARM_SLOT_KEY, cardKey)
         }
     }
 
@@ -1064,7 +1040,6 @@ object QrWidgets {
             moodPending = moodPending(ctx, cfg),
             eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0,
             taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0,
-            alarmIndex = if (cfg.alarms) alarmIndexOf(ctx, cfg.id, now) else -1,
             alarmRowRinging = cfg.cards.any { it.dyn == "alarm" && it.alarmId in ringing }
         )
     }
@@ -1074,7 +1049,7 @@ object QrWidgets {
         val s = snapshot(ctx, cfg)
         val res = QrPriority.build(cfg, s)
         if (cfg.relevance && res.mainTopKey != s.lastTopKey) rememberTop(ctx, cfg.id, res.mainTopKey)
-        rememberWhy(ctx, cfg.id, whyOf(res))
+        rememberWhy(ctx, cfg.id, whyOf(res, if (QrPriority.isGroupKey(res.topKey)) groupViewsOf(ctx, cfg, s, res) else emptyMap()))
         if ((ctx.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             try {
                 for (v in QrPriority.check(res, cfg, s)) Log.e("QrPriority", cfg.id + ": " + v)
@@ -1095,8 +1070,14 @@ object QrWidgets {
         }
     }
 
-    private fun whyOf(res: QrPriority.Result): JSONObject =
-        JSONObject().put("key", res.topKey).put("title", res.topTitle).put("reason", res.topReason)
+    /** `{key, title, reason}` верхней карточки. У карточки-группы — заголовок элемента, который она реально показывает: по очереди круга ([QrPriority.Result.topTitle]) или выбранного нажатием у края ([views]). */
+    private fun whyOf(res: QrPriority.Result, views: Map<String, GroupView> = emptyMap()): JSONObject {
+        var title = res.topTitle
+        var reason = res.topReason
+        val v = views[res.topKey]
+        if (v != null && v.card.title != title) { title = v.card.title; reason = "Выбрано нажатием у края карточки" }
+        return JSONObject().put("key", res.topKey).put("title", title).put("reason", reason)
+    }
 
     /** Запоминает, какая карточка сейчас наверху виджета и почему (пишет только при изменении: расчёт идёт при каждой перерисовке). */
     private fun rememberWhy(ctx: Context, cfgId: String, why: JSONObject) {
@@ -1442,7 +1423,7 @@ object QrWidgets {
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
-            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
+            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits || cfg.alarms)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -1464,7 +1445,7 @@ object QrWidgets {
     }
 
     /**
-     * Круг равных ([QrPriority.cycleOrder]): раз в минуту наверху другая карточка, поэтому, пока у какого-нибудь виджета «по релевантности» в верхней группе две карточки
+     * Круг равных ([QrPriority.build]): раз в минуту наверху другая карточка (или другой элемент карточки-группы), поэтому, пока у какого-нибудь виджета «по релевантности» в верхнем ярусе две очереди
      * и больше ([QrPriority.Result.cycleAt]), ставим обработчик на начало следующей минуты: экран включён — перерисовка ([refreshAll] перестроит стопку и снова
      * взведёт обработчик), выключен — ничего не рисуем и ждём следующей минуты (будильник ради круга не нужен: см. [QrPriority.Result.cycleAt]).
      */
