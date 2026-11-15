@@ -1,6 +1,6 @@
 /* ===========================================================================
    itemcards.js
-   Версия: 48.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
+   Версия: 49.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
    Версия: 47.4 (14.11) — «Конструктор виджетов»: привычки убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Отображать карточки привычек» все привычки отдаёт `widgetHabits`, у лица привычки появилось поле `last` (последний отмеченный день, ГГГГ-ММ-ДД). Откат: itemcards.js 47.3.
    Версия: 47.3 (14.11) — карта привычки (и схема заметок «Сегодня») открывается прокрученной в самый низ, к сегодняшней неделе, всегда: `scrollMapToBottom` повторяет прокрутку, пока лента не получила размер (раньше одна попытка в следующем кадре — при открытии из виджета или сразу после смены вкладки она срабатывала до раскладки, и карта оставалась наверху).
    Версия: 47.2 (14.11) — подсказки палитры `colorPaletteHtml` для карточек «Как тренировка?» (`wgrpe`) и «Как настроение?» (`wgmood`) в форме виджета.
@@ -952,6 +952,19 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
 
   var REMIND_BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"></path><path d="M10 20.5a2 2 0 0 0 4 0"></path></svg>';
   function remindShort(ts){ var d = new Date(ts); return pad2(d.getDate()) + "." + pad2(d.getMonth() + 1) + " " + pad2(d.getHours()) + ":" + pad2(d.getMinutes()); }
+  // Лицо карточки-будильника — то же, что у карточки «Будильники» в виджете (widgets.js: drawDynFace / DYN): колокольчик, надпись «Заведён» / «Не заведён»,
+  // название и крупное время. Числа — доли ширины карточки ×100 (viewBox 100×102 = тело карточки), как у DYN в widgets.js.
+  var ALARM_FACE = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.1, titleFs: 0.108, timeFs: 0.27 };
+  var ALARM_BELL_PATHS = '<path d="M10 5a2 2 0 1 1 4 0a7 7 0 0 1 4 6v3a4 4 0 0 0 2 3h-16a4 4 0 0 0 2 -3v-3a7 7 0 0 1 4 -6"/><path d="M9 17v1a3 3 0 0 0 6 0v-1"/>';
+  function alarmFaceHtml(c){
+    var F = ALARM_FACE, u = F.unit * 100, title = String(c.title || "Будильник"), tw = title.length * F.titleFs * 100 * 0.56;
+    var h = '<svg class="item-card-alarm-svg" viewBox="0 0 100 102" aria-hidden="true">';
+    h += '<g transform="translate(' + (50 - 12 * u).toFixed(2) + ' ' + (F.iconTop * 100 - 2 * u).toFixed(2) + ') scale(' + u.toFixed(4) + ')" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ALARM_BELL_PATHS + '</g>';
+    h += '<text class="item-card-alarm-label" data-alarm-id="' + escapeHtml(runId(c)) + '" x="50" y="' + (F.labelBase * 100).toFixed(1) + '" font-size="' + (F.labelFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">Не заведён</text>';
+    h += '<text x="50" y="' + (F.titleBase * 100).toFixed(1) + '" font-size="' + (F.titleFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700"' + (tw > 86 ? ' textLength="86" lengthAdjust="spacingAndGlyphs"' : '') + ' font-family="\'Palatino Linotype\',Georgia,serif">' + escapeHtml(title) + '</text>';
+    h += '<text x="50" y="' + (F.timeBase * 100).toFixed(1) + '" font-size="' + (F.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + escapeHtml(alarmClock(c)) + '</text>';
+    return h + '</svg>';
+  }
   function cardFrontHtml(c){
     var icon = iconSvg(c.icon);
     if(c.type === "timer"){
@@ -961,13 +974,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
           '<button type="button" class="item-card-stop-btn" title="Остановить таймер">Стоп</button>' +
         '</div>';
     }
-    if(c.type === "alarm"){ // время будильника, ниже — «заведён…» или повтор; кнопки как у таймера
-      return '<div class="item-card-title"></div>' +
-        '<div class="item-card-time">' + escapeHtml(alarmClock(c)) + '</div>' +
-        '<div class="item-card-date item-card-alarm-state" data-alarm-id="' + escapeHtml(runId(c)) + '"></div>' +
-        '<div class="item-card-timer-btns">' +
-          '<button type="button" class="item-card-stop-btn" title="Выключить будильник">Выкл.</button>' +
-        '</div>';
+    if(c.type === "alarm"){ // лицо как у карточки «Будильники» в виджете; тап заводит и выключает (onCardTap); название в svg, скрытый .item-card-title нужен коду, что подставляет название
+      return '<div class="item-card-title" style="display:none;"></div>' + alarmFaceHtml(c);
     }
     if(c.type === "weather"){ // значок погоды и название города
       return '<div class="item-card-icon">' + iconSvg(c.icon || "weather") + '</div>' +
@@ -1510,6 +1518,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   function onCardTap(c){
     if(c.type === "habit"){ openHabitMap(c.id); return; } // привычка: карта дней (отметка — нажатием на день); скан кода по-прежнему отмечает сегодня
+    if(c.type === "alarm" && alarmSupported()){ // будильник: тап заводит, повторный — выключает (как нажатие в виджете); лицо меняет надпись «Не заведён» ↔ «Заведён»
+      refreshAlarms();
+      if(alarmInfo(runId(c))) stopAlarmForCard(c);
+      else { notifyWidgetFired(c); startAlarmForCard(c); }
+      return;
+    }
     notifyWidgetFired(c);
     if(isSingletonCard(c)){ runSingletonCard(c); return; }
     if(c.type === "timer" || c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
@@ -2319,15 +2333,11 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     return ev ? "повтор " + ev + " мин × " + alarmTimes(c) : "";
   }
   function syncAlarmsView(){
-    var nodes = document.querySelectorAll(".item-card-alarm-state[data-alarm-id]");
+    var nodes = document.querySelectorAll(".item-card-alarm-label[data-alarm-id]");
     if(!nodes.length) return;
     refreshAlarms();
-    var byId = {}, k;
-    loadCards().forEach(function(c){ if(c.type === "alarm") byId[runId(c)] = c; });
-    for(k in virtualCards){ if(virtualCards.hasOwnProperty(k) && virtualCards[k].type === "alarm") byId[k] = virtualCards[k]; }
     for(var i = 0; i < nodes.length; i++){
-      var c = byId[nodes[i].getAttribute("data-alarm-id")];
-      if(c) nodes[i].textContent = alarmStateText(c);
+      nodes[i].textContent = alarmInfo(nodes[i].getAttribute("data-alarm-id")) ? "Заведён" : "Не заведён"; // запись в оболочке есть, пока не отзвонил последний повтор
     }
   }
   // заводит будильник карточки; возвращает момент первого звонка (мс) или 0 (нечем завести / ошибка)

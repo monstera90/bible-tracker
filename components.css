@@ -1,6 +1,6 @@
 /* ===========================================================================
    components.css
-   Версия: 26.2 (15.11) — `.item-card-qr-btn` (кнопка «Показать QR-код» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 26.1.
+   Версия: 26.3 (15.11) — `.item-card-qr-btn` (кнопка «Показать QR-код» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 26.1.
    Версия: 26.1 (12.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
@@ -4270,8 +4270,9 @@ body::after{
 }
 /* карточка квадратная: нижняя полоса оставляется только там, где внизу есть кнопки (часы-напоминание у предмета; «Стоп»/«Выкл.» у таймера и будильника) */
 .item-card-item .item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.22); }
-.item-card-timer .item-card-front,
-.item-card-alarm .item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.27); }
+.item-card-timer .item-card-front{ padding-bottom:calc(var(--item-card-w, 112px) * 0.27); }
+.item-card-alarm .item-card-front{ padding:0; } /* лицо будильника — svg на всю карточку, как у карточки в виджете */
+.item-card-alarm-svg{ display:block; width:100%; height:100%; max-width:none; }
 .item-card-front > *{ flex:0 0 auto; max-width:100%; box-sizing:border-box; } /* строки лица не сжимаются (иначе вторая строка названия обрезалась) */
 .item-card-back{ background:transparent; padding:0; } /* оборот — та же заливка, что у лица (у самой карточки); QR лежит на своей светлой подложке */
 .item-card-qr{
