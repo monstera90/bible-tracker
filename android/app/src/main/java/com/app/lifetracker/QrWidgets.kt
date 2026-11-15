@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.11 (15.11) — круг равных убран (минутный обработчик armCycle, [QrPriority.Result.cycleAt]): порядок стопки при равных баллах постоянный — календарь, следом привычки «в своё время», затем задачи ([QrPriority.tieRank]); страховка возврата не ждёт круга.
 // Версия: 14.10 (15.11) — круг равных ([QrPriority.cycleOrder]): привычки «в своё время» и календарь встают наверх по очереди, каждая на минуту; минутный обработчик [armCycle] перерисовывает виджет, пока экран включён. Страховка возврата стала точной: [GUARD_MS] = 60 с (было 75), проверка каждые [GUARD_TICK_MS] (15 с), а не раз в 75 с; при погашенном экране настройки виджетов не читаются.
 // Версия: 14.9 (15.11) — галочка «Показывать только мероприятия на сегодня и на завтра» (`eventsSoon`, под «Показывать события календаря», по умолчанию выключена): окно карточки события — сегодня и завтра вместо [QrPriority.DYN_DAYS] суток; нет событий в окне — карточки календаря в стопке нет ([QrPriority.eventCards]).
 // Версия: 14.8 (15.11) — убран вертикальный столбец белых кружков слева/справа от виджета (индикатор положения в стопке `qr_dots`): больше не рисуется и не показывается при смахивании и слайд-шоу.
@@ -83,8 +84,8 @@ import java.util.UUID
  * Балл карточки по релевантности считается по всем будильникам ряда: звонит любой — выше всего, зазвонит в ближайший час — «скоро». Карточка стоит после карточек задач и перед карточками заряда.
  *
  * Галочка «Отображать карточки привычек» (`habits` у виджета, `hab` — все привычки пользователя: ключ карточки, код, название, время суток и дни недели привычки в этом виджете,
- * `last` — последний отмеченный день): привычка, у которой сейчас «её» время ([QrPriority.habitDue]), встаёт в стопку своей карточкой и участвует в круге наравне с календарём
- * (календарь → бег → чтение → календарь …, каждая карточка наверху по минуте — [QrPriority.cycleOrder], только «по релевантности»); привычки не в своё время в круг не попадают. Если ни у одной привычки сейчас нет её времени, в стопке один слот с первой привычкой.
+ * `last` — последний отмеченный день): привычка, у которой сейчас «её» время ([QrPriority.habitDue]), встаёт в стопку своей карточкой и стоит в стопке сразу за календарём
+ * (календарь → бег → чтение → задачи, постоянный порядок — [QrPriority.tieRank], только «по релевантности»); привычка не в своё время баллов не имеет и стоит ниже задач. Если ни у одной привычки сейчас нет её времени, в стопке один слот с первой привычкой.
  * Нажатие у левого края — предыдущая привычка, у правого — следующая (по ряду: сначала «в своё время», затем остальные; без зацикливания; выбор держит [habitNav] в [K_HABIDX]
  * [EVENT_RESET_MS], точки внизу — [withEventDots]); одно нажатие в центре открывает карту дней привычки, двойное — отмечает сегодня и убирает из стопки до полуночи
  * только эту привычку ([hideHabitToday]). Привычка, отмеченная в приложении, пропадает по `last`. Все привычки отмечены — карточки привычек в стопке нет совсем ([QrPriority.habitSlots]).
@@ -204,7 +205,6 @@ object QrWidgets {
 
     @Volatile private var guardOn = false
     private val guardToken = Any()
-    private val cycleToken = Any()
 
     /** Версия адаптера стопки у виджета (extra `rev` в intent службы): смена версии заставляет систему создать адаптер заново, с пустым кэшем карточек. */
     private val adapterRev = HashMap<Int, Int>()
@@ -1453,37 +1453,10 @@ object QrWidgets {
         tickAt = Math.min(tickAt, dynAt)
         if (tickAt != Long.MAX_VALUE) setAlarm(app, tickAt, tickPi(app, true)!!)
         else tickPi(app, false)?.let { am(app).cancel(it); it.cancel() }
-        armCycle(app, ids)
         if (anyBattery) {
             QrBattery.register(app)
             if (force || batteryPi(app, false) == null) setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
         } else batteryPi(app, false)?.let { am(app).cancel(it); it.cancel() }
-    }
-
-    /**
-     * Круг равных ([QrPriority.cycleOrder]): раз в минуту наверху другая карточка, поэтому, пока у какого-нибудь виджета «по релевантности» в верхней группе две карточки
-     * и больше ([QrPriority.Result.cycleAt]), ставим обработчик на начало следующей минуты: экран включён — перерисовка ([refreshAll] перестроит стопку и снова
-     * взведёт обработчик), выключен — ничего не рисуем и ждём следующей минуты (будильник ради круга не нужен: см. [QrPriority.Result.cycleAt]).
-     */
-    private fun armCycle(app: Context, ids: IntArray) {
-        var at = Long.MAX_VALUE
-        for (id in ids) {
-            val cfg = cfgFor(app, id) ?: continue
-            if (!cfg.relevance) continue
-            at = Math.min(at, plan(app, cfg).cycleAt)
-        }
-        main.removeCallbacksAndMessages(cycleToken)
-        if (at == Long.MAX_VALUE) return
-        val delay = Math.max(1_000L, at - System.currentTimeMillis())
-        main.postAtTime({
-            try {
-                val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-                if (screenOn(pm)) refreshAll(app)
-                else armCycle(app, AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java)))
-            } catch (e: Exception) {
-                Log.e("QrCycle", "cycle: " + e)
-            }
-        }, cycleToken, SystemClock.uptimeMillis() + delay)
     }
 
     // ---------- карточка заряда ----------
@@ -1659,8 +1632,6 @@ object QrWidgets {
                 if (pending) continue
                 val placed = synchronized(placedAt) { placedAt[id] ?: 0L }
                 if (SystemClock.uptimeMillis() - placed < GUARD_MS) continue
-                val cyc = plan(app, cfg).cycleAt // круг равных сам вот-вот выставит наверх следующую карточку (перерисует виджет): второго возврата не нужно
-                if (cyc != Long.MAX_VALUE && cyc - System.currentTimeMillis() < 2 * GUARD_TICK_MS) continue
                 try {
                     Log.d("QrReturn", "guard id=" + id)
                     returnToTop(app, id)

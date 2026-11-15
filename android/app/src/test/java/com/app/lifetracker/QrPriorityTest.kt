@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.3 (15.11) — круг равных заменён постоянным порядком при равном балле (tie_*): календарь → привычки → задачи → будильники → остальные → заряд.
 // Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
 // Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
 // Версия: 4.0 (14.11) — будильник «скоро» за 30 минут, а не за час; будильник «скоро» перебивает событие (alarmSoon_beatsEventSoon_*, alarmRow_soonBeatsEvent_*).
@@ -159,7 +160,7 @@ class QrPriorityTest {
         val r = run(cfg(cards, true), snap(c, lastTop = "t1"))
         assertEquals(listOf("e", "t1", "q"), keys(r)) // задачи — одна карточка (первая по времени)
         assertEquals("e", r.anchorKey)
-        assertEquals(QrPriority.SCORE_CYCLE, scoreOf(r, "e")) // событие вне часа — в круге равных, выше любой задачи
+        assertEquals(QrPriority.SCORE_CAL_HABIT, scoreOf(r, "e")) // событие вне часа — с баллом календаря и привычки, выше любой задачи
     }
 
     @Test fun anchor_isFirstDyn_whenNoRecommended() {
@@ -168,7 +169,7 @@ class QrPriorityTest {
         val cards = listOf(card("e", dyn = "event", at = now + 3_600_000L), card("q"))
         val r = run(cfg(cards, true), snap(c))
         assertEquals("e", r.anchorKey)
-        assertEquals("e", r.topKey) // событие в окне — в круге равных (балл SCORE_CYCLE), выше карточки без сигналов
+        assertEquals("e", r.topKey) // событие в окне — балл SCORE_CAL_HABIT, выше карточки без сигналов
         assertEquals("", run(cfg(cards, false), snap(c)).anchorKey) // без «релевантности» якоря нет
     }
 
@@ -323,7 +324,7 @@ class QrPriorityTest {
         val now = cal(12).timeInMillis
         val cards = listOf(card("t", dyn = "task", at = now + 24 * hour, tid = "T"), card("q"), card("e", dyn = "event", at = now + 2 * hour))
         val r = run(cfg(cards, true), snap(cal(12)))
-        assertEquals(listOf("e", "t", "q"), keys(r)) // событие в окне стоит в круге равных (выше «q» без сигналов); задача на завтра — без сигнала, как «q»
+        assertEquals(listOf("e", "t", "q"), keys(r)) // событие в окне выше «q» без сигналов; задача на завтра — без сигнала, как «q»
     }
 
     @Test fun reasons_scheduledWindow() {
@@ -798,70 +799,129 @@ class QrPriorityTest {
         assertEquals(listOf("hab_0", "hab_1"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8)))))
     }
 
-    // ---------- круг равных: привычки «в своё время» и календарь ----------
+    // ---------- равный балл: постоянный порядок (календарь → привычки → задачи → будильники → остальные → заряд) ----------
 
-    private fun cfgCycle(habits: List<Card>, cards: List<Card>) =
+    private fun cfgTie(habits: List<Card>, cards: List<Card>) =
         Cfg(id = "w", name = "w", rotate = false, rotateMin = 1, relevance = true, cards = cards, habits = true, habitCards = habits)
 
-    @Test fun cycle_twoDueHabitsAndCalendar_eachOnTopForAMinute_thirdHabitNever() {
+    @Test fun tie_calendarThenHabits_thenTask_orderIsFixedAndDoesNotRotate() {
         val ev = card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)
         val hs = listOf(hab("run", setOf("e")), hab("read", setOf("e")), hab("morning", setOf("m")))
-        val cf = cfgCycle(hs, listOf(card("q"), ev))
-        val tops = (0..5).map { run(cf, snap(cal(18, it))).topKey }
-        assertEquals(setOf("e", "hab_0", "hab_1"), tops.toSet()) // «утренняя» привычка в круг не входит: слотов только по привычкам «в своё время»
-        for (i in 1 until tops.size) assertTrue(tops[i] != tops[i - 1]) // каждую минуту — следующая карточка
-        assertEquals(tops[0], tops[3]) // круг из трёх: через три минуты — снова та же
-        for (m in 0..2) assertEquals(SCORE, run(cf, snap(cal(18, m))).cards[0].score)
+        val cf = cfgTie(hs, listOf(card("q"), card("t", dyn = "task", at = cal(18).timeInMillis - hour, tid = "T"), ev))
+        // порядок один и тот же в любую минуту: время суток в нём не участвует
+        for (m in 0..5) {
+            val r = run(cf, snap(cal(18, m)))
+            assertEquals(listOf("e", "hab_0", "hab_1", "t", "q"), keys(r)) // «утренняя» привычка не в своё время: слота под неё нет
+            assertEquals("e", r.topKey)
+            assertEquals(SCORE, scoreOf(r, "e"))
+            assertEquals(SCORE, scoreOf(r, "hab_0"))
+            assertEquals(SCORE, scoreOf(r, "hab_1"))
+        }
     }
 
-    @Test fun cycle_noCalendar_habitsTakeTurns_oneHabitStaysOnTop() {
-        val two = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
-        val tops = (0..3).map { run(two, snap(cal(18, it))).topKey }
-        assertEquals(setOf("hab_0", "hab_1"), tops.toSet())
-        assertTrue(tops[0] != tops[1])
-        val one = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("m"))), listOf(card("q")))
-        for (m in 0..3) assertEquals("hab_0", run(one, snap(cal(18, m))).topKey) // привычка одна — наверху всегда
-    }
-
-    @Test fun cycle_previousTopDoesNotHoldHysteresis() {
-        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
-        val a = run(cf, snap(cal(18, 0))).topKey
-        val b = run(cf, snap(cal(18, 1), lastTop = a))
-        assertTrue(b.topKey != a)
-        assertEquals(b.topKey, b.mainTopKey)
-    }
-
-    @Test fun cycle_urgentBeatsCircle_andCycleAtIsNextMinute() {
+    @Test fun tie_noCalendar_habitsTakeItsPlace_thenTasks() {
         val c = cal(18, 0)
-        val now = c.timeInMillis
-        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 20 * min)))
+        val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("t", dyn = "task", at = c.timeInMillis + hour, tid = "T")))
         val r = run(cf, snap(c))
-        assertEquals("e", r.topKey) // событие через 20 минут (750) выше круга равных (500): круга нет
-        assertEquals(Long.MAX_VALUE, r.cycleAt)
-        val calm = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
-        val r2 = run(calm, snap(c))
-        assertEquals(now + 60_000L + 1_000L, r2.cycleAt)
-        assertEquals(cal(23, 0).timeInMillis + 5_000L, r2.nextChangeAt) // будильник ради круга не ставится: ближайшее — граница окон времени суток
+        assertEquals(listOf("hab_0", "hab_1", "t", "q"), keys(r))
+        assertEquals("hab_0", r.topKey)
+        assertEquals("hab_0", r.anchorKey)
     }
 
-    @Test fun cycle_tasksAreBelowCalendarAndHabits_andOutsideTheCircle() {
+    @Test fun tie_listedOrderOfCardsDoesNotMatter_calendarStillBeforeHabit() {
+        val c = cal(18, 0)
+        val ev = card("e", dyn = "event", at = c.timeInMillis + 5 * hour)
+        val hs = listOf(hab("run", setOf("e")))
+        val a = run(cfgTie(hs, listOf(ev, card("q"))), snap(c))
+        val b = run(cfgTie(hs, listOf(card("q"), ev)), snap(c))
+        assertEquals(listOf("e", "hab_0", "q"), keys(a))
+        assertEquals(keys(a), keys(b))
+        assertEquals("e", a.topKey)
+    }
+
+    @Test fun tie_previousTopHabit_doesNotHoldAgainstCalendar() {
+        val c = cal(18, 0)
+        val cf = cfgTie(listOf(hab("run", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = c.timeInMillis + 5 * hour)))
+        // наверху была привычка (календаря не было), событие вошло в окно с тем же баллом: календарь встаёт выше, равный балл не удерживает прежний верх
+        val r = run(cf, snap(c, lastTop = "hab_0"))
+        assertEquals("e", r.topKey)
+        assertEquals(listOf("e", "hab_0", "q"), keys(r))
+        assertEquals("e", r.mainTopKey)
+    }
+
+    @Test fun tie_urgentBeatsCalendarAndHabits() {
         val c = cal(18, 0)
         val now = c.timeInMillis
-        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 5 * hour),
-            card("t", dyn = "task", at = now - hour, tid = "T")))
-        val tops = (0..5).map { run(cf, snap(cal(18, it))).topKey }
-        assertEquals(setOf("e", "hab_0", "hab_1"), tops.toSet()) // задача (даже просроченная) наверх в круге не встаёт
-        val last = run(cf, snap(c)).cards.map { it.card.key }
-        assertEquals("t", last[3]) // после трёх участников круга
-        assertTrue(QrPriority.SCORE_TASK_OVERDUE < QrPriority.SCORE_CYCLE && QrPriority.SCORE_TASK_TODAY < QrPriority.SCORE_CYCLE)
+        val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 20 * min)))
+        val r = run(cf, snap(c))
+        assertEquals("e", r.topKey) // событие через 20 минут (750) выше привычек (500)
+        assertEquals(listOf("e", "hab_0", "hab_1", "q"), keys(r))
+        assertEquals(cal(23, 0).timeInMillis + 5_000L, run(cfgTie(listOf(hab("run", setOf("e"))), listOf(card("q"))), snap(c)).nextChangeAt) // ради порядка пересчёта по таймеру нет: ближайшее — граница окон времени суток
     }
 
-    @Test fun cycle_scheduledHabitNotDue_isLowerThanCircle() {
-        val cf = cfgCycle(listOf(hab("run", setOf("m")), hab("read", setOf("m"))), listOf(card("q"), card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)))
+    @Test fun tie_tasksAreBelowCalendarAndHabits() {
+        val c = cal(18, 0)
+        val now = c.timeInMillis
+        val cf = cfgTie(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 5 * hour),
+            card("t", dyn = "task", at = now - hour, tid = "T")))
+        val r = run(cf, snap(c))
+        assertEquals(listOf("e", "hab_0", "hab_1", "t", "q"), keys(r)) // задача (даже просроченная) — после календаря и всех привычек
+        assertTrue(QrPriority.SCORE_TASK_OVERDUE < QrPriority.SCORE_CAL_HABIT && QrPriority.SCORE_TASK_TODAY < QrPriority.SCORE_CAL_HABIT)
+    }
+
+    @Test fun tie_scheduledHabitNotDue_isLowerThanCalendar() {
+        val cf = cfgTie(listOf(hab("run", setOf("m")), hab("read", setOf("m"))), listOf(card("q"), card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)))
         val r = run(cf, snap(cal(18, 0))) // вечер, обе привычки утренние: слот один, балла нет; наверху календарь
         assertEquals("e", r.topKey)
         assertEquals(0, scoreOf(r, "hab_0"))
     }
 
-    private val SCORE = QrPriority.SCORE_CYCLE
+    @Test fun tie_ordinaryCardWithItsTime_standsAfterCalendarAndHabits() {
+        val c = cal(18, 0)
+        val cf = cfgTie(listOf(hab("run", setOf("e"))), listOf(card("s", times = setOf("e")), card("e", dyn = "event", at = c.timeInMillis + 5 * hour)))
+        val r = run(cf, snap(c))
+        assertEquals(SCORE, scoreOf(r, "s"))
+        assertEquals(listOf("e", "hab_0", "s"), keys(r)) // у обычной карточки «её» время — тот же балл; она после календаря и привычек
+    }
+
+    @Test fun tie_zeroScoreGroup_habitThenTaskThenUserCards_batteryLast() {
+        val c = cal(13, 0) // обед: ни у кого нет сигнала
+        val now = c.timeInMillis
+        val cards = listOf(card(QrBattery.KEY), card("a"), card("t", dyn = "task", at = now + 30 * hour, tid = "T"), card("b"))
+        val cf = cfgTie(listOf(hab("run", setOf("m"))), cards)
+        val r = run(cf, snap(c, battery = 80))
+        assertEquals(listOf("hab_0", "t", "a", "b", QrBattery.KEY), keys(r))
+        assertEquals("", r.topKey) // ни у кого нет балла — выделенной верхней карточки нет
+    }
+
+    @Test fun tie_prioTop_firstAmongEquals() {
+        val c = cal(18, 0)
+        val cf = cfgTie(listOf(hab("run", setOf("e"))), listOf(card("s", times = setOf("e"), prio = "top"), card("e", dyn = "event", at = c.timeInMillis + 5 * hour)))
+        val r = run(cf, snap(c))
+        assertEquals("s", r.topKey) // «наверх» прибавляет 300: балл выше календаря — тут равенства нет
+        assertEquals(listOf("s", "e", "hab_0"), keys(r))
+        // при полном равенстве баллов ручное «наверх» ставит карточку впереди остальных равных
+        assertTrue(QrPriority.tieRank(card("x", prio = "top")) < QrPriority.tieRank(card("e", dyn = "event")))
+    }
+
+    @Test fun tie_rank_table() {
+        val r = { c: Card -> QrPriority.tieRank(c) }
+        assertTrue(r(card("e", dyn = "event")) < r(hab("h")))
+        assertTrue(r(hab("h")) < r(card("t", dyn = "task")))
+        assertTrue(r(card("t", dyn = "task")) < r(card("a", dyn = "alarm")))
+        assertTrue(r(card("a", dyn = "alarm")) < r(card("x")))
+        assertTrue(r(card("x")) < r(card(QrBattery.KEY)))
+    }
+
+    @Test fun check_catchesTieOrderViolation() {
+        val c = cal(18, 0)
+        val cf = cfgTie(listOf(hab("run", setOf("e"))), listOf(card("e", dyn = "event", at = c.timeInMillis + 5 * hour)))
+        val s = snap(c)
+        val good = QrPriority.build(cf, s)
+        assertEquals(listOf("e", "hab_0"), keys(good))
+        val swapped = QrPriority.Result(good.cards.reversed(), "", "", Long.MAX_VALUE)
+        assertTrue(QrPriority.check(swapped, cf, s).any { it.startsWith("12") })
+    }
+
+    private val SCORE = QrPriority.SCORE_CAL_HABIT
 }

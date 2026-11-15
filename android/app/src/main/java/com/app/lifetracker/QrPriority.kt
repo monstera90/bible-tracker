@@ -1,6 +1,7 @@
 package com.app.lifetracker
-// Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CYCLE]), в круг равных входят только слоты привычек и событие.
-// Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие) имеют один балл [SCORE_CYCLE] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
+// Версия: 4.8 (15.11) — круг равных (смена верха раз в минуту) убран: при равном балле порядок в стопке постоянный и физический, его задаёт [tieRank]: календарь → привычки «в своё время» → задачи → будильники → остальные карточки (в порядке пользователя) → заряд. Правило действует на все группы с равным баллом, а не только на верхнюю; [check] следит за ним (инвариант 12). Равный балл удержание прежней верхней карточки не вызывает — решает [tieRank]. [Result.cycleAt], [CYCLE_MS], [cycleOrder], [tidy] удалены.
+// Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CAL_HABIT]), в круг равных входят только слоты привычек и событие.
+// Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие) имеют один балл [SCORE_CAL_HABIT] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
 // Версия: 4.5 (14.11) — карточка «Привычки» (`Cfg.habits`, `Cfg.habitCards`): привычки, у которых сейчас «их» время, встают в стопку каждая своей карточкой-слотом («hab_0», «hab_1» …) и участвуют в круге наравне с календарём; нет таких — один слот, который листают у краёв; все отмечены — карточек нет ([habitList], [habitSlots]).
 // Версия: 4.4 (14.11) — служебные карточки «Как тренировка?» / «Как настроение?» берут цвет из [Cfg] (`rpeColor`, `moodColor`).
 // Версия: 4.3 (14.11) — вторая служебная карточка «Как настроение?» ([QrMood.KEY], [Snapshot.moodPending]): стоит над всеми обычными карточками, под «Как тренировка?»; [check] знает обе.
@@ -53,12 +54,11 @@ object QrPriority {
     /** «Её» время суток и день недели ([scheduledNow]). */
     const val SCORE_SCHEDULED = 500
     /**
-     * Круг равных: привычка, у которой сейчас её время, и карточки календаря (событие, задача на сегодня) имеют один и тот же балл и по очереди встают наверх
-     * ([cycleOrder]). Выше него — только срочное (идёт занятие, звонит или скоро зазвонит будильник, событие скоро, просроченная задача).
+     * Балл события календаря в окне и привычки «в своё время» — один и тот же ([SCORE_SCHEDULED]). Они стоят в стопке рядом, и порядок между ними постоянный:
+     * сначала календарь, следующим шагом привычки ([tieRank]). Выше — только срочное (идёт занятие, звонит или скоро зазвонит будильник, событие скоро).
+     * Задачи календаря ниже ([SCORE_TASK_OVERDUE], [SCORE_TASK_TODAY]).
      */
-    const val SCORE_CYCLE = SCORE_SCHEDULED
-    /** Сколько каждая карточка круга равных остаётся наверху. */
-    const val CYCLE_MS = 60_000L
+    const val SCORE_CAL_HABIT = SCORE_SCHEDULED
     /** Заряд телефона не выше [BATTERY_LOW_PERCENT] — только карточки заряда. */
     const val SCORE_BATTERY_LOW = 450
     const val BATTERY_LOW_PERCENT = 15
@@ -133,9 +133,7 @@ object QrPriority {
         /** Название верхней карточки ([topKey]); пусто, если наверху нет выделенной карточки. */
         val topTitle: String = "",
         /** Почему она наверху («Идёт тренировка», «Будильник через 25 мин», «Сейчас её время: утро»); пусто, если [topKey] пуст. */
-        val topReason: String = "",
-        /** Когда круг равных ([cycleOrder]) выставит наверх следующую карточку; [Long.MAX_VALUE] — круга нет (равных меньше двух). В [nextChangeAt] не входит (будильник каждую минуту при погашенном экране не нужен): оболочка ставит для него обработчик на время, пока экран включён ([QrWidgets]). */
-        val cycleAt: Long = Long.MAX_VALUE
+        val topReason: String = ""
     )
 
     // ---------- построение ----------
@@ -146,7 +144,6 @@ object QrPriority {
         val rowAlarm = alarmRowScore(cfg, s) // то же для карточки будильников: балл по всем будильникам ряда, а не по показанному
         val main = ArrayList<Scored>()
         var top = ""
-        var cyc = false
         if (!cfg.relevance || base.size < 2) {
             for (c in base) main.add(Scored(c, 0, ""))
         } else {
@@ -162,9 +159,8 @@ object QrPriority {
                     scored.add(Scored(c, sc.first, sc.second))
                 }
                 lift(scored)
-                // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
-                val sorted = ArrayList(cycleOrder(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })), s.now))
-                cyc = cycleSize(sorted) >= 2
+                // сортировка устойчивая: баллы по убыванию, при равных — [tieRank] (календарь → привычки → задачи → будильники → остальные → заряд), внутри одного ранга — порядок пользователя
+                val sorted = ArrayList(scored.sortedWith(compareByDescending<Scored> { it.score }.thenBy { tieRank(it.card) }))
                 if (sorted.first().score > 0) top = sorted.first().card.key
                 top = keepPrevTop(sorted, top, s)
                 main.addAll(sorted)
@@ -179,8 +175,7 @@ object QrPriority {
         val topKey = if (serviceKey.isNotEmpty()) serviceKey else top
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
         val topScored: Scored? = if (serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
-        val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "", cycleAt)
+        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "")
     }
 
     /**
@@ -189,7 +184,7 @@ object QrPriority {
      * на сегодня — новый виджет вставал на задаче, а не на календаре. Более высокие баллы события («скоро», приоритет «наверх») не трогаются.
      */
     private fun lift(scored: MutableList<Scored>) {
-        // Задачи ниже события и привычки «в своё время» по приоритету ([SCORE_TASK_OVERDUE], [SCORE_TASK_TODAY] < [SCORE_CYCLE]): поднимать событие над ними не нужно.
+        // Задачи ниже события и привычки «в своё время» по приоритету ([SCORE_TASK_OVERDUE], [SCORE_TASK_TODAY] < [SCORE_CAL_HABIT]): поднимать событие над ними не нужно.
     }
 
     /**
@@ -205,74 +200,33 @@ object QrPriority {
         val ps = sorted[idx].score
         val first = sorted[0].score
         if (ps <= 0 || first >= ps + HYSTERESIS) return top
-        if (ps == first && isCycleMember(sorted[idx].card) && isCycleMember(sorted[0].card)) return top
-        if (sorted[idx].card.dyn == "task" && isCycleMember(sorted[0].card)) return top // календарь и привычка выше задач: прежняя верхняя задача их не удерживает // круг равных: смена верха по очереди, гистерезис её не держит
+        if (ps == first) return top // равный балл — это не отрыв: порядок решает [tieRank] (календарь выше привычки, привычка выше остальных), прежний верх его не меняет
+        if (sorted[idx].card.dyn == "task" && isCalOrHabit(sorted[0].card)) return top // календарь и привычка выше задач: прежняя верхняя задача их не удерживает
         if (isRinging(sorted[0].card, s) && !isRinging(sorted[idx].card, s)) return top
         sorted.add(0, sorted.removeAt(idx))
         return prev
     }
 
     /**
-     * При равных баллах (после устойчивой сортировки — в порядке пользователя): места, занятые событиями и задачами календаря, переписываются
-     * «сначала события, потом задачи», карточки заряда — после остальных. Остальные карточки с равным баллом остаются где стояли.
+     * Порядок при равном балле — постоянный, не по времени и не по очереди: карточки стоят в стопке физически в этом порядке.
+     * Меньше — выше. Сначала ручной приоритет «наверх» (+0 / +10), затем род карточки: 0 — событие календаря, 1 — привычка («в своё время» — следом за календарём;
+     * нет календаря — привычка на его месте), 2 — задача, 3 — «Будильники», 4 — остальные карточки (внутри ранга порядок пользователя, сортировка устойчивая), 5 — заряд.
+     * Правило действует на любую группу равных баллов в стопке, не только на верхнюю.
      */
-    private fun tidy(sorted: List<Scored>): List<Scored> {
-        val out = ArrayList<Scored>(sorted.size)
-        var i = 0
-        while (i < sorted.size) {
-            var j = i
-            while (j < sorted.size && sorted[j].score == sorted[i].score) j++
-            val run = sorted.subList(i, j)
-            val dynSlots = run.indices.filter { isCal(run[it].card) }
-            val ordered = ArrayList(run)
-            if (dynSlots.size > 1) {
-                val dyn = dynSlots.map { run[it] }
-                val re = dyn.filter { it.card.dyn == "event" } + dyn.filter { it.card.dyn != "event" }
-                for (k in dynSlots.indices) ordered[dynSlots[k]] = re[k]
-            }
-            out.addAll(ordered.filter { !isBattery(it.card.key) })
-            out.addAll(ordered.filter { isBattery(it.card.key) })
-            i = j
+    fun tieRank(c: Card): Int {
+        val kind = when {
+            isBattery(c.key) -> 5
+            c.dyn == "event" -> 0
+            c.dyn == "habit" -> 1
+            c.dyn == "task" -> 2
+            c.dyn == "alarm" -> 3
+            else -> 4
         }
-        return out
+        return (if (c.prio == "top") 0 else 10) + kind
     }
 
-    /** Участник круга равных: слот привычки или карточка события календаря. Задачи в круг не входят: они ниже календаря и привычек по приоритету. */
-    private fun isCycleMember(c: Card): Boolean = c.dyn == "habit" || c.dyn == "event"
-
-    /** Сколько участников круга равных в верхней группе [sorted] (карточки с баллом, как у первой; балл должен быть больше нуля). */
-    private fun cycleSize(sorted: List<Scored>): Int {
-        if (sorted.isEmpty() || sorted[0].score <= 0) return 0
-        val top = sorted[0].score
-        var n = 0
-        for (x in sorted) { if (x.score != top) break; if (isCycleMember(x.card)) n++ }
-        return n
-    }
-
-    /**
-     * Круг равных. Привычки, у которых сейчас «их» время, и карточки календаря (событие, задача на сегодня) имеют один балл ([SCORE_CYCLE]) и равные права:
-     * если они в верхней группе (с баллом, как у первой карточки) вдвоём и больше, наверху по очереди стоит каждая — по [CYCLE_MS] (60 с), номер очереди — `now / CYCLE_MS`.
-     * Остальные карточки верхней группы (например, обычная карточка с её временем) идут после участников круга; всё ниже по баллу не трогается.
-     * Привычка не в своё время балла круга не имеет и в круг не входит. Одна карточка в группе — ничего не меняется.
-     */
-    private fun cycleOrder(sorted: List<Scored>, now: Long): List<Scored> {
-        if (cycleSize(sorted) < 2) return sorted
-        val top = sorted[0].score
-        var end = 0
-        while (end < sorted.size && sorted[end].score == top) end++
-        val tier = sorted.subList(0, end)
-        val members = tier.filter { isCycleMember(it.card) }
-        val shift = Math.floorMod(now / CYCLE_MS, members.size.toLong()).toInt()
-        val out = ArrayList<Scored>(sorted.size)
-        out.addAll(members.drop(shift))
-        out.addAll(members.take(shift))
-        out.addAll(tier.filter { !isCycleMember(it.card) })
-        out.addAll(sorted.subList(end, sorted.size))
-        return out
-    }
-
-    /** Когда начнётся следующая очередь круга равных (граница минуты плюс секунда). */
-    fun nextCycleAt(now: Long): Long = (now / CYCLE_MS + 1) * CYCLE_MS + 1_000L
+    /** Календарь (событие) или слот привычки: то, что стоит выше задач. */
+    private fun isCalOrHabit(c: Card): Boolean = c.dyn == "habit" || c.dyn == "event"
 
     /** Карточка события или задачи календаря (карточка «Будильники» тоже динамическая, но к календарю не относится). */
     private fun isCal(c: Card): Boolean = c.dyn == "event" || c.dyn == "task"
@@ -445,8 +399,8 @@ object QrPriority {
     }
 
     /**
-     * Карточки-слоты привычек в стопке. Слотов столько, сколько привычек «в своё время» (каждая своей карточкой — так они сменяют друг друга в круге наравне
-     * с календарём); нет таких — один слот с первой привычкой списка. Все привычки отмечены — слотов нет, карточки в стопке нет совсем.
+     * Карточки-слоты привычек в стопке. Слотов столько, сколько привычек «в своё время» (каждая своей карточкой: слоты стоят в стопке сразу за календарём
+     * в порядке привычек, [tieRank]); нет таких — один слот с первой привычкой списка. Все привычки отмечены — слотов нет, карточки в стопке нет совсем.
      * Слот копирует время суток и дни привычки, которую показывает по умолчанию, поэтому «по релевантности» он поднимается как обычная карточка с временем.
      * Какую привычку слот показывает на самом деле (пролистали нажатием у края), решает оболочка ([QrWidgets.habitViews]).
      */
@@ -535,7 +489,7 @@ object QrPriority {
         if (c.dyn == "event") {
             val d = c.at - s.now
             if (d in 0..SOON_MS) cand(SCORE_EVENT_SOON, "Событие " + inMinutes(d))
-            cand(SCORE_CYCLE, "Календарь: по очереди с привычками") // событие в окне — наравне с привычкой «в своё время» (круг равных)
+            cand(SCORE_CAL_HABIT, "Календарь") // событие в окне — балл как у привычки «в своё время»; при равенстве календарь выше ([tieRank])
         }
         if (c.dyn == "task") {
             val at = if (rowTaskAt > 0L) rowTaskAt else c.at // по первой (самой срочной) задаче ряда
@@ -647,8 +601,7 @@ object QrPriority {
         for (i in scored.indices) for (j in i + 1 until scored.size) {
             // исключение: удержанная устойчивостью верхняя карточка стоит первой, даже если рядом событие с тем же баллом
             val held = i == 0 && scored[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey
-            val inCycle = cfg.relevance && cycleSize(scored) >= 2 && scored[i].score == scored[0].score && scored[j].score == scored[0].score // круг равных ставит наверх по очереди любого
-            if (!held && !inCycle && scored[i].score == scored[j].score && scored[i].card.dyn == "task" && scored[j].card.dyn == "event") bad.add("4: задача выше события при равном балле")
+            if (!held && scored[i].score == scored[j].score && scored[i].card.dyn == "task" && scored[j].card.dyn == "event") bad.add("4: задача выше события при равном балле")
         }
 
         // 5. Без релевантности — порядок пользователя, topKey пуст (кроме служебных)
@@ -671,12 +624,17 @@ object QrPriority {
             val from = if (head.isNotEmpty() && head[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey) 1 else 0
             for (i in from + 1 until head.size) if (head[i].score > head[i - 1].score) bad.add("8: баллы не по убыванию у " + head[i].card.key)
 
+            // 12. При равном балле — порядок [tieRank] (календарь → привычки → задачи → будильники → остальные → заряд); удержанная верхняя карточка — вне счёта
+            for (i in from + 1 until head.size) {
+                if (head[i].score == head[i - 1].score && tieRank(head[i].card) < tieRank(head[i - 1].card)) bad.add("12: при равном балле нарушен порядок: " + head[i - 1].card.key + " выше " + head[i].card.key)
+            }
+
             // 9. Гистерезис: верхняя карточка сменилась только при отрыве минимум на HYSTERESIS, падении прежней до 0 или звонящем будильнике
             val prev = result.cards.firstOrNull { it.card.key == s.lastTopKey && !movedToday(it.card, s) }
             val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && !isService(it.card.key) }
             if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
-                !(isCycleMember(prev.card) && isCycleMember(topS.card) && prev.score == topS.score) &&
-                !(prev.card.dyn == "task" && isCycleMember(topS.card)) &&
+                prev.score != topS.score && // равный балл — не отрыв: порядок решает [tieRank]
+                !(prev.card.dyn == "task" && isCalOrHabit(topS.card)) &&
                 !(isRinging(topS.card, s) && !isRinging(prev.card, s))) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
 
             // 10. и 11. Ручной приоритет: «вниз» — балл не выше нуля, «наверх» — не ниже прибавки (баллы считаются, только когда в основной части две карточки и больше)
