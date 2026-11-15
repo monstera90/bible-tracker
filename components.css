@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.2 (15.11) — `.item-card-qr-btn` (кнопка «Показать QR-код» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 26.1.
    Версия: 26.1 (12.11)
    Версия: 16.5 (28.10) — удаление записи центра событий долгим нажатием: `#eventCenterList .event-row` без выделения текста, подсветка `.event-row-del`, плашка `.event-del-*`. Откат: components.css 16.4.
    Версия: 16.4 (27.10) — превью длинного комментария дня и кнопка «Открыть в редакторе» (`.year-day-note-preview`, `.year-day-note-open-btn`, `.year-day-note-hint`, `.hour-note-long*`). Откат: components.css 16.3.
@@ -4330,7 +4331,8 @@ body::after{
 .item-card .book-cover-actions{ grid-template-columns:repeat(2, 36px); z-index:2; }
 /* кнопка-глаз карточки: третья после «Изменить» и «Удалить»; при ширине карточки от 77px три кнопки в ряд не помещаются, поэтому она переносится во второй ряд сетки */
 .item-card .book-cover-actions .item-card-eye-btn,
-.item-card .book-cover-actions .item-card-fav-btn{
+.item-card .book-cover-actions .item-card-fav-btn,
+.item-card .book-cover-actions .item-card-qr-btn{
   visibility:hidden;
   display:inline-flex;
   align-items:center;
@@ -4344,10 +4346,12 @@ body::after{
   -webkit-tap-highlight-color:transparent;
 }
 .item-card .book-cover-actions .item-card-eye-btn.visible,
-.item-card .book-cover-actions .item-card-fav-btn.visible{ visibility:visible; }
+.item-card .book-cover-actions .item-card-fav-btn.visible,
+.item-card .book-cover-actions .item-card-qr-btn.visible{ visibility:visible; }
 @media (hover:hover) and (pointer:fine){
   .item-card .book-cover-actions .item-card-eye-btn:hover,
-  .item-card .book-cover-actions .item-card-fav-btn:hover{ background:rgba(0,0,0,.55); }
+  .item-card .book-cover-actions .item-card-fav-btn:hover,
+  .item-card .book-cover-actions .item-card-qr-btn:hover{ background:rgba(0,0,0,.55); }
 }
 .item-card.item-card-hidden{ opacity:.5; } /* скрытая карточка, когда показаны все, отличается от обычных */
 

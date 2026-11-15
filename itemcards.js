@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 48.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
    Версия: 47.4 (14.11) — «Конструктор виджетов»: привычки убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Отображать карточки привычек» все привычки отдаёт `widgetHabits`, у лица привычки появилось поле `last` (последний отмеченный день, ГГГГ-ММ-ДД). Откат: itemcards.js 47.3.
    Версия: 47.3 (14.11) — карта привычки (и схема заметок «Сегодня») открывается прокрученной в самый низ, к сегодняшней неделе, всегда: `scrollMapToBottom` повторяет прокрутку, пока лента не получила размер (раньше одна попытка в следующем кадре — при открытии из виджета или сразу после смены вкладки она срабатывала до раскладки, и карта оставалась наверху).
    Версия: 47.2 (14.11) — подсказки палитры `colorPaletteHtml` для карточек «Как тренировка?» (`wgrpe`) и «Как настроение?» (`wgmood`) в форме виджета.
@@ -60,7 +61,7 @@
    - сетка карточек 3:4 (было 2:3), число колонок считается от ширины карточки;
    - типы: «таймер», «предмет», «Сегодня» (бывшая «заметка с датой») и «Напоминалка»; формы создания/правки (таймер, предмет);
    - у каждой карточки личный id (8 знаков) и QR `lt://v1/card/<id>` на обороте
-     (двойной тап; QR строится лениво, библиотека vendor/qrcode.min.js);
+     (кнопка при удержании; QR строится лениво, библиотека vendor/qrcode.min.js);
    - долгий тап раскрывает кнопки «правка»/«удаление» (те же классы, что у обложек книг);
    - ползунок размера (0,7–2), нижний ряд кнопок;
    - QR заметок «Моего блокнота» (`lt://v1/note/<id>`) строит кнопка в редакторе заметок (mdeditor.js);
@@ -754,6 +755,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // «График отметок» привычки (кнопка при долгом нажатии на карточку-привычку): сетка дней, часть клеток закрашена
   var CHART_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="4.6" height="4.6" rx="1"></rect><rect x="9.7" y="3.5" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="15.9" y="3.5" width="4.6" height="4.6" rx="1"></rect><rect x="3.5" y="9.7" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="9.7" y="9.7" width="4.6" height="4.6" rx="1" fill="currentColor"></rect><rect x="15.9" y="9.7" width="4.6" height="4.6" rx="1"></rect><rect x="3.5" y="15.9" width="4.6" height="4.6" rx="1"></rect><rect x="9.7" y="15.9" width="4.6" height="4.6" rx="1"></rect><rect x="15.9" y="15.9" width="4.6" height="4.6" rx="1" fill="currentColor"></rect></svg>';
   var STAR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9-4.3-4.1 5.9-.8z"></path></svg>';
+  var QR_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"></rect><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"></rect><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"></rect><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM18 14h2.5M14 18v2.5"></path></svg>';
   var STAR_FILLED_ICON_SVG = STAR_ICON_SVG.replace('fill="none"', 'fill="currentColor"');
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
   var FILTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>';
@@ -1086,6 +1088,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
           '<button type="button" class="mdeditor-share-btn item-card-fav-btn' + (revealed ? " visible" : "") + '" title="' + (c.fav ? "В избранном (нажмите, чтобы убрать)" : "Добавить в избранное") + '">' + (c.fav ? STAR_FILLED_ICON_SVG : STAR_ICON_SVG) + '</button>' +
           // тап по карточке = «Пуск» (скан кода), поэтому правка формы — только этой кнопкой (появляется по долгому нажатию, тот же стиль, что у глаза)
           '<button type="button" class="mdeditor-share-btn item-card-edit-btn' + (revealed ? " visible" : "") + '" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
+          // QR-код на обороте: раньше открывался двойным тапом, теперь — этой кнопкой (у «Напоминания» кода нет)
+          (c.type !== "remind" ? '<button type="button" class="mdeditor-share-btn item-card-qr-btn' + (revealed ? " visible" : "") + '" title="Показать QR-код">' + QR_ICON_SVG + '</button>' : '') +
           // привычка: график отметок (карта дней) открывается отсюда — тап по карточке теперь отмечает день, других путей к графику нет
           // «Сегодня»: схема дней, когда написана заметка дня (openDatedNotesMap)
           ((c.type === "habit" || c.type === "datenote") ? '<button type="button" class="mdeditor-share-btn item-card-chart-btn' + (revealed ? " visible" : "") + '" title="' + (c.type === "habit" ? "График отметок" : "Схема заметок") + '">' + CHART_ICON_SVG + '</button>' : '') +
@@ -1321,7 +1325,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     for(var k in revealedIds){ if(revealedIds.hasOwnProperty(k)){ any = true; break; } }
     if(!any) return;
     revealedIds = {};
-    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-fav-btn.visible, #itemCardsGrid .item-card-edit-btn.visible, #itemCardsGrid .item-card-chart-btn.visible");
+    var btns = document.querySelectorAll("#itemCardsGrid .mdeditor-delete-btn.visible, #itemCardsGrid .item-card-eye-btn.visible, #itemCardsGrid .item-card-fav-btn.visible, #itemCardsGrid .item-card-edit-btn.visible, #itemCardsGrid .item-card-qr-btn.visible, #itemCardsGrid .item-card-chart-btn.visible");
     for(var i = 0; i < btns.length; i++) btns[i].classList.remove("visible");
   }
 
@@ -1407,9 +1411,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
 
   function bindGrid(grid){
-    var LONG_MS = 350, MOVE_PX = 10, DOUBLE_MS = 300;
+    var LONG_MS = 350, MOVE_PX = 10;
     var pressTimer = null, startXY = null, longFired = false;
-    var lastTapId = null, lastTapAt = 0, singleTimer = null;
     function clearPress(){ clearTimeout(pressTimer); pressTimer = null; }
     function startPress(cardNode, x, y, target){
       if(!cardNode) return;
@@ -1428,7 +1431,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
         longFired = true;
         clearAttention(cardNode.dataset.id);
         revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn, .item-card-chart-btn");
+        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn, .item-card-qr-btn, .item-card-chart-btn");
         for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
       }, LONG_MS);
     }
@@ -1473,6 +1476,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       }
       if(e.target.closest(".item-card-fav-btn")){ toggleFav(c); return; } // звезда: в избранное ↔ из избранного (кнопки остаются раскрытыми)
       if(e.target.closest(".item-card-edit-btn")){ hideRevealed(); openForm(c.type, c); return; }
+      if(e.target.closest(".item-card-qr-btn")){ hideRevealed(); if(flippedId && flippedId !== id) unflipAny(); flipCard(id, true); return; } // QR на обороте (бывший двойной тап); тап по обороту — назад
       if(e.target.closest(".item-card-chart-btn")){ hideRevealed(); if(c.type === "datenote") openDatedNotesMap(c.id); else openHabitMap(c.id); return; } // график отметок привычки / схема заметок «Сегодня»
       if(e.target.closest(".mdeditor-delete-btn")){
         openAppConfirmBar("Удалить карточку «" + (c.title || "без названия") + "»?" + (c.type === "remind" ? " Напоминание будет отменено." : " QR-код перестанет работать."), function(){
@@ -1485,18 +1489,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
       if(c.type === "remind"){ onCardTap(c); return; } // у «Напоминания» нет QR-кода: оборота нет, тап сразу открывает форму
-      var now = Date.now();
-      if(lastTapId === id && now - lastTapAt < DOUBLE_MS){
-        clearTimeout(singleTimer); lastTapId = null;
-        flipCard(id, true);
-        return;
-      }
-      lastTapId = id; lastTapAt = now;
-      clearTimeout(singleTimer);
-      singleTimer = setTimeout(function(){
-        lastTapId = null;
-        onCardTap(c);
-      }, DOUBLE_MS);
+      onCardTap(c); // двойного тапа больше нет: тап сразу запускает действие, QR — кнопкой при удержании
     });
     // тап мимо карточки: оборот возвращается, раскрытые кнопки прячутся
     grid.parentNode.addEventListener("click", function(e){
