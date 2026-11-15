@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.7 (14.11) — галочка «Отображать карточки привычек» (`habits`, время суток и дни недели каждой привычки в этом виджете — `habitCfg`, экран «Привычки» по нажатию на карточку в форме): привычки в оболочку уходят полем `hab`; привычки из списка выбора убраны, ранее выбранные переносятся на галочку (`migrateHabitCards`). Откат: widgets.js 6.6.
    Версия: 6.6 (14.11) — в описании заряда наушников указано, откуда он взят (`bt.src`: система, метаданные, вещание, команды гарнитуры, BLE).
    Версия: 6.5 (14.11) — палитры цвета в форме свёрнуты: справа от пункта квадрат выбранного цвета, нажатие открывает палитру, после выбора она сворачивается; палитры (`rpeColor`, `moodColor`, `icfColors5/6`) у «Спрашивать о тренировке» и «Спрашивать о настроении»; из описания «заряд (несколько устройств)» убран список парных Bluetooth-устройств.
    Версия: 6.4 (14.11) — «Сегодня, <день>» и «Как настроение?» того же размера, что на карточке события календаря (образец `moodFaceHtml`; в виджете — QrMood.kt).
@@ -18,8 +19,9 @@
    Галочки «Показывать задачи» (`tasks`, цвет `tasksColor`, палитра `icfColors3`) и «Показывать события календаря» (`events`, цвет `eventsColor`, палитра `icfColors4`): в стопку добавляются динамические карточки по данным календаря (`CalendarTab.widgetFeed` через `deps.getCalendarFeed`, `buildFeed`). Задачи: открытые задачи календаря на ближайшую неделю (`FEED_DAYS`) и просроченные — в оболочку уходят до `MAX_TASKS` кандидатов, а в стопке одна карточка задач, которую нажатием у левого/правого края листают по задачам (QrWidgets.kt `taskNav`); событие: ближайшее запланированное в пределах недели (в оболочку уходят `MAX_EVENTS` кандидатов, показывает первое будущее — решает QrWidgets.kt по текущему времени). Лицо — `drawDynFace` (размеры сняты с макета, доли ширины карточки — `DYN`), у каждой карточки до четырёх картинок: `<ключ>` («Сегодня»), `<ключ>_t` («Завтра»), `<ключ>_w` (день недели, если до даты два дня и больше) и `<ключ>_s`/`<ключ>_y`/`<ключ>_o` («Просрочено, сегодня» / «…, вчера» / «…, 1 января», только у задачи); какую показать — выбирает оболочка (так надпись меняется в полночь без приложения). Данные меняются → `feedChanged` (из my.js: запись состояния и возврат в приложение) сверяет `feedSig` и при отличии шлёт `syncNow`. Палитра общая с карточками QR-кодов (`itemcards.colorPalette`), цвет по умолчанию — как на макете (`TASK_COLOR`/`EVENT_COLOR`), последний выбранный — `widgetsDynColors_v1`.
    Галочка «Показывать будильники» (`alarms`): в стопку добавляется одна карточка со ВСЕМИ будильниками пользователя (карточки «Будильник» вкладки QR-кодов; `widgetAlarms` в itemcards.js; в оболочку уходят до `MAX_ALARMS` штук в поле `alm`: ключ карточки, id и настройки будильника, название). Нажатие у левого/правого края листает будильники так же, как события и задачи (QrWidgets.kt `alarmNav`), нажатие в центре заводит/выключает показанный будильник. Лицо каждого будильника — `alarmFace`, два состояния (`<id>` и `<id>_on`) шлются как прежде. Отдельно будильник в стопку больше не выбирается (из списка «Выберите карточку» убран); будильники, выбранные в виджете раньше, при первой отправке переносятся на галочку (`migrateAlarmCards`).
    Галочка «Спрашивать о настроении» (`moodAsk`): с 20:30, если сегодня не было ни одной отметки настроения, над всеми обычными карточками (под «Как тренировка?», выше календаря) стоит служебная карточка «Как настроение?» с восемью эмодзи-кнопками — её рисует оболочка (QrMood.kt), страница шлёт только флаг и сообщает время последней отметки (mood.js `syncWidgetMood`, мост ≥37). Нажатие на эмодзи сразу записывает настроение и убирает карточку.
-   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,rpeAsk,rpeColor,moodAsk,moodColor}]}), только на устройстве.
+   Данные: localStorage `qrWidgets_v1` ({n, ever, list:[{id,n,cards:[{cid,times,days,after,prio}],rotate,rotateMin,relevance,battery,batColor,batteryMulti,bat2Color,tasks,tasksColor,events,eventsColor,alarms,habits,habitCfg:{<id привычки>:{times,days}},rpeAsk,rpeColor,moodAsk,moodColor}]}), только на устройстве.
    Страница рисует лица карточек в PNG (canvas, `pngFor`) и шлёт их оболочке вместе с настройками (мост ≥31 `widgetsSync`).
+   Галочка «Отображать карточки привычек» (`habits`): в стопку добавляются карточки ВСЕХ привычек пользователя (карточки «Привычка» вкладки QR-кодов; `widgetHabits` в itemcards.js; в оболочку уходят до `MAX_HABITS` штук в поле `hab`: ключ карточки, код, название, время суток и дни недели привычки в этом виджете, `last` — последний отмеченный день). Привычка, у которой сейчас её время, встаёт в круг наравне с календарём и другими такими привычками (каждая своей карточкой); не в своё время — в круг не попадает, но листается нажатием у левого/правого края карточки (QrWidgets.kt `habitNav`). Одно нажатие открывает карту дней привычки, двойное отмечает её и убирает из стопки до полуночи; все привычки отмечены — карточки нет. Время суток и дни привычки задаются здесь, в форме виджета (`habitCfg`, экран «Привычки»), а не в самой привычке. Отдельно привычка в стопку больше не выбирается (из списка «Выберите карточку» убрана); привычки, выбранные в виджете раньше, при первой отправке переносятся на галочку вместе с их временем (`migrateHabitCards`).
    Точка входа: window.initWidgetsModule(deps) → window.WidgetsTab.{render, scheduleSync}.
    =========================================================================== */
 (function(){
@@ -36,6 +38,7 @@
   var EVENT_COLOR = "#317bf6"; // цвет карточки события по умолчанию (синий макета, чуть насыщеннее)
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // задач, между которыми листает единственная карточка задач (ближайшие по времени, просроченные первыми; то же число — QrPriority.TASK_NAV_MAX)
+  var MAX_HABITS = 24; // привычек, которые уходят оболочке для карточек привычек (то же число — QrPriority.HABIT_NAV_MAX)
   var MAX_ALARMS = 16; // будильников, между которыми листает карточка будильников (то же число — QrPriority.ALARM_NAV_MAX)
   var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
@@ -103,14 +106,31 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
         w.rpeColor = normHex(w.rpeColor) || RPE_COLOR; w.moodColor = normHex(w.moodColor) || RPE_COLOR; // служебные карточки: пусто — фиолетовый макета, как было до палитры
       });
       return o;
     }
+    // время суток и дни недели привычек этого виджета: {<id привычки>: {times:["m"|"d"|"e"], days:[1..7]}}; пустые записи не хранятся
+    function normHabitCfg(o){
+      var out = {};
+      if(o && typeof o === "object") Object.keys(o).forEach(function(cid){
+        var v = o[cid]; if(!v || typeof v !== "object") return;
+        var t = (Array.isArray(v.times) ? v.times : []).filter(function(k){ return k === "m" || k === "d" || k === "e"; });
+        var d = (Array.isArray(v.days) ? v.days : []).filter(function(n){ return n >= 1 && n <= 7; });
+        if(t.length || d.length) out[cid] = { times: t, days: d };
+      });
+      return out;
+    }
+    function habitCfgOf(w, cid){
+      if(!w.habitCfg || typeof w.habitCfg !== "object") w.habitCfg = {};
+      if(!w.habitCfg[cid]) w.habitCfg[cid] = { times: [], days: [] };
+      return w.habitCfg[cid];
+    }
+    function trimHabitCfg(w, cid){ var h = w.habitCfg && w.habitCfg[cid]; if(h && !h.times.length && !h.days.length) delete w.habitCfg[cid]; }
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
-    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.rpeAsk || w.moodAsk); }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.habits || w.rpeAsk || w.moodAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function normPrio(v){ return (v === "top" || v === "low") ? v : "normal"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
@@ -132,6 +152,29 @@
         data.list.forEach(function(w){
           var keep = w.cards.filter(function(c){ var f = ic.widgetFace(c.cid); return !(f && f.type === "alarm"); });
           if(keep.length !== w.cards.length){ w.cards = keep; w.alarms = true; changedAny = true; }
+        });
+      }catch(e){}
+      if(changedAny) save();
+    }
+    // Привычка в стопку по одной больше не выбирается: у виджетов, где она уже стоит среди карточек, она убирается, а вместо неё включается «Отображать карточки привычек»;
+    // время суток и дни, заданные у карточки-привычки, переходят в настройки привычки этого виджета (`habitCfg`)
+    function migrateHabitCards(){
+      var changedAny = false;
+      try{
+        var ic = cardsOf();
+        if(!ic || typeof ic.widgetFace !== "function") return;
+        data.list.forEach(function(w){
+          var keep = [];
+          w.cards.forEach(function(c){
+            var f = ic.widgetFace(c.cid);
+            if(f && f.type === "habit"){
+              if(!(w.habitCfg && w.habitCfg[c.cid]) && ((c.times && c.times.length) || (c.days && c.days.length))){
+                var hc = habitCfgOf(w, c.cid);
+                hc.times = (c.times || []).slice(); hc.days = (c.days || []).slice();
+              }
+            } else keep.push(c);
+          });
+          if(keep.length !== w.cards.length){ w.cards = keep; w.habits = true; changedAny = true; }
         });
       }catch(e){}
       if(changedAny) save();
@@ -314,6 +357,7 @@
     function addDays(ts, n){ var d = new Date(ts); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime(); } // календарные дни (переход на летнее время не сдвигает полночь)
     function hhmm(ts){ var d = new Date(ts), h = d.getHours(), m = d.getMinutes(); return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; }
     function usesAlarms(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].alarms) return true; return false; }
+    function usesHabits(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].habits) return true; return false; }
     function usesDyn(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].tasks || data.list[i].events) return true; return false; }
     // что нужно карточкам: {tasks:[{at,title}], events:[{at,title}]}; задачи — открытые на сегодня и просроченные, события — ещё не начавшиеся
     function buildFeed(){
@@ -385,12 +429,18 @@
       var b = bridge();
       if(!b) return Promise.resolve(false);
       migrateAlarmCards();
+      migrateHabitCards();
       var ic = cardsOf(), ids = {}, faces = {};
       data.list.forEach(function(w){ w.cards.forEach(function(c){ ids[c.cid] = 1; }); });
       var alarmRows = []; // все будильники пользователя для карточки «Будильники» (у кого в виджете включена галочка)
       if(usesAlarms()){
         try{ alarmRows = ic.widgetAlarms().filter(function(f){ return f.alarmSpec; }).slice(0, MAX_ALARMS); }catch(e){ alarmRows = []; }
         alarmRows.forEach(function(f){ ids[f.id] = 1; });
+      }
+      var habitRows = []; // все привычки пользователя для карточек привычек (у кого в виджете включена галочка)
+      if(usesHabits()){
+        try{ habitRows = ic.widgetHabits().slice(0, MAX_HABITS); }catch(e){ habitRows = []; }
+        habitRows.forEach(function(f){ ids[f.id] = 1; });
       }
       Object.keys(ids).forEach(function(id){ var f = ic.widgetFace(id); if(f) faces[id] = f; });
       var keys = Object.keys(faces);
@@ -409,7 +459,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -509,6 +559,8 @@
         ".wg-chip.on{background:var(--wood);color:#fff;}" +
         ".wg-chip small{opacity:.7;margin-left:4px;font-size:11px;}" +
         ".wg-sec{font-weight:700;margin:14px 2px 2px;color:var(--ink);}" +
+        ".wg-habit-dot{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:8px;vertical-align:-1px;border:1px solid rgba(0,0,0,.2);}" +
+        ".wg-habit{margin:0 0 10px;padding:0 0 4px;border-bottom:1px solid rgba(0,0,0,.08);}" +
         ".wg-btns{display:flex;flex-direction:column;margin-top:14px;}" +
         ".wg-btns .workbooks-run-btn{margin:0 0 10px;}" +
         ".wg-preview{display:flex;justify-content:center;margin:4px 0 10px;}" +
@@ -663,6 +715,14 @@
       var hex = cardsOf().paletteColor("");
       return alarmFaceHtml({ title: "Подъём", big: "07:00", color: hex, shade: cardsOf().cardShade(hex) }, "");
     }
+    // Карточка привычек в форме: лицо первой привычки пользователя (в виджете — все привычки: «в своё время» по кругу, остальные листаются у краёв), нет привычек — образец
+    function habitsFaceHtml(){
+      var list = [];
+      try{ list = cardsOf().widgetHabits(); }catch(e){ list = []; }
+      if(list.length) return faceHtml(list[0], "");
+      var hex = cardsOf().paletteColor("");
+      return faceHtml({ type: "habit", title: "Бег", color: hex, shade: cardsOf().cardShade(hex), svg: "", big: "", sub: "" }, "");
+    }
     function tasksFaceHtml(w){ return dynFaceHtml("task", dynHex(w, "task")); }
     function eventsFaceHtml(w){ return dynFaceHtml("event", dynHex(w, "event")); }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
@@ -673,6 +733,7 @@
       if(w.tasks) extra.push("задачи");
       if(w.events) extra.push("события");
       if(w.alarms) extra.push("будильники");
+      if(w.habits) extra.push("привычки");
       if(w.rpeAsk) extra.push("вопрос о тренировке");
       if(w.moodAsk) extra.push("вопрос о настроении");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
@@ -734,7 +795,7 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : (w.alarms ? cardsOf().paletteColor("") : "var(--gold)")))))) + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : (w.alarms ? cardsOf().paletteColor("") : (w.habits ? cardsOf().paletteColor("") : "var(--gold)"))))))) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
           '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
@@ -766,6 +827,7 @@
       if(w.tasks) html += '<div class="wg-slot" data-bat="1" id="wgTasksSlot">' + tasksFaceHtml(w) + '</div>'; // образец карточки задач (в виджете это одна карточка, которую листают по задачам)
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
       if(w.alarms) html += '<div class="wg-slot" data-bat="1" id="wgAlarmsSlot">' + alarmsFaceHtml() + '</div>'; // карточка будильников (в виджете одна на все будильники, листается у краёв)
+      if(w.habits) html += '<div class="wg-slot" data-habits="1" id="wgHabitsSlot">' + habitsFaceHtml() + '</div>'; // карточка привычек (нажатие — время суток и дни каждой привычки)
       if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml(w) + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
       if(w.moodAsk) html += '<div class="wg-slot" data-bat="1" id="wgMoodSlot">' + moodFaceHtml(w) + '</div>'; // образец «Как настроение?» (в виджете она стоит над всеми обычными карточками с 20:30, пока сегодня не отмечено настроение)
       html += '</div>';
@@ -790,6 +852,8 @@
       html += checkRow("wgEvents", w.events, "Показывать события календаря", ["icfColors4", "wgevents"], dynHex(w, "event"));
       if(w.events) html += palBlock(["icfColors4", "wgevents"]);
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgHabits"' + (w.habits ? ' checked' : '') + '>Отображать карточки привычек</label>';
+      if(w.habits) html += '<div class="wg-hint">Нажмите на карточку привычек выше, чтобы задать время суток и дни недели каждой привычки: привычка в своё время встаёт в круг наравне с календарём.</div>';
       html += checkRow("wgRpe", w.rpeAsk, "Спрашивать о тренировке", ["icfColors5", "wgrpe"], rpeHex(w));
       if(w.rpeAsk) html += palBlock(["icfColors5", "wgrpe"]);
       html += checkRow("wgMood", w.moodAsk, "Спрашивать о настроении", ["icfColors6", "wgmood"], moodHex(w));
@@ -811,6 +875,7 @@
       ["Показывать задачи", "Одна карточка с ближайшими невыполненными задачами из календаря: просроченные первыми, затем сегодняшние и на неделю вперёд. Нажатие у левого или правого края карточки листает задачи, двойное нажатие в центре отмечает показанную задачу выполненной, и на её место встаёт следующая. Если не отметить, вместо «Сегодня» будет «Просрочено». Через минуту без нажатий снова показывается первая задача. Нет галочки — карточки задач в стопке нет."],
       ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
       ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова показывает его. Нет галочки — карточки будильников в стопке нет."],
+      ["Отображать карточки привычек", "Карточки ваших привычек (карточки «Привычка» вкладки QR-кодов). Нажмите на карточку привычек в форме и задайте каждой привычке время суток и дни недели. Привычка, у которой сейчас её время, встаёт в круг наравне с календарём: календарь, затем каждая такая привычка по очереди, и снова календарь (круг работает при включённом «Переключать виджеты по кругу»; при «Переключении по релевантности» такая привычка поднимается наверх). Привычки не в своё время в круг не попадают. Нажатие у левого или правого края карточки листает все привычки, одно нажатие в центре открывает карту дней привычки, двойное — отмечает её выполненной: исчезает только эта привычка, до конца дня. Когда отмечены все привычки, карточки привычек в стопке нет совсем. Нет галочки — привычек в стопке нет."],
       ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."],
       ["Спрашивать о настроении", "Каждый вечер в 20:30, если за день вы ни разу не отметили настроение (ни в приложении, ни в виджете), наверху стопки появляется карточка «Как настроение?» с восемью эмодзи — теми же чувствами, что на вкладке настроения. Нажатие на эмодзи сразу записывает настроение, и карточка исчезает; не отметили — в полночь она уходит сама, а завтра вечером придёт снова. Она стоит выше календаря и остальных карточек (как «Как тренировка?»); если ждут обе, «Как тренировка?» выше. Если пролистнуть на другую карточку, через минуту она вернётся наверх. Нет галочки — карточки нет."]
     ];
@@ -818,6 +883,26 @@
       var html = '<h3 class="common-tab-title">Описание галочек</h3>';
       INFO_ITEMS.forEach(function(it){
         html += '<div class="wg-sec">' + esc(it[0]) + '</div><div class="wg-hint">' + esc(it[1]) + '</div>';
+      });
+      html += fabRow(homeBtn("К виджету"));
+      return html;
+    }
+
+    // экран «Привычки»: у каждой привычки — время суток и дни недели (необязательно), только для этого виджета
+    function habitsHtml(a){
+      var w = a.w, list = [];
+      try{ list = cardsOf().widgetHabits().slice(0, MAX_HABITS); }catch(e){ list = []; }
+      var html = '<h3 class="common-tab-title">Привычки</h3>';
+      html += '<div class="wg-hint">Время суток и дни недели — необязательно. Если сейчас время привычки (её время суток и день), она встаёт в круг карточек наравне с календарём и другими такими привычками. Привычка без времени в круг не попадает: её можно найти, листая карточку привычек нажатием у левого и правого края.</div>';
+      if(!list.length) html += '<div class="wg-empty">Привычек пока нет.<br>Создайте их на вкладке QR-кодов: «+» → «Привычка».</div>';
+      list.forEach(function(f){
+        var hc = (w.habitCfg && w.habitCfg[f.id]) || { times: [], days: [] };
+        html += '<div class="wg-habit" data-cid="' + esc(f.id) + '"><div class="wg-sec"><span class="wg-habit-dot" style="background:' + f.color + ';"></span>' + esc(f.title || "Привычка") + '</div>';
+        html += '<div class="wg-chips wg-habit-times">';
+        WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (hc.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
+        html += '</div><div class="wg-chips wg-habit-days">';
+        DAYS.forEach(function(d, i){ html += '<div class="wg-chip' + (hc.days.indexOf(i + 1) >= 0 ? ' on' : '') + '" data-d="' + (i + 1) + '">' + d + '</div>'; });
+        html += '</div></div>';
       });
       html += fabRow(homeBtn("К виджету"));
       return html;
@@ -875,6 +960,7 @@
       else if(top.s === "card") body = cardHtml(top.a);
       else if(top.s === "pick") body = pickHtml(top.a);
       else if(top.s === "info") body = infoHtml();
+      else if(top.s === "habits") body = habitsHtml(top.a);
       el.innerHTML = '<div class="mdeditor-tab widgets-tab" id="widgetsTabRoot">' + body + '</div>';
       bind(top);
     }
@@ -897,6 +983,8 @@
         bindCard(top.a);
       } else if(top.s === "pick"){
         bindPick(top.a);
+      } else if(top.s === "habits"){
+        bindHabits(top.a);
       }
     }
     function commitDraft(a){
@@ -906,6 +994,7 @@
       var w = a.w;
       Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-slot"), function(s){
         s.addEventListener("click", function(){
+          if(s.getAttribute("data-habits")){ go("habits", { w: w, form: a }); return; } // карточка привычек: время суток и дни каждой привычки
           if(s.getAttribute("data-bat")) return; // карточку заряда не выбирают и не настраивают по времени — только цвет под галочкой
           if(s.getAttribute("data-add")) go("pick", { w: w, draft: a.draft, replace: -1, form: a });
           else go("card", { w: w, i: parseInt(s.getAttribute("data-i"), 10), form: a });
@@ -943,6 +1032,11 @@
       var alm = $("wgAlarms");
       alm.addEventListener("change", function(){
         w.alarms = alm.checked;
+        commitDraft(a); changed(); render();
+      });
+      var hab = $("wgHabits");
+      hab.addEventListener("change", function(){
+        w.habits = hab.checked;
         commitDraft(a); changed(); render();
       });
       var rpe = $("wgRpe");
@@ -994,7 +1088,7 @@
       var pin = $("wgPinBtn");
       if(pin) pin.addEventListener("click", function(){
         var hint = $("wgPinHint");
-        if(!hasContent(w)){ hint.textContent = "Сначала добавьте в виджет карточку или включите одну из галочек (заряд, задачи, события, будильники)."; return; }
+        if(!hasContent(w)){ hint.textContent = "Сначала добавьте в виджет карточку или включите одну из галочек (заряд, задачи, события, будильники, привычки)."; return; }
         commitDraft(a); save();
         hint.textContent = "Готовлю…";
         syncNow().then(function(ok){
@@ -1028,6 +1122,19 @@
       $("wgReplaceBtn").addEventListener("click", function(){ go("pick", { w: a.w, draft: false, replace: a.i, form: a }); });
       $("wgRemoveBtn").addEventListener("click", function(){ a.w.cards.splice(a.i, 1); changed(); backUi(); });
     }
+    function bindHabits(a){
+      var w = a.w;
+      function toggle(arr, v){ var i = arr.indexOf(v); if(i >= 0) arr.splice(i, 1); else arr.push(v); arr.sort(); }
+      Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-habit"), function(blk){
+        var cid = blk.getAttribute("data-cid");
+        Array.prototype.forEach.call(blk.querySelectorAll(".wg-habit-times .wg-chip"), function(ch){
+          ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggle(hc.times, ch.getAttribute("data-k")); ch.classList.toggle("on"); trimHabitCfg(w, cid); changed(); });
+        });
+        Array.prototype.forEach.call(blk.querySelectorAll(".wg-habit-days .wg-chip"), function(ch){
+          ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggle(hc.days, parseInt(ch.getAttribute("data-d"), 10)); ch.classList.toggle("on"); trimHabitCfg(w, cid); changed(); });
+        });
+      });
+    }
     function bindPick(a){
       var menu = $("wgFilterMenu");
       $("wgFilterBtn").addEventListener("click", function(e){ e.stopPropagation(); menu.style.display = menu.style.display === "none" ? "block" : "none"; });
@@ -1057,6 +1164,7 @@
       stack = [{ s: "list" }];
       data = load();
       migrateAlarmCards();
+      migrateHabitCards();
       render();
     }
 

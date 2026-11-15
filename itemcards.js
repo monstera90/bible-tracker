@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 47.4 (14.11) — «Конструктор виджетов»: привычки убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Отображать карточки привычек» все привычки отдаёт `widgetHabits`, у лица привычки появилось поле `last` (последний отмеченный день, ГГГГ-ММ-ДД). Откат: itemcards.js 47.3.
    Версия: 47.3 (14.11) — карта привычки (и схема заметок «Сегодня») открывается прокрученной в самый низ, к сегодняшней неделе, всегда: `scrollMapToBottom` повторяет прокрутку, пока лента не получила размер (раньше одна попытка в следующем кадре — при открытии из виджета или сразу после смены вкладки она срабатывала до раскладки, и карта оставалась наверху).
    Версия: 47.2 (14.11) — подсказки палитры `colorPaletteHtml` для карточек «Как тренировка?» (`wgrpe`) и «Как настроение?» (`wgmood`) в форме виджета.
    Версия: 47.1 (14.11) — «Конструктор виджетов»: карточки-будильники убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Показывать будильники» все будильники отдаёт `widgetAlarms`.
@@ -3399,6 +3400,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       });
     } else if(c.type === "habit"){
       f.svg = iconSvg("habit");
+      var hdays = habitDays(c); f.last = hdays.length ? hdays[hdays.length - 1] : ""; // последний отмеченный день: по нему оболочка прячет привычку, отмеченную в приложении
     } else if(c.type === "task"){
       f.svg = taskTabSvg(c.icon); if(taskTag(c.tag)) f.sub = "#" + taskTag(c.tag);
     } else if(c.type === "datenote"){
@@ -3410,13 +3412,13 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     return f;
   }
-  // Будильники в стопку виджета по одному не выбираются: их показывает одна карточка по галочке «Показывать будильники» (widgetAlarmList)
+  // Будильники и привычки в стопку виджета по одному не выбираются: их показывают одна карточка по галочке «Показывать будильники» (widgetAlarmList) и карточки по галочке «Отображать карточки привычек» (widgetHabitList)
   function widgetFilterList(){
-    return FILTERS.filter(function(f){ return f.key !== "remind" && f.key !== "alarm"; }).map(function(f){ return { key: f.key, label: f.label }; });
+    return FILTERS.filter(function(f){ return f.key !== "remind" && f.key !== "alarm" && f.key !== "habit"; }).map(function(f){ return { key: f.key, label: f.label }; });
   }
   function widgetCardList(filterKey){
     reloadCards();
-    return loadCards().filter(function(c){ return c.type !== "remind" && c.type !== "alarm" && cardMatchesFilter(c, filterKey || "all"); }).map(widgetFace);
+    return loadCards().filter(function(c){ return c.type !== "remind" && c.type !== "alarm" && c.type !== "habit" && cardMatchesFilter(c, filterKey || "all"); }).map(widgetFace);
   }
   // Все будильники пользователя (лица для карточки «Будильники» в виджете): по времени суток, затем по названию
   function widgetAlarmList(){
@@ -3424,6 +3426,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     return loadCards().filter(function(c){ return c.type === "alarm" && alarmHM(c); }).map(widgetFace).sort(function(a, b){
       return a.big < b.big ? -1 : (a.big > b.big ? 1 : (a.title < b.title ? -1 : (a.title > b.title ? 1 : 0)));
     });
+  }
+
+  // Все привычки пользователя (лица для карточек «Привычки» в виджете) — в порядке сетки карточек
+  function widgetHabitList(){
+    reloadCards();
+    return loadCards().filter(function(c){ return c.type === "habit"; }).map(widgetFace);
   }
 
   // страница scan.html: сразу сканер, результат — на прозрачном фоне поверх рабочего стола
@@ -4182,6 +4190,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     widgetCards: widgetCardList,
     widgetFilters: widgetFilterList,
     widgetAlarms: widgetAlarmList,
+    widgetHabits: widgetHabitList,
     // выбор цвета для виджета (карточка «Заряд», widgets.js): та же палитра и те же запомненные цвета, что в форме карточки
     colorPalette: function(type, domId){ ensureHabitStyles(); return colorPaletteHtml(type || "battery", domId); },
     paletteColor: function(hex){ return effColor({ color: hex }); },

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.11 (14.11) — карточка «Привычки» (dyn = "habit", слоты «hab_N»): края листают привычки (`habnav`), нажатие в центре — как у обычной привычки (одно открывает карту дней, двойное отмечает), внизу точки.
 // Версия: 2.10 (14.11) — направление смахивания поменяно: смахивание снизу вверх ведёт ко второй карточке (позиции стопки отданы в обратном порядке, см. [getViewAt]).
 // Версия: 2.9 (14.11) — карточка «Будильники» (dyn = "alarm"): края листают будильники (`alnav`), центр заводит/выключает показанный (`alarm`), внизу точки.
 // Версия: 2.8 (14.11)
@@ -30,6 +31,7 @@ class QrWidgetService : RemoteViewsService() {
 
         private var cards: List<QrWidgets.Card> = emptyList()
         private var bitmaps: Map<String, Bitmap> = emptyMap()
+        private var habitViews: Map<String, QrWidgets.HabitView> = emptyMap()
 
         // Первые обращения после загрузки данных — не смахивание: точки показываем только после этой паузы.
         @Volatile private var quietUntil = 0L
@@ -47,17 +49,21 @@ class QrWidgetService : RemoteViewsService() {
                 val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
                 val tpos = if (cfg != null && cfg.tasks) QrWidgets.taskPos(ctx, cfg) else Pair(0, 0)
                 val apos = if (cfg != null && cfg.alarms) QrWidgets.alarmPos(ctx, cfg) else Pair(0, 0)
+                val hviews = if (cfg != null && cfg.habits) QrWidgets.habitViews(ctx, cfg) else emptyMap()
                 for (c in list) {
-                    val bmp = QrWidgets.bitmapFor(ctx, c)
+                    val hv = if (c.dyn == "habit") hviews[c.key] else null
+                    val bmp = QrWidgets.bitmapFor(ctx, hv?.card ?: c) // слот привычек рисует лицо той привычки, которую показывает
                     fresh[c.key] = when (c.dyn) {
                         "event" -> QrWidgets.withEventDots(bmp, pos.first, pos.second)
                         "task" -> QrWidgets.withEventDots(bmp, tpos.first, tpos.second)
                         "alarm" -> QrWidgets.withEventDots(bmp, apos.first, apos.second)
+                        "habit" -> if (hv != null) QrWidgets.withEventDots(bmp, hv.index, hv.total) else bmp
                         else -> bmp
                     }
                 }
                 cards = list
                 bitmaps = fresh
+                habitViews = hviews
             } catch (e: Throwable) {
                 // не хватило памяти или сбой данных — остаются прежние карточки
             }
@@ -95,7 +101,20 @@ class QrWidgetService : RemoteViewsService() {
             val isEv = c.dyn == "event"
             val isTk = c.dyn == "task"
             val isAl = c.dyn == "alarm"
-            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk || isAl) View.VISIBLE else View.GONE)
+            val isHb = c.dyn == "habit"
+            rv.setViewVisibility(R.id.ev_zones, if (isEv || isTk || isAl || isHb) View.VISIBLE else View.GONE)
+            if (isHb) {
+                // карточка привычек: края листают ряд привычек (QrWidgets.habitNav, без зацикливания); центр и вся карточка — как у обычной привычки: ScanActivity ждёт второго нажатия
+                // (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
+                rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("habnav", -1).putExtra("wid", widgetId).putExtra("slot", c.key))
+                rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("habnav", 1).putExtra("wid", widgetId).putExtra("slot", c.key))
+                val hv = habitViews[c.key]
+                if (hv != null) {
+                    val tap = Intent().putExtra("key", hv.card.key).putExtra("habit", true).putExtra("code", hv.card.code)
+                    rv.setOnClickFillInIntent(R.id.ev_center, tap)
+                    rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(tap))
+                }
+            }
             if (isAl) {
                 // карточка будильников: края листают ряд будильников (QrWidgets.alarmNav, без зацикливания), центр и вся карточка — завести/выключить показанный будильник (ScanActivity)
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("alnav", -1).putExtra("wid", widgetId))

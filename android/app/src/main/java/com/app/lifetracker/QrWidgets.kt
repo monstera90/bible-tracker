@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.7 (15.11) — галочка «Отображать карточки привычек» (`habits`, список `hab`): привычки «в своё время» встают в круг наравне с календарём, остальные листаются у краёв ([habitNav]), двойное нажатие отмечает привычку и убирает только её.
 // Версия: 14.6 (15.11)
 // Версия: 14.5 (14.11) — заряд наушников в карточке «Заряд» появляется сразу после подключения: первая проверка без паузы и частые проверки первых секунд ([BT_FAST_AT]), а не через 6 с по неточному будильнику.
 // Версия: 14.4 (14.11) — цвет карточек «Как тренировка?» и «Как настроение?» задаёт палитра формы виджета (`rpeColor`, `moodColor` → [Cfg]).
@@ -78,6 +79,13 @@ import java.util.UUID
  * нажатие в центре заводит показанный будильник или выключает его ([toggleAlarm], показанный будильник при этом не меняется). Лицо — `<ключ>.png` / `<ключ>_on.png` («Заведён»), как у прежней карточки-будильника.
  * Балл карточки по релевантности считается по всем будильникам ряда: звонит любой — выше всего, зазвонит в ближайший час — «скоро». Карточка стоит после карточек задач и перед карточками заряда.
  *
+ * Галочка «Отображать карточки привычек» (`habits` у виджета, `hab` — все привычки пользователя: ключ карточки, код, название, время суток и дни недели привычки в этом виджете,
+ * `last` — последний отмеченный день): привычка, у которой сейчас «её» время ([QrPriority.habitDue]), встаёт в стопку своей карточкой и участвует в круге наравне с календарём
+ * (календарь → бег → чтение → календарь …); привычки не в своё время в круг не попадают. Если ни у одной привычки сейчас нет её времени, в стопке один слот с первой привычкой.
+ * Нажатие у левого края — предыдущая привычка, у правого — следующая (по ряду: сначала «в своё время», затем остальные; без зацикливания; выбор держит [habitNav] в [K_HABIDX]
+ * [EVENT_RESET_MS], точки внизу — [withEventDots]); одно нажатие в центре открывает карту дней привычки, двойное — отмечает сегодня и убирает из стопки до полуночи
+ * только эту привычку ([hideHabitToday]). Привычка, отмеченная в приложении, пропадает по `last`. Все привычки отмечены — карточки привычек в стопке нет совсем ([QrPriority.habitSlots]).
+ *
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
  * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
  * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
@@ -127,6 +135,7 @@ object QrWidgets {
     private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val K_ALIDX = "alidx"         // id виджета конструктора → {i: номер будильника в ряду карточки будильников (0 — первый по времени), t: время последнего нажатия, мс}
+    private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ слота «hab_N»: {h: id выбранной привычки, t: время последнего нажатия, мс}}
     private const val AEV_MAX = 50
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
@@ -199,8 +208,8 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal")
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR) {
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0)
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList()) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -236,6 +245,12 @@ object QrWidgets {
         val m = o.optInt("m", -1)
         if (h !in 0..23 || m !in 0..59) return null
         return AlarmSpec(h, m, o.optInt("every", 0), o.optInt("times", 0), o.optString("title", "").take(200))
+    }
+
+    /** "ГГГГ-ММ-ДД" от страницы → ГГГГММДД (как [dayKey]); пусто или неверно — 0. */
+    private fun parseDayKey(v: String): Int {
+        val m = Regex("^(\\d{4})-(\\d{2})-(\\d{2})$").matchEntire(v) ?: return 0
+        return m.groupValues[1].toInt() * 10000 + m.groupValues[2].toInt() * 100 + m.groupValues[3].toInt()
     }
 
     private fun parse(text: String?): List<Cfg> {
@@ -311,6 +326,24 @@ object QrWidgets {
                     }
                     cards.addAll(als) // после задач, перед карточками заряда
                 }
+                val habitsOn = o.optBoolean("habits", false)
+                val hab = o.optJSONArray("hab")
+                val habitList = ArrayList<Card>()
+                if (hab != null && habitsOn) {
+                    for (j in 0 until hab.length()) {
+                        val d = hab.optJSONObject(j) ?: continue
+                        val key = d.optString("key", "")
+                        if (!KEY_RE.matches(key) || cards.any { it.key == key } || habitList.any { it.key == key }) continue
+                        val times = HashSet<String>()
+                        val ta = d.optJSONArray("times")
+                        if (ta != null) for (x in 0 until ta.length()) ta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) times.add(it) }
+                        val days = HashSet<Int>()
+                        val da = d.optJSONArray("days")
+                        if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
+                        habitList.add(Card(key, d.optString("code", ""), d.optString("title", ""), emptyList(), times, days, "none", QrBattery.DEFAULT_FACE, "habit", 0L, habit = true, doneDay = parseDayKey(d.optString("last", ""))))
+                        if (habitList.size >= QrPriority.HABIT_NAV_MAX) break
+                    }
+                }
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
                 if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none", batColor)) // карточка заряда — последняя в стопке
@@ -320,7 +353,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList
                     )
                 )
             }
@@ -470,12 +503,12 @@ object QrWidgets {
         }
     }
 
-    /** Подпись настроек виджетов без списков `dyn` и `alm` (состав задач, событий и будильников меняется сам и положения стопки не касается). */
+    /** Подпись настроек виджетов без списков `dyn`, `alm` и `hab` (состав задач, событий, будильников и привычек, в том числе отметки дней, меняется сам и положения стопки не касается). */
     private fun structSig(text: String?): String {
         if (text.isNullOrEmpty()) return ""
         return try {
             val root = JSONObject(text)
-            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.let { it.remove("dyn"); it.remove("alm") } }
+            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.let { it.remove("dyn"); it.remove("alm"); it.remove("hab") } }
             root.toString()
         } catch (e: Exception) {
             text
@@ -597,6 +630,7 @@ object QrWidgets {
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
         if (cfg.alarms) alarmResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для ряда будильников
+        if (cfg.habits) habitResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для слотов привычек
         return at
     }
 
@@ -712,6 +746,79 @@ object QrWidgets {
         val to = (pos.first + dir).coerceIn(0, Math.max(0, pos.second - 1))
         if (pos.second == 0 || to == pos.first) return
         saveRowIndex(app, K_ALIDX, cfg.id, to)
+        refreshAll(app)
+    }
+
+    // ---------- карточка «Привычки» ----------
+
+    /** Что показывает слот карточки «Привычки»: сама привычка [card] и её номер [index] в ряду из [total] привычек. */
+    class HabitView(val card: Card, val index: Int, val total: Int)
+
+    /**
+     * (ряд привычек, что показывает каждый слот). Слот показывает привычку, выбранную нажатием у края (не дольше [EVENT_RESET_MS] и пока она не отмечена),
+     * иначе привычку с номером слота в [QrPriority.habitList] — при слотах «в своё время» это та самая привычка, чьё время сейчас.
+     */
+    private fun habitViewsOf(ctx: Context, cfg: Cfg, s: QrPriority.Snapshot): Pair<List<Card>, Map<String, HabitView>> {
+        val list = QrPriority.habitList(cfg, s)
+        val out = HashMap<String, HabitView>()
+        if (list.isEmpty()) return Pair(list, out)
+        val over = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfg.id) }
+        for (slot in QrPriority.habitSlots(cfg, s)) {
+            var idx = QrPriority.habitSlotIndex(slot.key)
+            val e = over?.optJSONObject(slot.key)
+            if (e != null) {
+                val t = e.optLong("t", 0L)
+                if (s.now >= t && s.now - t < EVENT_RESET_MS) {
+                    val i = list.indexOfFirst { it.key == e.optString("h", "") }
+                    if (i >= 0) idx = i
+                }
+            }
+            idx = idx.coerceIn(0, list.size - 1)
+            out[slot.key] = HabitView(list[idx], idx, list.size)
+        }
+        return Pair(list, out)
+    }
+
+    /** Ключ слота → привычка, которую он показывает (пусто, если у виджета нет галочки или все привычки отмечены). */
+    fun habitViews(ctx: Context, cfg: Cfg): Map<String, HabitView> {
+        if (!cfg.habits) return emptyMap()
+        val app = ctx.applicationContext
+        return habitViewsOf(app, cfg, snapshot(app, cfg)).second
+    }
+
+    /** Когда выбранные нажатием привычки вернутся к привычкам «по умолчанию»; null — ничего не выбрано. */
+    private fun habitResetAt(ctx: Context, cfgId: String, now: Long): Long? {
+        val per = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfgId) } ?: return null
+        var at = Long.MAX_VALUE
+        val ks = per.keys()
+        while (ks.hasNext()) {
+            val t = per.optJSONObject(ks.next())?.optLong("t", 0L) ?: continue
+            if (t > 0L && now >= t && now - t < EVENT_RESET_MS) at = Math.min(at, t + EVENT_RESET_MS + 500L)
+        }
+        return if (at == Long.MAX_VALUE) null else at
+    }
+
+    /**
+     * Нажатие у края слота [slotKey] карточки «Привычки» в виджете [widgetId] ([dir] = -1 — предыдущая привычка, 1 — следующая). Ряд не зациклен: у первой и последней
+     * привычки нажатие ничего не меняет. Выбор запоминается за слотом на [EVENT_RESET_MS]; стопка не сбрасывается — перерисовывается только лицо слота.
+     */
+    fun habitNav(ctx: Context, widgetId: Int, slotKey: String, dir: Int) {
+        if (dir != -1 && dir != 1) return
+        if (!slotKey.startsWith(QrPriority.HABIT_SLOT_PREFIX) || !KEY_RE.matches(slotKey)) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        if (!cfg.habits) return
+        val st = habitViewsOf(app, cfg, snapshot(app, cfg))
+        val view = st.second[slotKey] ?: return
+        val to = (view.index + dir).coerceIn(0, Math.max(0, st.first.size - 1))
+        if (to == view.index) return
+        synchronized(LOCK) {
+            val all = jmap(app, K_HABIDX)
+            val per = all.optJSONObject(cfg.id) ?: JSONObject()
+            per.put(slotKey, JSONObject().put("h", st.first[to].key).put("t", System.currentTimeMillis()))
+            all.put(cfg.id, per)
+            prefs(app).edit().putString(K_HABIDX, all.toString()).apply()
+        }
         refreshAll(app)
     }
 
@@ -1011,7 +1118,7 @@ object QrWidgets {
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.rpeAsk || cfg.moodAsk) && visibleCount(ctx, cfg) == 0
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.habits || cfg.rpeAsk || cfg.moodAsk) && visibleCount(ctx, cfg) == 0
 
     /**
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
@@ -1024,7 +1131,7 @@ object QrWidgets {
         synchronized(LOCK) {
             val all = jmap(app, K_FIRED)
             for (cfg in configs(app)) {
-                val card = cfg.cards.firstOrNull { it.key == cardKey } ?: continue
+                val card = cfg.cards.firstOrNull { it.key == cardKey } ?: cfg.habitCards.firstOrNull { it.key == cardKey } ?: continue // привычка карточки «Привычки» — не среди cfg.cards
                 if (forceHide && !card.habit) continue
                 if (card.after == "none" && !forceHide) continue
                 val st = firedOf(app, cfg.id)
@@ -1332,7 +1439,7 @@ object QrWidgets {
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
-            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
+            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)
@@ -1340,7 +1447,7 @@ object QrWidgets {
                 }
             } else cancelRotate(app, id)
             if (cfg != null && cfg.relevance) anyRel = true
-            if (cfg != null && cfg.cards.any { it.after == "hide" || it.habit }) anyHide = true // скрытое возвращается в полночь
+            if (cfg != null && (cfg.habits || cfg.cards.any { it.after == "hide" || it.habit })) anyHide = true // скрытое возвращается в полночь; привычки меняют состав в границы времени суток
         }
         var tickAt = if (anyRel || anyHide) nextBoundary() else Long.MAX_VALUE
         tickAt = Math.min(tickAt, dynAt)

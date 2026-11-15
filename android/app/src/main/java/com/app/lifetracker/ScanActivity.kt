@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.3 (14.11) — `habnav` (-1 / 1, `wid`, `slot`): края карточки «Привычки» в виджете листают привычки ([QrWidgets.habitNav]); одно и двойное нажатие в центре — как у обычной привычки.
 // Версия: 13.2 (14.11) — `alnav` (-1 / 1, `wid`): края карточки «Будильники» в виджете листают будильники ([QrWidgets.alarmNav]).
 // Версия: 13.1 (14.11)
 // Версия: 12.0 (14.11)
@@ -127,17 +128,19 @@ class ScanActivity : ComponentActivity() {
     }
 
     /**
-     * Нажатие на карточку события в виджете (тот же `tok`): `evnav` (-1 / 1, `wid` — id виджета) листает ряд событий ([QrWidgets.eventNav]), `tknav` — ряд задач ([QrWidgets.taskNav]), `alnav` — ряд будильников ([QrWidgets.alarmNav]); `evopen` (id события, `evat` — начало
+     * Нажатие на карточку события в виджете (тот же `tok`): `evnav` (-1 / 1, `wid` — id виджета) листает ряд событий ([QrWidgets.eventNav]), `tknav` — ряд задач ([QrWidgets.taskNav]), `alnav` — ряд будильников ([QrWidgets.alarmNav]), `habnav` (+ `slot`) — ряд привычек ([QrWidgets.habitNav]); `evopen` (id события, `evat` — начало
      * повторения, мс) открывает приложение на форме этого события (MainActivity.ACTION_OPEN_EVENT). Окно и страница сканера не нужны. true — это был такой запрос.
      */
     private fun handleEvent(i: Intent?): Boolean {
-        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen") || i.hasExtra("tknav") || i.hasExtra("alnav"))) return false
+        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen") || i.hasExtra("tknav") || i.hasExtra("alnav") || i.hasExtra("habnav"))) return false
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             try {
                 if (i.hasExtra("tknav")) {
                     QrWidgets.taskNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("tknav", 0))
                 } else if (i.hasExtra("alnav")) {
                     QrWidgets.alarmNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("alnav", 0))
+                } else if (i.hasExtra("habnav")) {
+                    QrWidgets.habitNav(applicationContext, i.getIntExtra("wid", -1), i.getStringExtra("slot") ?: "", i.getIntExtra("habnav", 0))
                 } else if (i.hasExtra("evnav")) {
                     QrWidgets.eventNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("evnav", 0))
                 } else {

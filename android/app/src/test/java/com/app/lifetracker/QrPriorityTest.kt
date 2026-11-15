@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
 // Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
 // Версия: 4.0 (14.11) — будильник «скоро» за 30 минут, а не за час; будильник «скоро» перебивает событие (alarmSoon_beatsEventSoon_*, alarmRow_soonBeatsEvent_*).
 // Версия: 3.5 (14.11) — карточка «Будильники» (alarmRow_*).
@@ -756,5 +757,44 @@ class QrPriorityTest {
         val r = run(cfg(cards, true, moodAsk = true), snap(c, timers = setOf("x"), mood = true))
         assertEquals("__mood", r.topKey)
         assertEquals("t", r.mainTopKey) // оболочка запоминает как «прежнюю верхнюю» именно основную, а не служебную
+    }
+
+    // ---------- карточка «Привычки» ----------
+
+    private fun hab(key: String, times: Set<String> = emptySet(), days: Set<Int> = emptySet(), done: Int = 0) =
+        Card(key = key, code = "", title = key, live = emptyList(), times = times, days = days, dyn = "habit", habit = true, doneDay = done)
+
+    private fun cfgH(habits: List<Card>, cards: List<Card> = emptyList()) =
+        Cfg(id = "w", name = "w", rotate = true, rotateMin = 1, relevance = false, cards = cards, habits = true, habitCards = habits)
+
+    @Test fun habits_dueEnterTheCircle_othersDoNot() {
+        val hs = listOf(hab("water", setOf("e")), hab("run", setOf("m")), hab("read", setOf("m")))
+        val cf = cfgH(hs, listOf(card("cal")))
+        val s = snap(cal(8))
+        // утро: календарь, затем бег и чтение (каждая своей карточкой); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
+        assertEquals(listOf("cal", "hab_0", "hab_1"), keys(run(cf, s)))
+        assertEquals(listOf("run", "read", "water"), QrPriority.habitList(cf, s).map { it.key })
+    }
+
+    @Test fun habits_noneDue_oneSlotShowsFirstInUserOrder() {
+        val hs = listOf(hab("water", setOf("e")), hab("run", setOf("m")))
+        val cf = cfgH(hs)
+        val s = snap(cal(13)) // обед: ни у одной привычки сейчас её времени нет
+        assertEquals(listOf("hab_0"), keys(run(cf, s)))
+        assertEquals(listOf("water", "run"), QrPriority.habitList(cf, s).map { it.key })
+    }
+
+    @Test fun habits_doneDisappearOneByOne_allDoneNoCard() {
+        val hs = listOf(hab("run", setOf("m")), hab("read", setOf("m"), done = 20261116))
+        val cf = cfgH(hs)
+        // «чтение» отмечено в приложении сегодня (doneDay), «бег» осталось: один слот
+        assertEquals(listOf("hab_0"), keys(run(cf, snap(cal(8)))))
+        assertEquals(listOf("run"), QrPriority.habitList(cf, snap(cal(8))).map { it.key })
+        // «бег» отмечено двойным нажатием в виджете (ключ в hiddenKeys): привычек не осталось — карточки нет
+        val all = snap(cal(8), hidden = setOf("run"))
+        assertEquals(emptyList<String>(), keys(run(cf, all)))
+        assertEquals(0, QrPriority.visibleCount(cf, all))
+        // отметка вчерашним днём сегодня ничего не скрывает
+        assertEquals(listOf("hab_0", "hab_1"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8)))))
     }
 }

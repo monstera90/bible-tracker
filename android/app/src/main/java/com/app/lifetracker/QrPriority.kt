@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.5 (14.11) — карточка «Привычки» (`Cfg.habits`, `Cfg.habitCards`): привычки, у которых сейчас «их» время, встают в стопку каждая своей карточкой-слотом («hab_0», «hab_1» …) и участвуют в круге наравне с календарём; нет таких — один слот, который листают у краёв; все отмечены — карточек нет ([habitList], [habitSlots]).
 // Версия: 4.4 (14.11) — служебные карточки «Как тренировка?» / «Как настроение?» берут цвет из [Cfg] (`rpeColor`, `moodColor`).
 // Версия: 4.3 (14.11) — вторая служебная карточка «Как настроение?» ([QrMood.KEY], [Snapshot.moodPending]): стоит над всеми обычными карточками, под «Как тренировка?»; [check] знает обе.
 // Версия: 4.2 (14.11) — будильник «скоро» поднимает карточку за 30 минут, а не за час ([ALARM_SOON_MS]); балл [SCORE_ALARM_SOON] выше события «скоро» на гистерезис, чтобы будильник перебивал календарь.
@@ -371,6 +372,62 @@ object QrPriority {
         return if (soonest == Long.MAX_VALUE) null else Pair(SCORE_ALARM_SOON, "Будильник " + inMinutes(soonest))
     }
 
+    // ---------- карточка «Привычки» ----------
+
+    /** Сколько привычек (кандидатов) принимает карточка «Привычки» (то же число — MAX_HABITS в widgets.js). */
+    const val HABIT_NAV_MAX = 24
+
+    /** Ключи карточек-слотов привычек в стопке: «hab_0», «hab_1» … ([habitSlots]). */
+    const val HABIT_SLOT_PREFIX = "hab_"
+
+    private fun dayKeyOf(cal: Calendar): Int = cal.get(Calendar.YEAR) * 10000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
+
+    /** Привычка отмечена сегодня: двойным нажатием в виджете (её ключ в [Snapshot.hiddenKeys]) или в приложении ([Card.doneDay] — последний отмеченный день, его присылает страница). */
+    fun habitDone(c: Card, s: Snapshot): Boolean = c.key in s.hiddenKeys || (c.doneDay != 0 && c.doneDay == dayKeyOf(s.cal))
+
+    /** Привычка «в своё время»: сейчас её время суток и день недели ([scheduledNow]); у привычки без времени и дней своего времени нет. */
+    fun habitDue(c: Card, s: Snapshot): Boolean = scheduledNow(c, s.cal)
+
+    /** Не отмеченные сегодня привычки: сначала те, у которых сейчас их время, затем остальные — каждая группа в порядке пользователя. Пусто, если галочки нет или все отмечены. */
+    fun habitList(cfg: Cfg, s: Snapshot): List<Card> {
+        if (!cfg.habits) return emptyList()
+        val open = cfg.habitCards.filter { !habitDone(it, s) }
+        return open.filter { habitDue(it, s) } + open.filter { !habitDue(it, s) }
+    }
+
+    /**
+     * Карточки-слоты привычек в стопке. Слотов столько, сколько привычек «в своё время» (каждая своей карточкой — так они сменяют друг друга в круге наравне
+     * с календарём); нет таких — один слот с первой привычкой списка. Все привычки отмечены — слотов нет, карточки в стопке нет совсем.
+     * Слот копирует время суток и дни привычки, которую показывает по умолчанию, поэтому «по релевантности» он поднимается как обычная карточка с временем.
+     * Какую привычку слот показывает на самом деле (пролистали нажатием у края), решает оболочка ([QrWidgets.habitViews]).
+     */
+    fun habitSlots(cfg: Cfg, s: Snapshot): List<Card> {
+        val list = habitList(cfg, s)
+        if (list.isEmpty()) return emptyList()
+        val n = Math.max(1, list.count { habitDue(it, s) })
+        val out = ArrayList<Card>(n)
+        for (i in 0 until n) {
+            val b = list[i]
+            out.add(Card(HABIT_SLOT_PREFIX + i, b.code, b.title, emptyList(), b.times, b.days, "none", b.color, "habit", 0L, habit = true))
+        }
+        return out
+    }
+
+    /** Номер слота по его ключу («hab_2» → 2). */
+    fun habitSlotIndex(key: String): Int =
+        if (key.startsWith(HABIT_SLOT_PREFIX)) (key.substring(HABIT_SLOT_PREFIX.length).toIntOrNull() ?: 0) else 0
+
+    /** Слоты привычек встают после остальных карточек и перед карточками заряда. */
+    private fun withHabitSlots(shown: List<Card>, cfg: Cfg, s: Snapshot): List<Card> {
+        if (!cfg.habits) return shown
+        val slots = habitSlots(cfg, s)
+        if (slots.isEmpty()) return shown
+        val at = shown.indexOfFirst { isBattery(it.key) }
+        val out = ArrayList<Card>(shown)
+        out.addAll(if (at < 0) out.size else at, slots)
+        return out
+    }
+
     /** Задача — только та, что выбрана [nextTaskKey] (одна карточка на все задачи); событие — только то, что выбрано [nextEventKey]; будильник — [nextAlarmKey]. */
     private fun dynShown(c: Card, nextEv: String, nextTask: String, nextAlarm: String): Boolean = when (c.dyn) {
         "task" -> c.key == nextTask
@@ -389,7 +446,7 @@ object QrPriority {
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
         val nextAlarm = nextAlarmKey(cfg, s)
-        val shown = cfg.cards.filter { isShown(it, s, nextEv, nextTask, nextAlarm) }
+        val shown = withHabitSlots(cfg.cards.filter { isShown(it, s, nextEv, nextTask, nextAlarm) }, cfg, s)
         if (shown.none { it.after == "end" && s.movedAt.containsKey(it.key) }) return shown
         return shown.withIndex().sortedWith(
             compareBy<IndexedValue<Card>> { if (it.value.after == "end") (s.movedAt[it.value.key] ?: 0L) else 0L }.thenBy { it.index }
@@ -545,8 +602,8 @@ object QrPriority {
 
         // 5. Без релевантности — порядок пользователя, topKey пуст (кроме служебных)
         if (!cfg.relevance) {
-            val rest = main.filter { !(it.after == "end" && s.movedAt.containsKey(it.key)) }
             val order = cfg.cards.map { it.key }
+            val rest = main.filter { it.key in order && !(it.after == "end" && s.movedAt.containsKey(it.key)) } // слоты привычек не из cfg.cards — их место определяет сама стопка
             val pos = rest.map { order.indexOf(it.key) }
             for (i in 1 until pos.size) if (pos[i] < pos[i - 1]) bad.add("5: нарушен порядок пользователя")
             if (result.topKey.isNotEmpty() && !isService(result.topKey)) bad.add("5: topKey не пуст без релевантности")
