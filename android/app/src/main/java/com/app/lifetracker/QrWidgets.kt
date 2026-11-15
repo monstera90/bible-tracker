@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.6 (15.11)
 // Версия: 14.5 (14.11) — заряд наушников в карточке «Заряд» появляется сразу после подключения: первая проверка без паузы и частые проверки первых секунд ([BT_FAST_AT]), а не через 6 с по неточному будильнику.
 // Версия: 14.4 (14.11) — цвет карточек «Как тренировка?» и «Как настроение?» задаёт палитра формы виджета (`rpeColor`, `moodColor` → [Cfg]).
 // Версия: 14.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» ([QrMood]) — по правилам «Как тренировка?»: над всеми обычными карточками, под «Как тренировка?»; появляется в 20:30, если настроение сегодня не отмечено ([nextDynChange], [onMoodChanged]).
@@ -147,6 +148,9 @@ object QrWidgets {
     /** Страховка возврата: шаг проверки и минимальное время от последней постановки стопки наверх (пока смахивание хоть раз не было замечено). */
     private const val GUARD_MS = 75_000L
     private const val SWIPE_QUIET_MS = 4_000L
+
+    /** Сколько ждать после последнего запроса фабрики, прежде чем считать смахивание законченным (анимация StackView ≈ 0,4 с). */
+    private const val SWIPE_SETTLE_MS = 700L
     private const val BATTERY_EVERY_MS = 5 * 60_000L
 
     /** Серия проверок заряда после подключения Bluetooth-устройства по будильнику (страховка, если процесс уснул): через столько мс от подключения (3, 8, 15, 30, 60, 120 с). */
@@ -171,6 +175,7 @@ object QrWidgets {
     private val alarmToken = Any()
     private val hideTokens = HashMap<Int, Any>()
     private val returnTokens = HashMap<Int, Any>()
+    private val swipeTokens = HashMap<Int, Any>()
 
     /** Виджеты, у которых сейчас показаны точки справа (чтобы при серии смахиваний не слать лишних обновлений). */
     private val dotsOn: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
@@ -1098,7 +1103,13 @@ object QrWidgets {
         // все карточки скрыты — полупрозрачная плашка, как папка на телефонах Xiaomi; иначе обычная сиреневая
         rv.setInt(R.id.qr_empty, "setBackgroundResource", if (allDone) R.drawable.qr_widget_done_bg else R.drawable.qr_widget_empty_bg)
         rv.setTextViewTextSize(R.id.qr_empty, android.util.TypedValue.COMPLEX_UNIT_SP, if (allDone) 14f else 12f)
-        rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
+        // Точки всегда на месте (при двух и больше карточках), меняется только прозрачность: показ и скрытие точек при смахивании не пересчитывают раскладку
+        val dotsCount = if (cfg == null) 0 else visibleCount(app, cfg)
+        if (dotsCount >= 2) {
+            rv.setImageViewBitmap(R.id.qr_dots, dotsBitmap(app, dotsCount))
+            rv.setViewVisibility(R.id.qr_dots, android.view.View.VISIBLE)
+            rv.setInt(R.id.qr_dots, "setImageAlpha", 0)
+        } else rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
         val tpl = Intent(app, ScanActivity::class.java)
         tpl.action = ScanActivity.ACTION_SCAN_CODE
         tpl.putExtra("tok", token(app))
@@ -1460,10 +1471,17 @@ object QrWidgets {
 
     // ---------- точки справа ----------
 
+    /**
+     * Показывает точки. ⚠️ Только прозрачность: смена видимости или размера картинки пересчитывает раскладку, а обновление виджета
+     * посреди смахивания сбивает анимацию StackView (карточка зависает сдвинутой вверх). Картинку (`qr_dots`) ставит [update].
+     */
     private fun putDots(app: Context, rv: RemoteViews, n: Int) {
         if (n < 2) return
-        rv.setImageViewBitmap(R.id.qr_dots, dotsBitmap(app, n))
-        rv.setViewVisibility(R.id.qr_dots, android.view.View.VISIBLE)
+        rv.setInt(R.id.qr_dots, "setImageAlpha", 255)
+    }
+
+    private fun hideDots(rv: RemoteViews) {
+        rv.setInt(R.id.qr_dots, "setImageAlpha", 0)
     }
 
     private fun scheduleHide(app: Context, id: Int) {
@@ -1473,7 +1491,7 @@ object QrWidgets {
             try {
                 dotsOn.remove(id)
                 val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
+                hideDots(rv)
                 AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
             } catch (e: Exception) {
                 // виджет удалили
@@ -1504,17 +1522,25 @@ object QrWidgets {
             } catch (e: Exception) {
                 Log.e("QrReturn", "armReturn: " + e)
             }
+        }
+        // Точки — не сразу: фабрику зовут в момент отпускания пальца, когда StackView ещё доигрывает анимацию (≈ 0,4 с), а обновление виджета в этот
+        // момент сбивает её. Ждём, пока запросы стихнут (серия смахиваний — одно обновление после последнего).
+        val token = synchronized(swipeTokens) { swipeTokens.getOrPut(id) { Any() } }
+        main.removeCallbacksAndMessages(token)
+        main.postAtTime({
             try {
-                if (dotsOn.add(id)) {
-                    val rv = RemoteViews(app.packageName, R.layout.qr_widget)
-                    putDots(app, rv, n)
-                    AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
+                if (!swipeSuppressed(id)) {
+                    if (dotsOn.add(id)) {
+                        val rv = RemoteViews(app.packageName, R.layout.qr_widget)
+                        putDots(app, rv, n)
+                        AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(id, rv)
+                    }
+                    scheduleHide(app, id)
                 }
-                scheduleHide(app, id)
             } catch (e: Exception) {
                 // виджет удалили
             }
-        }
+        }, token, SystemClock.uptimeMillis() + SWIPE_SETTLE_MS)
     }
 
     // ---------- страховка возврата ----------
