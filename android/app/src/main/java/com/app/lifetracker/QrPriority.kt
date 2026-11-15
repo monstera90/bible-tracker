@@ -70,6 +70,9 @@ object QrPriority {
     /** Окно задач и событий: сегодня и ещё шесть дней (совпадает с FEED_DAYS в widgets.js). */
     const val DYN_DAYS = 7
 
+    /** Окно карточки события при галочке «Показывать только мероприятия на сегодня и на завтра» (`Cfg.eventsSoon`): сегодня и завтра. */
+    const val EVENTS_SOON_DAYS = 2
+
     /** Интервалы времени суток (минуты от полуночи, [начало; конец)). Те же значения показывает страница (widgets.js, WINDOWS). */
     val WINDOWS: Map<String, Pair<Int, Int>> = mapOf("m" to (5 * 60 to 11 * 60), "d" to (11 * 60 to 15 * 60), "e" to (17 * 60 to 23 * 60))
     private val BOUNDARIES = intArrayOf(0, 5 * 60, 11 * 60, 15 * 60, 17 * 60, 23 * 60)
@@ -296,7 +299,7 @@ object QrPriority {
 
     /** Ближайшие ещё не начавшиеся события в пределах [DYN_DAYS] суток по возрастанию времени (при равном — как их прислала страница), не больше [EVENT_NAV_MAX]. */
     fun eventCards(cfg: Cfg, s: Snapshot): List<Card> {
-        val limit = dayStart(s.cal, s.now, DYN_DAYS)
+        val limit = dayStart(s.cal, s.now, if (cfg.eventsSoon) EVENTS_SOON_DAYS else DYN_DAYS) // «только сегодня и завтра»: до начала послезавтрашних суток
         return cfg.cards.filter { it.dyn == "event" && it.at > s.now && it.at < limit }.sortedBy { it.at }.take(EVENT_NAV_MAX)
     }
 

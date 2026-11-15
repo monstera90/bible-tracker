@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.8 (15.11) — под «Показывать события календаря» галочка «Показывать только мероприятия на сегодня и на завтра» (`eventsSoon`, по умолчанию выключена; уходит в оболочку полем `eventsSoon`): карточка события показывает только сегодня и завтра, нет событий — карточки в стопке нет.
    Версия: 6.7 (14.11) — галочка «Отображать карточки привычек» (`habits`, время суток и дни недели каждой привычки в этом виджете — `habitCfg`, экран «Привычки» по нажатию на карточку в форме): привычки в оболочку уходят полем `hab`; привычки из списка выбора убраны, ранее выбранные переносятся на галочку (`migrateHabitCards`). Откат: widgets.js 6.6.
    Версия: 6.6 (14.11) — в описании заряда наушников указано, откуда он взят (`bt.src`: система, метаданные, вещание, команды гарнитуры, BLE).
    Версия: 6.5 (14.11) — палитры цвета в форме свёрнуты: справа от пункта квадрат выбранного цвета, нажатие открывает палитру, после выбора она сворачивается; палитры (`rpeColor`, `moodColor`, `icfColors5/6`) у «Спрашивать о тренировке» и «Спрашивать о настроении»; из описания «заряд (несколько устройств)» убран список парных Bluetooth-устройств.
@@ -106,7 +107,7 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.eventsSoon = !!w.events && !!w.eventsSoon; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
         w.rpeColor = normHex(w.rpeColor) || RPE_COLOR; w.moodColor = normHex(w.moodColor) || RPE_COLOR; // служебные карточки: пусто — фиолетовый макета, как было до палитры
       });
@@ -459,7 +460,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -851,6 +852,7 @@
       if(w.tasks) html += palBlock(["icfColors3", "wgtasks"]);
       html += checkRow("wgEvents", w.events, "Показывать события календаря", ["icfColors4", "wgevents"], dynHex(w, "event"));
       if(w.events) html += palBlock(["icfColors4", "wgevents"]);
+      if(w.events) html += '<label class="wg-check"><input type="checkbox" id="wgEventsSoon"' + (w.eventsSoon ? ' checked' : '') + '>Показывать только мероприятия на сегодня и на завтра</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgHabits"' + (w.habits ? ' checked' : '') + '>Отображать карточки привычек</label>';
       if(w.habits) html += '<div class="wg-hint">Нажмите на карточку привычек выше, чтобы задать время суток и дни недели каждой привычки: привычка в своё время встаёт в круг наравне с календарём.</div>';
@@ -874,6 +876,7 @@
       ["Отображать заряд аккумулятора (несколько устройств)", "Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.)."],
       ["Показывать задачи", "Одна карточка с ближайшими невыполненными задачами из календаря: просроченные первыми, затем сегодняшние и на неделю вперёд. Нажатие у левого или правого края карточки листает задачи, двойное нажатие в центре отмечает показанную задачу выполненной, и на её место встаёт следующая. Если не отметить, вместо «Сегодня» будет «Просрочено». Через минуту без нажатий снова показывается первая задача. Нет галочки — карточки задач в стопке нет."],
       ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
+      ["Показывать только мероприятия на сегодня и на завтра", "Появляется под «Показывать события календаря», по умолчанию выключена. Если включена, карточка события показывает только события на сегодня и на завтра; когда на эти два дня событий нет, карточки календаря в стопке нет. Если выключена — события ближайшей недели."],
       ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова показывает его. Нет галочки — карточки будильников в стопке нет."],
       ["Отображать карточки привычек", "Карточки ваших привычек (карточки «Привычка» вкладки QR-кодов). Нажмите на карточку привычек в форме и задайте каждой привычке время суток и дни недели. Привычка, у которой сейчас её время, встаёт в круг наравне с календарём: календарь, затем каждая такая привычка по очереди, и снова календарь (круг работает при включённом «Переключать виджеты по кругу»; при «Переключении по релевантности» такая привычка поднимается наверх). Привычки не в своё время в круг не попадают. Нажатие у левого или правого края карточки листает все привычки, одно нажатие в центре открывает карту дней привычки, двойное — отмечает её выполненной: исчезает только эта привычка, до конца дня. Когда отмечены все привычки, карточки привычек в стопке нет совсем. Нет галочки — привычек в стопке нет."],
       ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."],
@@ -1027,6 +1030,12 @@
       ev.addEventListener("change", function(){
         w.events = ev.checked;
         if(w.events) w.eventsColor = dynColorFor("event");
+        else w.eventsSoon = false;
+        commitDraft(a); changed(); render();
+      });
+      var evs = $("wgEventsSoon");
+      if(evs) evs.addEventListener("change", function(){
+        w.eventsSoon = evs.checked;
         commitDraft(a); changed(); render();
       });
       var alm = $("wgAlarms");
