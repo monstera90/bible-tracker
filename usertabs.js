@@ -1,5 +1,6 @@
 /* ===========================================================================
    usertabs.js
+   Версия: 5.1 (15.11) — в форме адреса (долгое нажатие на кнопку вкладки) галочка «Зафиксировать иконку для этой вкладки» (`locks`, localStorage `userTabIconLock_v1`, только на этом устройстве): значок на кнопке остаётся тем, что был на момент включения, сайт его больше не меняет (`syncIcon`); снять галочку — значок снова обновляется. Kotlin не менялся. Откат: usertabs.js 5.0.
    Версия: 5.0 (13.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
    по умолчанию; дальше вкладка помнит, где человек остановился на сайте (в том числе после закрытия приложения).
@@ -28,11 +29,13 @@
   var ARM_MS = 4000;       // сколько крестик ждёт второго нажатия
   var SYNC_KEY = "userTabsSync_v1"; // {synced:{id:1}, pending:[id]} — «уже была в облаке» и «удалена здесь, убрать из облака»
   var SYNC_TYPE = "utab";           // тип записи в канале карточек (itemcards.js такие записи игнорирует)
+  var LOCK_KEY = "userTabIconLock_v1"; // {id: data:image/png или ""} — вкладки с зафиксированным значком (только на этом устройстве, в облако не идёт)
   var PULL_MIN_MS = 60000;          // облако перечитывается не чаще раза в минуту
 
   var deps = {};
   var tabs = [];            // [{id, home}] — старые первыми
   var icons = {};           // id -> data:image/png (значок сайта от оболочки)
+  var locks = loadLocks();  // id -> зафиксированный значок («» — зафиксирована буква/глобус, пока значка не было)
   var iconRev = {};         // id -> ревизия значка, которую мы уже забрали
   var active = false;       // нативный WebView вкладки activeId должен быть на экране
   var activeId = null;
@@ -63,6 +66,23 @@
   }
   function keys(){ return tabs.map(function(t){ return keyOf(t.id); }); }
   function buttonId(key){ return BTN_PREFIX + idOf(key); }
+
+  function loadLocks(){
+    try{
+      var o = JSON.parse(localStorage.getItem(LOCK_KEY) || "{}"), r = {};
+      if(o && typeof o === "object") Object.keys(o).forEach(function(k){ if(ID_RE.test(k)) r[k] = typeof o[k] === "string" ? o[k] : ""; });
+      return r;
+    }catch(e){ return {}; }
+  }
+  function saveLocks(){ try{ localStorage.setItem(LOCK_KEY, JSON.stringify(locks)); }catch(e){} }
+  function locked(id){ return Object.prototype.hasOwnProperty.call(locks, id); }
+  // значок вкладки сейчас: у зафиксированной — запомненный, пока не открыт сайт и значка нет, берётся у оболочки
+  function currentIcon(id){
+    if(icons[id]) return icons[id];
+    var b = bridge();
+    if(b){ try{ return b.utabGetIcon(id) || ""; }catch(e){} }
+    return "";
+  }
 
   function load(){
     try{
@@ -145,6 +165,8 @@
       ".settings-tab .ut-ico{display:block;width:26px;height:26px;box-sizing:border-box;padding:2px;border-radius:6px;background:#fff;object-fit:contain;}" +
       ".ut-form input{display:block;width:100%;box-sizing:border-box;font:inherit;font-size:16px;margin:10px 0 4px;padding:9px 11px;border-radius:8px;" +
       "border:1px solid var(--wood,#5b4a8a);background:var(--parchment,#f4f0f8);color:var(--wood,#5b4a8a);}" +
+      ".ut-lock{display:-webkit-flex;display:flex;-webkit-align-items:center;align-items:center;gap:10px;margin:6px 0 12px;font-size:15px;color:var(--wood,#5b4a8a);}" +
+      ".ut-form .ut-lock input{display:inline-block;width:20px;height:20px;margin:0;padding:0;flex:0 0 auto;}" +
       ".ut-err{min-height:18px;font-size:13px;color:#b00020;margin:0 0 6px;}" +
       ".ut-btns button{font:inherit;font-size:14px;margin:0 8px 8px 0;padding:7px 12px;border-radius:8px;" +
       "border:1px solid var(--wood,#5b4a8a);background:var(--parchment,#f4f0f8);color:var(--wood,#5b4a8a);}" +
@@ -241,6 +263,11 @@
   function syncIcon(id, st){
     var b = bridge();
     if(!b) return;
+    if(locked(id)){ // «Зафиксировать значок»: что бы ни отдал сайт, на кнопке остаётся запомненный значок
+      var fr = locks[id] || "", t0 = find(id);
+      if((icons[id] || "") !== fr){ if(fr) icons[id] = fr; else delete icons[id]; if(t0) updateButton(t0); }
+      return;
+    }
     st = st || readState(id);
     var rev = st.rev || 0;
     if(rev === (iconRev[id] || 0) && (icons[id] || !rev)) return;
@@ -320,6 +347,7 @@
     if(btn && btn.parentNode) btn.parentNode.removeChild(btn);
     delete icons[id];
     delete iconRev[id];
+    if(locked(id)){ delete locks[id]; saveLocks(); }
     if(formFor === id) formFor = null;
     var wasCurrent = deps.getCurrentTab && deps.getCurrentTab() === keyOf(id);
     if(deps.refresh) deps.refresh();
@@ -353,8 +381,7 @@
     var b = bridge();
     if(!b || !t || !t.home) return;
     formFor = null;
-    delete icons[t.id];
-    iconRev[t.id] = 0;
+    if(!locked(t.id)){ delete icons[t.id]; iconRev[t.id] = 0; }
     updateButton(t);
     try{ b.utabGo(t.id, t.home); }catch(e){}
     var c = el("settingsTabContent");
@@ -385,6 +412,7 @@
         '<div class="modal-note">Эта страница открывается по умолчанию. Дальше вкладка запоминает, где вы остановились, и открывает её на том же месте.</div>' +
         '<input id="utUrl" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="example.com" value="' + esc(t.home) + '">' +
         '<div class="ut-err" id="utErr"></div>' +
+        '<label class="ut-lock"><input type="checkbox" id="utLockIcon"' + (locked(t.id) ? ' checked' : '') + '>Зафиксировать иконку для этой вкладки</label>' +
         '<div class="ut-btns">' +
           '<button type="button" class="primary" id="utOpen">Открыть</button>' +
           (hasHome ? '<button type="button" id="utBack">К странице</button><button type="button" id="utReload">Обновить</button><button type="button" id="utDel">Удалить вкладку</button>' : '') +
@@ -401,8 +429,7 @@
       t.updatedAt = Date.now();
       save();
       syncSoon(false);
-      delete icons[t.id];
-      iconRev[t.id] = 0;
+      if(!locked(t.id)){ delete icons[t.id]; iconRev[t.id] = 0; }
       updateButton(t);
       if(b){ try{ b.utabGo(t.id, u); }catch(e){} }
       render(keyOf(t.id));
@@ -414,6 +441,13 @@
     }
     input.addEventListener("focus", function(){ kbOverlay(true); });
     input.addEventListener("blur", function(){ kbOverlay(false); });
+    // галочка действует сразу (кнопка «Открыть» не нужна): фиксируется значок, который на кнопке вкладки сейчас; снята — значок снова обновляется сайтом
+    el("utLockIcon").addEventListener("change", function(){
+      if(this.checked){ locks[t.id] = currentIcon(t.id); if(locks[t.id]) icons[t.id] = locks[t.id]; }
+      else{ delete locks[t.id]; syncIcon(t.id); }
+      saveLocks();
+      updateButton(t);
+    });
     el("utOpen").addEventListener("click", openIt);
     input.addEventListener("keydown", function(e){ if(e.key === "Enter" || e.keyCode === 13){ e.preventDefault(); openIt(); } });
     if(hasHome){
@@ -665,11 +699,11 @@
       if(b){ try{ b.utabRemove(id); }catch(e){} }
       delete icons[id];
       delete iconRev[id];
+      if(locked(id)){ delete locks[id]; saveLocks(); }
     });
     homeChanged.forEach(function(t){
       var b = bridge();
-      delete icons[t.id];
-      iconRev[t.id] = 0;
+      if(!locked(t.id)){ delete icons[t.id]; iconRev[t.id] = 0; }
       if(b && t.home){ try{ b.utabGo(t.id, t.home); }catch(e){} }
     });
     rebuildButtons();
