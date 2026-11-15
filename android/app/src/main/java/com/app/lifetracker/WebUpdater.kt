@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (15.11) — `minApk` в version.json: если установленный versionCode меньше, веб-часть не скачивается и страница получает `needApk`; в describe() ещё `latest` (последняя версия в репозитории) и `lastCheckAt`.
 // Версия: 1.1 (24.10) — счётчик завершённых проверок `checkSeq` (в describe() и для вкладки «Проверка обновлений»).
 // Версия: 1.0 (16.10) — activeBundleReadOnly(): чтение активного бандла без изменения состояния (для ScanActivity).
 
@@ -83,6 +84,24 @@ class WebUpdater(
         /** Сколько проверок завершилось с запуска приложения (растёт после каждой): страница по нему узнаёт, что проверка кончилась. */
         @Volatile
         var checkSeq: Int = 0
+            private set
+
+        /** versionCode установленного APK (задаёт MainActivity до проверки; 0 — неизвестно, ограничение `minApk` тогда не действует). */
+        @Volatile
+        var installedApk: Long = 0L
+
+        /** Нужная сборка APK, если последняя веб-часть требует оболочку новее установленной (0 — не требует). */
+        @Volatile
+        var needApk: Long = 0L
+            private set
+
+        /** Последняя версия веб-части в репозитории по итогу последней проверки (пусто — не узнали). */
+        @Volatile
+        var latestWeb: String = ""
+            private set
+
+        @Volatile
+        var lastCheckWall: Long = 0L
             private set
 
         /** "0.38.41" и "V0.38.41" приводятся к "v0.38.41"; всё, что не похоже на версию, даёт null. */
@@ -318,6 +337,7 @@ class WebUpdater(
                 "ошибка: ${e.message ?: e.javaClass.simpleName}"
             }
             lastResult = result
+            lastCheckWall = System.currentTimeMillis()
             checkSeq++
             Log.i(TAG, result)
             return result
@@ -328,6 +348,7 @@ class WebUpdater(
 
     private fun doCheck(): String {
         webRoot.mkdirs()
+        needApk = 0L
         val info = JSONObject(fetchText(VERSION_URL, 64 * 1024))
         val ver = normalizeVersion(info.optString("version", ""))
             ?: throw IOException("в version.json нет корректной версии")
@@ -337,6 +358,8 @@ class WebUpdater(
         }
         val sha = info.optString("sha256", "").trim().lowercase()
         if (!SHA_RE.matches(sha)) throw IOException("в version.json нет корректного sha256")
+        latestWeb = ver
+        val minApk = info.optLong("minApk", 0L)
 
         val s = synchronized(LOCK) { load() }
         var known: String? = null
@@ -349,6 +372,10 @@ class WebUpdater(
             return "актуально: у приложения $knownNow, на GitHub $ver"
         }
         if (s.bad.contains(ver)) return "версия $ver уже не запустилась на этом телефоне, пропускаем"
+        if (minApk > 0L && installedApk in 1L until minApk) {
+            needApk = minApk
+            return "для версии $ver нужно обновить приложение (нужна сборка $minApk, у вас $installedApk)"
+        }
 
         val part = File(webRoot, "$ver.zip.part")
         try {
@@ -508,6 +535,9 @@ class WebUpdater(
             .put("busy", busy.get())
             .put("lastResult", lastResult)
             .put("checkSeq", checkSeq)
+            .put("latest", latestWeb)
+            .put("needApk", needApk)
+            .put("lastCheckAt", lastCheckWall)
             .toString()
     }
 

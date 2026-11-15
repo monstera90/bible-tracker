@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.2 (15.11) — проверка новой сборки APK при запуске и возврате ([ApkUpdater], не чаще раза в 3 часа): диалог «Скачать / Позже»; versionCode установленного APK сообщается WebUpdater (`minApk`).
 // Версия: 18.1 (13.11)
 // Версия: 11.0 (04.11)
 // Версия: 5.0 (27.10) — вкладка «Тренировки»: запрос разрешения на геолокацию (`requestLocationForWorkout`), `WorkoutTracker.onAppBackground` в onPause. Откат: MainActivity.kt 4.0.
@@ -369,6 +370,7 @@ class MainActivity : ComponentActivity() {
 
         // Live-update: до загрузки страницы выбираем бандл (скачанный или встроенный) и применяем ожидающую версию.
         webUpdater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() })
+        WebUpdater.installedApk = ApkUpdater.installedCode(applicationContext)
         val bundle = try {
             webUpdater.startLaunch()
         } catch (e: Exception) {
@@ -408,6 +410,7 @@ class MainActivity : ComponentActivity() {
             }
         )
         webUpdater.checkInBackground()
+        checkApkUpdate()
         warnIfWebViewTooOld()
         claudeTab.startIfEnabled()
         userTabs.preloadLast()
@@ -495,8 +498,9 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             // уведомления остаются на странице; приложение работает
         }
-        // Возврат на передний план: проверка обновления веб-части (не чаще раза в 15 минут, внутри WebUpdater).
+        // Возврат на передний план: проверка обновления веб-части (не чаще раза в 15 минут, внутри WebUpdater) и новой сборки APK (не чаще раза в 3 часа).
         webUpdater.checkInBackground()
+        checkApkUpdate()
         // Страница возвращает прокрутку открытой заметки (visibilitychange на возврате приходит не всегда).
         if (pageTrusted) {
             webView.evaluateJavascript("window.__ltOnAppResume && window.__ltOnAppResume()", null)
@@ -641,6 +645,25 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = if (sdk >= Build.VERSION_CODES.O) Color.TRANSPARENT else Color.BLACK
+    }
+
+    /** Автопроверка новой сборки APK (не чаще раза в 3 часа, внутри ApkUpdater): нашлась новее и о ней не отказывались — диалог «Скачать / Позже». */
+    private fun checkApkUpdate() {
+        ApkUpdater.checkInBackground(applicationContext, false) { info -> runOnUiThread { showApkUpdateDialog(info) } }
+    }
+
+    private fun showApkUpdateDialog(info: ApkUpdater.Info) {
+        if (isFinishing || isDestroyed) return
+        try {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("Доступна новая версия приложения")
+                .setMessage("Версия ${info.name} (сборка ${info.build}). Скачать и установить?")
+                .setPositiveButton("Скачать") { _, _ -> ApkUpdater.startInstall(this) }
+                .setNegativeButton("Позже") { _, _ -> ApkUpdater.dismiss(applicationContext, info.build) }
+                .show()
+        } catch (e: Exception) {
+            // окно не показалось: проверка и кнопка в «Проверке обновлений» работают как обычно
+        }
     }
 
     /** Предупреждение, если установленный WebView старее нужного (на Android 5-7 его обновляют через Google Play). */

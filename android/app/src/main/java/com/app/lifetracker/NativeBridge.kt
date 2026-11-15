@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.0 (15.11) — мост версии 38: `apkGetState` / `apkCheckNow` / `apkInstall` (обновление самого APK из GitHub Releases, ApkUpdater; вкладка «Проверка обновлений»).
 // Версия: 29.0 (14.11) — мост версии 37: карточка «Как настроение?» в виджетах (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood).
 // Версия: 28.0 (14.11)
 // Версия: 18.0 (03.11)
@@ -43,6 +44,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 11: скрытый таймер карточки (startHiddenCardTimer).
          * 12: будильники карточек (setCardAlarm / cancelCardAlarm / getCardAlarms).
          * 24: `utabHoles(spec)` — окна под кнопки страницы в сайте вкладки-сайта (сайт растянут под кнопки; Android 10+).
+         * 38: обновление самого APK (apkGetState / apkCheckNow / apkInstall; ApkUpdater).
          * 37: отметка настроения из виджета (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood): страница сообщает время последней отметки и вносит в журнал настроения ответы с карточки «Как настроение?».
          * 36: `widgetWhy(cfgId)` — какая карточка сейчас наверху виджета конструктора и почему (QrWidgets.whyJson): страница пишет это в форме виджета; ручной приоритет карточки `prio` приходит в `widgetsSync`.
          * 35: будильники, заведённые/выключенные нажатием на карточку в виджете (`widgetAlarmTake` / `widgetAlarmAck`; QrWidgets): страница вносит их в журнал событий.
@@ -68,7 +70,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 37
+        const val BRIDGE_VERSION = 38
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -130,6 +132,35 @@ class NativeBridge(private val activity: MainActivity) {
     fun restartForWebUpdate() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.recreate() }
+    }
+
+    /** JSON с состоянием обновления самого APK (установленная и последняя сборка, ход скачивания; см. [ApkUpdater.describe]). */
+    @JavascriptInterface
+    fun apkGetState(): String {
+        if (!activity.pageTrusted) return "{}"
+        return try {
+            ApkUpdater.describe(activity.applicationContext)
+        } catch (e: Exception) {
+            "{}"
+        }
+    }
+
+    /** Запускает проверку новой сборки APK прямо сейчас (в фоне); итог виден в apkGetState() по счётчику checkSeq. */
+    @JavascriptInterface
+    fun apkCheckNow() {
+        if (!activity.pageTrusted) return
+        ApkUpdater.checkInBackground(activity.applicationContext, true)
+    }
+
+    /** Скачивает найденную сборку и открывает установщик: "ok" / "permission" (открыты настройки установки неизвестных приложений) / текст причины. */
+    @JavascriptInterface
+    fun apkInstall(): String {
+        if (!activity.pageTrusted) return "страница не доверенная"
+        return try {
+            ApkUpdater.startInstall(activity)
+        } catch (e: Exception) {
+            "ошибка: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
 
     /** Самотест live-update на устройстве (без сети, в отдельной папке): текст с ✅/❌. */

@@ -1,5 +1,5 @@
 name: Web release
-# Версия: 1.0 (03.11)
+# Версия: 1.1 (15.11) — в version.json добавляется `minApk` (из tools/min-apk.txt): минимальный versionCode APK, на котором работает эта веб-часть.
 
 # Выпуск веб-части для live-update (ПЕРЕЕЗД_В_APK.md, 6.5).
 # Как выпускать: поменять APP_VERSION в sw.js (например "v0.38.42") и закоммитить в main, как и раньше.
@@ -78,8 +78,10 @@ jobs:
           SHA: ${{ steps.prep.outputs.zip_sha256 }}
         run: |
           set -euo pipefail
+          MIN=$(grep -E '^[0-9]+$' tools/min-apk.txt 2>/dev/null | head -n 1 || true)
+          MIN=${MIN:-0}
           URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/web-${VER}/${NAME}"
-          jq -n --arg v "$VER" --arg u "$URL" --arg s "$SHA" '{version: $v, url: $u, sha256: $s}' > dist/version.json
+          jq -n --arg v "$VER" --arg u "$URL" --arg s "$SHA" --argjson m "$MIN" '{version: $v, url: $u, sha256: $s, minApk: $m}' > dist/version.json
           cat dist/version.json
 
       - name: Опубликовать Release

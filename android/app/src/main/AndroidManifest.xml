@@ -8,6 +8,8 @@
          только для Android 12 и ниже), RECEIVE_BOOT_COMPLETED (будильники и опрос ставятся заново после перезагрузки).
          Для сохранения в «Загрузки» разрешений не нужно (MediaStore). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Обновление самого APK из GitHub Releases (ApkUpdater): запуск системного установщика скачанного файла. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />

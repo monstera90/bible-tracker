@@ -2,4 +2,6 @@
 <paths>
     <!-- Файлы, подготовленные для системного меню «Поделиться» (FileSaver.beginStage). Только эта папка. -->
     <cache-path name="share" path="share/" />
+    <!-- Скачанный APK новой сборки для установщика (ApkUpdater): files/apkupdate/. -->
+    <files-path name="apk_update" path="apkupdate/" />
 </paths>

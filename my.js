@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
    Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
    Версия: 149.2 (13.11)
    Версия: 91.0 (28.10) — `startWorkout` в deps «Карточек предметов» (действие «Запустить тренировку» QR «Комбинированный»).
@@ -9793,8 +9794,16 @@
       '<div class="settings-content-bottom">' +
       '<div class="settings-gear-tab updates-tab">' +
       '<h3 class="common-tab-title">Проверка обновлений</h3>' +
-      '<div id="updatesStatus" style="margin:0 0 12px;min-height:1.3em;opacity:.85;"></div>' +
+      '<div id="updatesStatus" style="margin:0 0 6px;min-height:1.3em;opacity:.85;"></div>' +
+      '<div id="updatesApkStatus" style="margin:0 0 12px;min-height:1.3em;opacity:.85;display:none;"></div>' +
       '<button class="modal-btn primary" id="updatesBtn" type="button">' + UPDATES_LABEL_CHECK + '</button>' +
+      '<button class="modal-btn primary" id="updatesApkBtn" type="button" style="display:none;margin-top:8px;">Скачать и установить приложение</button>' +
+      '<div style="margin-top:10px;"><a href="#" id="updatesMore" style="opacity:.75;font-size:.9em;">Подробнее</a></div>' +
+      '<div id="updatesDetails" style="display:none;margin-top:8px;font-size:.88em;opacity:.9;">' +
+      '<div id="updatesDetText" style="white-space:pre-line;word-break:break-word;"></div>' +
+      '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><button class="modal-btn" id="updatesWebOnly" type="button">Проверить веб-часть</button>' +
+      '<button class="modal-btn" id="updatesApkOnly" type="button" style="display:none;">Проверить приложение</button></div>' +
+      '</div>' +
       '</div>' +
       '</div>';
     var btn = document.getElementById("updatesBtn");
@@ -9806,17 +9815,39 @@
     var canRestart = !!(native && typeof native.restartForWebUpdate !== "undefined");
     var readyToReload = false;
     var busy = false;
+    // сам APK (мост ≥ 38): вторая независимая проверка; в браузере (PWA) её нет, строки про приложение скрыты
+    var apkOk = !!(native && typeof native.apkGetState !== "undefined" && typeof native.apkCheckNow !== "undefined" && typeof native.apkInstall !== "undefined");
+    var apkStatusEl = document.getElementById("updatesApkStatus");
+    var apkBtn = document.getElementById("updatesApkBtn");
+    var moreEl = document.getElementById("updatesMore");
+    var detEl = document.getElementById("updatesDetails");
+    var detTextEl = document.getElementById("updatesDetText");
+    var webOnlyBtn = document.getElementById("updatesWebOnly");
+    var apkOnlyBtn = document.getElementById("updatesApkOnly");
+    var afterWeb = null;      // что сделать, когда проверка веб-части кончилась (проверка приложения идёт после неё)
+    var apkChecking = false;
+    var apkInstalling = false;
+    var webCheckedAt = 0;
 
     function alive(){ return document.getElementById("updatesBtn") === btn; } // вкладку могли закрыть
     function setStatus(t){ statusEl.textContent = t || ""; }
+    function setApkStatus(t){ if(apkStatusEl) apkStatusEl.textContent = t || ""; }
+    function webDone(){
+      webCheckedAt = Date.now();
+      var cb = afterWeb; afterWeb = null;
+      if(cb) cb();
+      renderDetails();
+    }
     function showCheck(){
       readyToReload = false; busy = false;
       btn.disabled = false; btn.textContent = UPDATES_LABEL_CHECK;
+      webDone();
     }
     function showReload(text){
       readyToReload = true; busy = false;
       btn.disabled = false; btn.textContent = UPDATES_LABEL_RELOAD;
       if(text) setStatus(text);
+      webDone();
     }
     function showBusy(text){
       busy = true; btn.disabled = true; btn.textContent = "Проверяю…";
@@ -9848,6 +9879,91 @@
         if(st.busy) setStatus("Скачиваю обновление…");
         setTimeout(poll, UPDATES_POLL_MS);
       })();
+    }
+
+    // ---- приложение (APK)
+    function apkReadState(){
+      try{ return JSON.parse(native.apkGetState() || "{}") || {}; }catch(e){ return {}; }
+    }
+    function fmtTime(ms){
+      if(!ms) return "ещё не было";
+      try{ return new Date(ms).toLocaleString(); }catch(e){ return String(ms); }
+    }
+    function apkRender(st){
+      if(!apkOk || !apkStatusEl) return;
+      apkStatusEl.style.display = "";
+      var t = "Приложение: " + (st.lastResult || "");
+      if(st.note) t += " (" + st.note + ")";
+      setApkStatus(t);
+      if(apkBtn) apkBtn.style.display = st.newer ? "" : "none";
+    }
+    function apkCheck(done){
+      if(!apkOk || apkChecking){ if(done) done(); return; }
+      apkChecking = true;
+      var before = apkReadState().checkSeq || 0;
+      if(apkStatusEl) apkStatusEl.style.display = "";
+      setApkStatus("Приложение: проверяю…");
+      try{ native.apkCheckNow(); }catch(e){ apkChecking = false; setApkStatus("Приложение: не удалось запустить проверку: " + e); if(done) done(); return; }
+      var started = Date.now();
+      (function poll(){
+        if(!alive()){ apkChecking = false; return; }
+        var st = apkReadState();
+        if((st.checkSeq || 0) > before){ apkChecking = false; apkRender(st); renderDetails(); if(done) done(); return; }
+        if(Date.now() - started > 60000){ apkChecking = false; setApkStatus("Приложение: ответа нет дольше минуты."); if(done) done(); return; }
+        setTimeout(poll, UPDATES_POLL_MS);
+      })();
+    }
+    function apkInstallNow(){
+      if(apkInstalling || !apkOk) return;
+      apkInstalling = true; apkBtn.disabled = true;
+      var r = "";
+      try{ r = String(native.apkInstall() || ""); }catch(e){ r = "ошибка: " + e; }
+      function finish(text){ apkInstalling = false; apkBtn.disabled = false; if(text) setApkStatus(text); renderDetails(); }
+      if(r === "permission"){ finish("Приложение: разрешите установку для LifeTracker в открывшихся настройках и нажмите кнопку ещё раз."); return; }
+      if(r !== "ok"){ finish("Приложение: " + r); return; }
+      var started = Date.now();
+      (function poll(){
+        if(!alive()){ apkInstalling = false; return; }
+        var st = apkReadState();
+        if(st.downloading){
+          var mb = function(n){ return (n / 1048576).toFixed(1); };
+          setApkStatus("Приложение: скачиваю… " + mb(st.downloaded || 0) + (st.size ? " из " + mb(st.size) : "") + " МБ");
+        } else if(st.note){
+          finish(st.note.indexOf("ошибка") === 0 ? "Приложение: " + st.note : "Приложение: установщик открыт, подтвердите установку.");
+          return;
+        }
+        if(Date.now() - started > 600000){ finish("Приложение: скачивание идёт слишком долго, нажмите ещё раз."); return; }
+        setTimeout(poll, 500);
+      })();
+    }
+
+    // ---- «Подробнее»: версии, время проверок, ошибки (для разработчика)
+    function renderDetails(){
+      if(!detEl || detEl.style.display === "none" || !detTextEl) return;
+      var L = [];
+      L.push("Веб-часть:");
+      if(nativeOk){
+        var w = updatesReadNativeState();
+        L.push("  в работе: " + (w.served || "—") + (w.pending ? ", скачана и ждёт перезапуска: " + w.pending : ""));
+        L.push("  последняя в репозитории: " + (w.latest || "ещё не узнали"));
+        L.push("  последняя проверка: " + fmtTime(w.lastCheckAt));
+        L.push("  итог: " + (w.lastResult || "—"));
+        if(w.needApk) L.push("  требует приложение: сборка " + w.needApk + " и новее");
+      } else {
+        L.push("  последняя проверка: " + (webCheckedAt ? fmtTime(webCheckedAt) : "ещё не было"));
+      }
+      if(apkOk){
+        var a = apkReadState();
+        L.push("");
+        L.push("Приложение:");
+        L.push("  установлено: " + (a.installedName || "—") + ", сборка " + (a.installedCode || "—"));
+        L.push("  последнее в релизах: " + (a.latestBuild ? (a.latestName || "—") + ", сборка " + a.latestBuild + (a.latestTag ? " (тег " + a.latestTag + ")" : "") : "ещё не узнали"));
+        L.push("  последняя проверка: " + fmtTime(a.lastCheckAt));
+        L.push("  итог: " + (a.lastResult || "—"));
+        if(a.note) L.push("  установка: " + a.note);
+        if(a.canInstall === false) L.push("  установка неизвестных приложений: не разрешена");
+      }
+      detTextEl.textContent = L.join("\n");
     }
 
     // ---- браузер (PWA, service worker)
@@ -9898,8 +10014,28 @@
         }
         return;
       }
+      afterWeb = function(){ if(apkOk) apkCheck(); }; // сначала веб-часть, потом приложение
       if(nativeOk) nativeCheck(); else swCheck();
     });
+
+    if(apkBtn) apkBtn.addEventListener("click", apkInstallNow);
+    if(moreEl) moreEl.addEventListener("click", function(ev){
+      ev.preventDefault();
+      var open = detEl.style.display === "none";
+      detEl.style.display = open ? "" : "none";
+      if(open) renderDetails();
+    });
+    if(webOnlyBtn) webOnlyBtn.addEventListener("click", function(){
+      if(busy || readyToReload) return;
+      afterWeb = null;
+      if(nativeOk) nativeCheck(); else swCheck();
+    });
+    if(apkOk && apkOnlyBtn){
+      apkOnlyBtn.style.display = "";
+      apkOnlyBtn.addEventListener("click", function(){ apkCheck(); });
+      var ast = apkReadState();
+      if(ast.latestBuild) apkRender(ast); // уже найденная автопроверкой новая сборка видна сразу
+    }
 
     // уже скачанное, но не применённое обновление — сразу предлагаем перезагрузку
     if(nativeOk){

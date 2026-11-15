@@ -1,5 +1,5 @@
 name: Android APK
-# Версия: 1.0 (03.11)
+# Версия: 1.1 (15.11) — после публикации нового релиза удаляются все прежние релизы apk-v* (остаётся только последний APK; приложение берёт его из списка релизов, ApkUpdater).
 
 # Сборка подписанного APK. Запуск: пуш в main с изменениями в android/** (Kotlin, ресурсы, манифест, Gradle),
 # вручную (Actions → Android APK → Run workflow) или тегом apk-v*.
@@ -119,3 +119,17 @@ jobs:
             --title "LifeTracker APK ${{ steps.prep.outputs.version_name }} (сборка ${{ github.run_number }})" \
             --notes "$NOTES" \
             --latest=false
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Оставить только последний APK-релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # новый релиз должен существовать, иначе ничего не удаляем
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+          OLD=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 500 --json tagName --jq '.[].tagName' | grep '^apk-v' | grep -vxF "$TAG" || true)
+          for T in $OLD; do
+            echo "Удаляю прежний APK-релиз $T"
+            gh release delete "$T" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done
