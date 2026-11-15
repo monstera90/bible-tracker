@@ -771,9 +771,18 @@ class QrPriorityTest {
         val hs = listOf(hab("water", setOf("e")), hab("run", setOf("m")), hab("read", setOf("m")))
         val cf = cfgH(hs, listOf(card("cal")))
         val s = snap(cal(8))
-        // утро: календарь, затем бег и чтение (каждая своей карточкой); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
-        assertEquals(listOf("cal", "hab_0", "hab_1"), keys(run(cf, s)))
+        // утро: календарь и ОДНА карточка привычек (бег и чтение сменяют друг друга на ней); «вода» — вечерняя, в круг не попадает, но стоит в ряду последней
+        assertEquals(listOf("cal", "hab_0"), keys(run(cf, s)))
         assertEquals(listOf("run", "read", "water"), QrPriority.habitList(cf, s).map { it.key })
+        assertEquals(2, QrPriority.habitSlots(cf, s)[0].cycleN) // очередей в круге — по числу привычек «в своё время»
+    }
+
+    @Test fun habits_manyDue_stillExactlyOneCard() {
+        val hs = listOf(hab("a", setOf("m")), hab("b", setOf("m")), hab("c", setOf("m")), hab("d", setOf("m")))
+        val cf = cfgH(hs, listOf(card("cal"), card("x")))
+        val s = snap(cal(8))
+        assertEquals(listOf("cal", "x", "hab_0"), keys(run(cf, s))) // свайп по стопке — только по группам, привычки не размножают карточки
+        assertEquals(4, QrPriority.habitSlots(cf, s)[0].cycleN)
     }
 
     @Test fun habits_noneDue_oneSlotShowsFirstInUserOrder() {
@@ -794,8 +803,8 @@ class QrPriorityTest {
         val all = snap(cal(8), hidden = setOf("run"))
         assertEquals(emptyList<String>(), keys(run(cf, all)))
         assertEquals(0, QrPriority.visibleCount(cf, all))
-        // отметка вчерашним днём сегодня ничего не скрывает
-        assertEquals(listOf("hab_0", "hab_1"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8)))))
+        // отметка вчерашним днём сегодня ничего не скрывает: обе привычки на одной карточке
+        assertEquals(listOf("hab_0"), keys(run(cfgH(listOf(hab("run", setOf("m"), done = 20261115), hab("read", setOf("m")))), snap(cal(8)))))
     }
 
     // ---------- круг равных: привычки «в своё время» и календарь ----------
@@ -807,28 +816,52 @@ class QrPriorityTest {
         val ev = card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)
         val hs = listOf(hab("run", setOf("e")), hab("read", setOf("e")), hab("morning", setOf("m")))
         val cf = cfgCycle(hs, listOf(card("q"), ev))
-        val tops = (0..5).map { run(cf, snap(cal(18, it))).topKey }
-        assertEquals(setOf("e", "hab_0", "hab_1"), tops.toSet()) // «утренняя» привычка в круг не входит: слотов только по привычкам «в своё время»
-        for (i in 1 until tops.size) assertTrue(tops[i] != tops[i - 1]) // каждую минуту — следующая карточка
-        assertEquals(tops[0], tops[3]) // круг из трёх: через три минуты — снова та же
-        for (m in 0..2) assertEquals(SCORE, run(cf, snap(cal(18, m))).cards[0].score)
+        val rs = (0..5).map { run(cf, snap(cal(18, it))) }
+        assertEquals(setOf("e", "hab_0"), rs.map { it.topKey }.toSet()) // карточек две: календарь и «Привычки»; «утренняя» привычка в круг не входит
+        // круг из трёх очередей (календарь, бег, чтение): за три минуты календарь наверху один раз, карточка «Привычки» — два, и на ней разные привычки
+        val three = rs.take(3)
+        assertEquals(1, three.count { it.topKey == "e" })
+        assertEquals(setOf(0, 1), three.filter { it.topKey == "hab_0" }.map { it.habitIdx }.toSet())
+        assertEquals(rs[0].topKey, rs[3].topKey) // через три минуты — снова то же
+        assertEquals(rs[0].habitIdx, rs[3].habitIdx)
+        for (m in 0..2) assertEquals(SCORE, rs[m].cards[0].score)
     }
 
-    @Test fun cycle_noCalendar_habitsTakeTurns_oneHabitStaysOnTop() {
+    @Test fun cycle_noCalendar_habitsTakeTurns_cardStaysHabitChanges() {
         val two = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
-        val tops = (0..3).map { run(two, snap(cal(18, it))).topKey }
-        assertEquals(setOf("hab_0", "hab_1"), tops.toSet())
-        assertTrue(tops[0] != tops[1])
+        val rs = (0..3).map { run(two, snap(cal(18, it))) }
+        for (r in rs) assertEquals("hab_0", r.topKey) // карточка одна и стоит на месте
+        assertEquals(setOf(0, 1), rs.map { it.habitIdx }.toSet())
+        assertTrue(rs[0].habitIdx != rs[1].habitIdx) // а привычка на ней меняется каждую минуту
+        assertEquals(rs[0].habitIdx, rs[2].habitIdx)
         val one = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("m"))), listOf(card("q")))
-        for (m in 0..3) assertEquals("hab_0", run(one, snap(cal(18, m))).topKey) // привычка одна — наверху всегда
+        for (m in 0..3) {
+            val r = run(one, snap(cal(18, m)))
+            assertEquals("hab_0", r.topKey) // привычка «в своё время» одна — наверху всегда она
+            assertEquals(0, r.habitIdx)
+        }
+    }
+
+    @Test fun cycle_onlyHabitCardInStack_stillTakesTurns() {
+        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), emptyList()) // в стопке всего одна карточка
+        val rs = (0..3).map { run(cf, snap(cal(18, it))) }
+        assertEquals(listOf("hab_0"), keys(rs[0]))
+        for (r in rs) assertEquals("hab_0", r.topKey)
+        assertEquals(setOf(0, 1), rs.map { it.habitIdx }.toSet())
+        assertEquals(rs[0].cycleAt, cal(18, 0).timeInMillis + 60_000L + 1_000L) // круг идёт: виджет перерисуется на следующей минуте
     }
 
     @Test fun cycle_previousTopDoesNotHoldHysteresis() {
-        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q")))
-        val a = run(cf, snap(cal(18, 0))).topKey
-        val b = run(cf, snap(cal(18, 1), lastTop = a))
-        assertTrue(b.topKey != a)
-        assertEquals(b.topKey, b.mainTopKey)
+        val ev = card("e", dyn = "event", at = cal(18).timeInMillis + 5 * hour)
+        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), ev))
+        for (m in 0..5) {
+            val free = run(cf, snap(cal(18, m)))
+            val prev = run(cf, snap(cal(18, m - 1))).topKey
+            val held = run(cf, snap(cal(18, m), lastTop = prev))
+            assertEquals(free.topKey, held.topKey) // прежняя верхняя карточка круг не удерживает
+            assertEquals(free.habitIdx, held.habitIdx)
+            assertEquals(held.topKey, held.mainTopKey)
+        }
     }
 
     @Test fun cycle_urgentBeatsCircle_andCycleAtIsNextMinute() {
@@ -850,9 +883,9 @@ class QrPriorityTest {
         val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 5 * hour),
             card("t", dyn = "task", at = now - hour, tid = "T")))
         val tops = (0..5).map { run(cf, snap(cal(18, it))).topKey }
-        assertEquals(setOf("e", "hab_0", "hab_1"), tops.toSet()) // задача (даже просроченная) наверх в круге не встаёт
+        assertEquals(setOf("e", "hab_0"), tops.toSet()) // задача (даже просроченная) наверх в круге не встаёт
         val last = run(cf, snap(c)).cards.map { it.card.key }
-        assertEquals("t", last[3]) // после трёх участников круга
+        assertEquals("t", last[2]) // после двух участников круга: календаря и карточки «Привычки»
         assertTrue(QrPriority.SCORE_TASK_OVERDUE < QrPriority.SCORE_CYCLE && QrPriority.SCORE_TASK_TODAY < QrPriority.SCORE_CYCLE)
     }
 

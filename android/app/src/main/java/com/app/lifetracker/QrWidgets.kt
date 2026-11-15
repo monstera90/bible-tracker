@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.11 (15.11) — карточка «Привычки» в стопке одна (QrPriority 4.8): привычки «в своё время» сменяют друг друга на ней по кругу, а не лежат отдельными карточками; свайп листает группы, привычки листаются нажатием у края ([habitNav]). Выбор нажатием держится [EVENT_RESET_MS] (60 с) после последнего нажатия.
 // Версия: 14.10 (15.11) — круг равных ([QrPriority.cycleOrder]): привычки «в своё время» и календарь встают наверх по очереди, каждая на минуту; минутный обработчик [armCycle] перерисовывает виджет, пока экран включён. Страховка возврата стала точной: [GUARD_MS] = 60 с (было 75), проверка каждые [GUARD_TICK_MS] (15 с), а не раз в 75 с; при погашенном экране настройки виджетов не читаются.
 // Версия: 14.9 (15.11) — галочка «Показывать только мероприятия на сегодня и на завтра» (`eventsSoon`, под «Показывать события календаря», по умолчанию выключена): окно карточки события — сегодня и завтра вместо [QrPriority.DYN_DAYS] суток; нет событий в окне — карточки календаря в стопке нет ([QrPriority.eventCards]).
 // Версия: 14.8 (15.11) — убран вертикальный столбец белых кружков слева/справа от виджета (индикатор положения в стопке `qr_dots`): больше не рисуется и не показывается при смахивании и слайд-шоу.
@@ -83,8 +84,9 @@ import java.util.UUID
  * Балл карточки по релевантности считается по всем будильникам ряда: звонит любой — выше всего, зазвонит в ближайший час — «скоро». Карточка стоит после карточек задач и перед карточками заряда.
  *
  * Галочка «Отображать карточки привычек» (`habits` у виджета, `hab` — все привычки пользователя: ключ карточки, код, название, время суток и дни недели привычки в этом виджете,
- * `last` — последний отмеченный день): привычка, у которой сейчас «её» время ([QrPriority.habitDue]), встаёт в стопку своей карточкой и участвует в круге наравне с календарём
- * (календарь → бег → чтение → календарь …, каждая карточка наверху по минуте — [QrPriority.cycleOrder], только «по релевантности»); привычки не в своё время в круг не попадают. Если ни у одной привычки сейчас нет её времени, в стопке один слот с первой привычкой.
+ * `last` — последний отмеченный день): в стопке ВСЕГДА одна карточка привычек ([QrPriority.habitSlots]) — свайп листает группы карточек, а не привычки. Привычка, у которой сейчас «её» время ([QrPriority.habitDue]),
+ * участвует в круге наравне с календарём (календарь → бег → чтение → календарь …, каждая наверху по минуте — [QrPriority.cycleOrder], только «по релевантности»), но очередь привычки — это очередь
+ * на той же карточке: меняется её лицо, сама карточка стоит на месте ([QrPriority.Result.habitIdx], [habitViewsOf]); привычки не в своё время в круг не попадают. Если ни у одной привычки сейчас нет её времени, на карточке первая привычка.
  * Нажатие у левого края — предыдущая привычка, у правого — следующая (по ряду: сначала «в своё время», затем остальные; без зацикливания; выбор держит [habitNav] в [K_HABIDX]
  * [EVENT_RESET_MS], точки внизу — [withEventDots]); одно нажатие в центре открывает карту дней привычки, двойное — отмечает сегодня и убирает из стопки до полуночи
  * только эту привычку ([hideHabitToday]). Привычка, отмеченная в приложении, пропадает по `last`. Все привычки отмечены — карточки привычек в стопке нет совсем ([QrPriority.habitSlots]).
@@ -213,7 +215,7 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1)
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -760,16 +762,17 @@ object QrWidgets {
     class HabitView(val card: Card, val index: Int, val total: Int)
 
     /**
-     * (ряд привычек, что показывает каждый слот). Слот показывает привычку, выбранную нажатием у края (не дольше [EVENT_RESET_MS] и пока она не отмечена),
-     * иначе привычку с номером слота в [QrPriority.habitList] — при слотах «в своё время» это та самая привычка, чьё время сейчас.
+     * (ряд привычек, что показывает карточка «Привычки»). Карточка показывает привычку, выбранную нажатием у края (не дольше [EVENT_RESET_MS] после последнего нажатия
+     * и пока она не отмечена), иначе — ту, чья очередь в круге равных сейчас ([QrPriority.Result.habitIdx]); без «релевантности» круга нет — первая из ряда («в своё время» стоят впереди).
      */
     private fun habitViewsOf(ctx: Context, cfg: Cfg, s: QrPriority.Snapshot): Pair<List<Card>, Map<String, HabitView>> {
         val list = QrPriority.habitList(cfg, s)
         val out = HashMap<String, HabitView>()
         if (list.isEmpty()) return Pair(list, out)
         val over = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfg.id) }
+        val turn = if (cfg.relevance) QrPriority.build(cfg, s).habitIdx else 0
         for (slot in QrPriority.habitSlots(cfg, s)) {
-            var idx = QrPriority.habitSlotIndex(slot.key)
+            var idx = turn
             val e = over?.optJSONObject(slot.key)
             if (e != null) {
                 val t = e.optLong("t", 0L)

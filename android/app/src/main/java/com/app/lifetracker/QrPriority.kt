@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.8 (15.11) — карточка «Привычки» в стопке всегда одна ([habitSlots], ключ [HABIT_SLOT_KEY]): свайп листает группы, привычки листаются только нажатием у края. Привычки «в своё время» по-прежнему сменяют друг друга и календарь раз в минуту, но очередь каждой — очередь на одной карточке ([Card.cycleN], [Result.habitIdx]), а не отдельная карточка стопки.
 // Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CYCLE]), в круг равных входят только слоты привычек и событие.
 // Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие) имеют один балл [SCORE_CYCLE] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
 // Версия: 4.5 (14.11) — карточка «Привычки» (`Cfg.habits`, `Cfg.habitCards`): привычки, у которых сейчас «их» время, встают в стопку каждая своей карточкой-слотом («hab_0», «hab_1» …) и участвуют в круге наравне с календарём; нет таких — один слот, который листают у краёв; все отмечены — карточек нет ([habitList], [habitSlots]).
@@ -135,7 +136,9 @@ object QrPriority {
         /** Почему она наверху («Идёт тренировка», «Будильник через 25 мин», «Сейчас её время: утро»); пусто, если [topKey] пуст. */
         val topReason: String = "",
         /** Когда круг равных ([cycleOrder]) выставит наверх следующую карточку; [Long.MAX_VALUE] — круга нет (равных меньше двух). В [nextChangeAt] не входит (будильник каждую минуту при погашенном экране не нужен): оболочка ставит для него обработчик на время, пока экран включён ([QrWidgets]). */
-        val cycleAt: Long = Long.MAX_VALUE
+        val cycleAt: Long = Long.MAX_VALUE,
+        /** Какую из привычек «в своё время» ([habitList], с нуля) круг равных сейчас выставляет на единственной карточке «Привычки»; 0 — круга нет. Показ слота решает оболочка ([QrWidgets.habitViews]). */
+        val habitIdx: Int = 0
     )
 
     // ---------- построение ----------
@@ -147,7 +150,9 @@ object QrPriority {
         val main = ArrayList<Scored>()
         var top = ""
         var cyc = false
-        if (!cfg.relevance || base.size < 2) {
+        var habitIdx = 0
+        // одна карточка «Привычки» с двумя и больше привычками «в своё время» — тоже круг (привычки сменяют друг друга на ней), поэтому считается и при одной карточке в стопке
+        if (!cfg.relevance || (base.size < 2 && base.sumOf { cycleWeight(it) } < 2)) {
             for (c in base) main.add(Scored(c, 0, ""))
         } else {
             val head = ArrayList<Card>()
@@ -163,7 +168,9 @@ object QrPriority {
                 }
                 lift(scored)
                 // sortedWith устойчивая: при равных баллах остаётся порядок пользователя; события и заряд уточняет tidy
-                val sorted = ArrayList(cycleOrder(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })), s.now))
+                val cycled = cycleOrder(tidy(scored.sortedWith(compareByDescending<Scored> { it.score })), s.now)
+                val sorted = ArrayList(cycled.order)
+                habitIdx = cycled.habitIdx
                 cyc = cycleSize(sorted) >= 2
                 if (sorted.first().score > 0) top = sorted.first().card.key
                 top = keepPrevTop(sorted, top, s)
@@ -180,7 +187,7 @@ object QrPriority {
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
         val topScored: Scored? = if (serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "", cycleAt)
+        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topScored?.card?.title ?: "", topScored?.reason ?: "", cycleAt, habitIdx)
     }
 
     /**
@@ -245,30 +252,51 @@ object QrPriority {
         if (sorted.isEmpty() || sorted[0].score <= 0) return 0
         val top = sorted[0].score
         var n = 0
-        for (x in sorted) { if (x.score != top) break; if (isCycleMember(x.card)) n++ }
+        for (x in sorted) { if (x.score != top) break; if (isCycleMember(x.card)) n += cycleWeight(x.card) }
         return n
     }
 
     /**
+     * Сколько очередей круга занимает карточка. Привычки «в своё время» все на ОДНОЙ карточке «Привычки» (свайп листает группы, а не привычки), но очередь у каждой своя:
+     * у слота привычек вес — число таких привычек ([Card.cycleN]), у остальных участников — один.
+     */
+    private fun cycleWeight(c: Card): Int = if (c.dyn == "habit") Math.max(1, c.cycleN) else 1
+
+    /** Итог [cycleOrder]: порядок карточек и номер привычки (среди «в своё время»), чья очередь на карточке «Привычки». */
+    private class Cycled(val order: List<Scored>, val habitIdx: Int)
+
+    /**
      * Круг равных. Привычки, у которых сейчас «их» время, и карточки календаря (событие, задача на сегодня) имеют один балл ([SCORE_CYCLE]) и равные права:
-     * если они в верхней группе (с баллом, как у первой карточки) вдвоём и больше, наверху по очереди стоит каждая — по [CYCLE_MS] (60 с), номер очереди — `now / CYCLE_MS`.
+     * если их очередей в верхней группе (с баллом, как у первой карточки) две и больше, наверху по очереди стоит каждая — по [CYCLE_MS] (60 с), номер очереди — `now / CYCLE_MS`.
+     * Все привычки «в своё время» — на одной карточке «Привычки» ([habitSlots]): у неё несколько очередей подряд, и меняется не карточка, а привычка на ней ([Cycled.habitIdx]).
      * Остальные карточки верхней группы (например, обычная карточка с её временем) идут после участников круга; всё ниже по баллу не трогается.
      * Привычка не в своё время балла круга не имеет и в круг не входит. Одна карточка в группе — ничего не меняется.
      */
-    private fun cycleOrder(sorted: List<Scored>, now: Long): List<Scored> {
-        if (cycleSize(sorted) < 2) return sorted
+    private fun cycleOrder(sorted: List<Scored>, now: Long): Cycled {
+        if (cycleSize(sorted) < 2) return Cycled(sorted, 0)
         val top = sorted[0].score
         var end = 0
         while (end < sorted.size && sorted[end].score == top) end++
         val tier = sorted.subList(0, end)
         val members = tier.filter { isCycleMember(it.card) }
-        val shift = Math.floorMod(now / CYCLE_MS, members.size.toLong()).toInt()
+        var total = 0
+        for (m in members) total += cycleWeight(m.card)
+        val turn = Math.floorMod(now / CYCLE_MS, total.toLong()).toInt() // номер очереди среди всех очередей круга (у слота привычек их несколько)
+        var shift = 0
+        var habitIdx = 0
+        var from = 0
+        for (i in members.indices) {
+            val w = cycleWeight(members[i].card)
+            if (turn >= from && turn < from + w) shift = i
+            if (members[i].card.dyn == "habit") habitIdx = (turn - from).coerceIn(0, w - 1) // до своей очереди и после неё слот показывает ближайшую крайнюю привычку
+            from += w
+        }
         val out = ArrayList<Scored>(sorted.size)
         out.addAll(members.drop(shift))
         out.addAll(members.take(shift))
         out.addAll(tier.filter { !isCycleMember(it.card) })
         out.addAll(sorted.subList(end, sorted.size))
-        return out
+        return Cycled(out, habitIdx)
     }
 
     /** Когда начнётся следующая очередь круга равных (граница минуты плюс секунда). */
@@ -426,8 +454,9 @@ object QrPriority {
     /** Сколько привычек (кандидатов) принимает карточка «Привычки» (то же число — MAX_HABITS в widgets.js). */
     const val HABIT_NAV_MAX = 24
 
-    /** Ключи карточек-слотов привычек в стопке: «hab_0», «hab_1» … ([habitSlots]). */
+    /** Ключ карточки «Привычки» в стопке: «hab_0» ([habitSlots]); префикс проверяется при нажатии у края карточки. */
     const val HABIT_SLOT_PREFIX = "hab_"
+    const val HABIT_SLOT_KEY = HABIT_SLOT_PREFIX + "0"
 
     private fun dayKeyOf(cal: Calendar): Int = cal.get(Calendar.YEAR) * 10000 + (cal.get(Calendar.MONTH) + 1) * 100 + cal.get(Calendar.DAY_OF_MONTH)
 
@@ -445,28 +474,21 @@ object QrPriority {
     }
 
     /**
-     * Карточки-слоты привычек в стопке. Слотов столько, сколько привычек «в своё время» (каждая своей карточкой — так они сменяют друг друга в круге наравне
-     * с календарём); нет таких — один слот с первой привычкой списка. Все привычки отмечены — слотов нет, карточки в стопке нет совсем.
-     * Слот копирует время суток и дни привычки, которую показывает по умолчанию, поэтому «по релевантности» он поднимается как обычная карточка с временем.
-     * Какую привычку слот показывает на самом деле (пролистали нажатием у края), решает оболочка ([QrWidgets.habitViews]).
+     * Карточка «Привычки» в стопке — ВСЕГДА одна, сколько бы привычек ни было «в своё время»: свайп листает группы карточек, а привычки листаются только нажатием у края.
+     * Очередей в круге у неё столько, сколько привычек «в своё время» ([Card.cycleN]): они сменяют друг друга на этой же карточке раз в [CYCLE_MS] ([Result.habitIdx]).
+     * Нет таких — карточка с первой привычкой списка, в круг не входит. Все привычки отмечены — карточки нет совсем.
+     * Карточка копирует время суток и дни первой привычки списка (при «своих» привычках это та, чьё время сейчас), поэтому «по релевантности» поднимается как обычная карточка с временем.
+     * Какую привычку она показывает на самом деле (очередь круга или нажатие у края), решает оболочка ([QrWidgets.habitViews]).
      */
     fun habitSlots(cfg: Cfg, s: Snapshot): List<Card> {
         val list = habitList(cfg, s)
         if (list.isEmpty()) return emptyList()
-        val n = Math.max(1, list.count { habitDue(it, s) })
-        val out = ArrayList<Card>(n)
-        for (i in 0 until n) {
-            val b = list[i]
-            out.add(Card(HABIT_SLOT_PREFIX + i, b.code, b.title, emptyList(), b.times, b.days, "none", b.color, "habit", 0L, habit = true))
-        }
-        return out
+        val b = list[0]
+        val due = list.count { habitDue(it, s) }
+        return listOf(Card(HABIT_SLOT_KEY, b.code, b.title, emptyList(), b.times, b.days, "none", b.color, "habit", 0L, habit = true, cycleN = Math.max(1, due)))
     }
 
-    /** Номер слота по его ключу («hab_2» → 2). */
-    fun habitSlotIndex(key: String): Int =
-        if (key.startsWith(HABIT_SLOT_PREFIX)) (key.substring(HABIT_SLOT_PREFIX.length).toIntOrNull() ?: 0) else 0
-
-    /** Слоты привычек встают после остальных карточек и перед карточками заряда. */
+    /** Карточка «Привычки» встаёт после остальных карточек и перед карточками заряда. */
     private fun withHabitSlots(shown: List<Card>, cfg: Cfg, s: Snapshot): List<Card> {
         if (!cfg.habits) return shown
         val slots = habitSlots(cfg, s)
