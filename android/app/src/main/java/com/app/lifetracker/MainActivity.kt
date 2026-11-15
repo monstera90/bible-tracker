@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.3 (15.11) — белый экран после возврата из другого приложения: после возврата (onStop → onResume) проверяется, что страница рисует кадры (requestAnimationFrame отвечает); если нет — встряска окна WebView (INVISIBLE → VISIBLE), затем reload, затем recreate. Откат: MainActivity.kt 18.2.
 // Версия: 18.2 (15.11) — проверка новой сборки APK при запуске и возврате ([ApkUpdater], не чаще раза в 3 часа): диалог «Скачать / Позже»; versionCode установленного APK сообщается WebUpdater (`minApk`).
 // Версия: 18.1 (13.11)
 // Версия: 11.0 (04.11)
@@ -484,6 +485,11 @@ class MainActivity : ComponentActivity() {
         // Chromium мог не нарисовать кадр, пока окно было скрыто/на паузе (возврат жестом «назад», быстрое переключение приложений):
         // просим перерисовать сразу после того, как окно встало на место.
         webView.post { if (!isDestroyed) webView.invalidate() }
+        // Возврат из другого приложения: убеждаемся, что страница действительно рисуется (иначе — белый экран до перезапуска).
+        if (wasStopped) {
+            wasStopped = false
+            startPageHealthCheck()
+        }
         // Шаг 5: пока приложение на экране, напоминания и общие задачи показывает страница, а не оболочка.
         NotifyStore.appForeground = true
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
@@ -592,11 +598,81 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        wasStopped = true
+        pageHealthSeq++ // проверка прошлого возврата больше не нужна
         // Окно скрыто: теперь можно остановить анимации и таймеры страницы (страница о паузе уже узнала в onPause).
         webView.onPause()
         // Играет видео на открытой вкладке-сайте — оно уходит в плавающее окно и не прерывается (нужно «Поверх других приложений»).
         userTabs.onAppHidden()
         super.onStop()
+    }
+
+    // ---- Самолечение белого экрана после возврата ----
+    // Белый экран целиком (интерфейса нет, перезапуск помогает, бывает не каждый раз) — страница жива, но WebView не рисует
+    // (кадр вытеснен системой в фоне или окно осталось «скрытым» для Chromium) либо рендер убит без вызова onRenderProcessGone.
+    // Живая видимая страница получает requestAnimationFrame несколько раз в секунду; если за ~1,2 с он не сработал:
+    // ступень 0 — «встряска» окна (INVISIBLE → VISIBLE), 1 — reload страницы (данные уже сохранены в onPause), 2 — recreate().
+    private var wasStopped = false
+    private var pageHealthSeq = 0
+
+    private fun startPageHealthCheck() {
+        val seq = ++pageHealthSeq
+        handler.postDelayed({ pageHealthStep(seq, 0) }, 1500L)
+    }
+
+    private fun pageHealthStep(seq: Int, stage: Int) {
+        if (isDestroyed || seq != pageHealthSeq || !pageTrusted) return
+        if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
+        val v = webView
+        v.evaluateJavascript("(function(){window.__ltRafAt=0;requestAnimationFrame(function(){window.__ltRafAt=Date.now()});return 1})()", null)
+        handler.postDelayed({
+            if (isDestroyed || seq != pageHealthSeq) return@postDelayed
+            var answered = false
+            v.evaluateJavascript("window.__ltRafAt||0") { res ->
+                if (answered) return@evaluateJavascript
+                answered = true
+                if (isDestroyed || seq != pageHealthSeq) return@evaluateJavascript
+                val painted = res != null && res != "0" && res != "null"
+                if (painted) {
+                    if (stage > 0) {
+                        android.util.Log.w("LTHealth", "страница снова рисует после ступени ${stage - 1}")
+                        debugLog("health", "страница снова рисует после ступени ${stage - 1}")
+                    }
+                } else {
+                    pageHealthRecover(seq, stage, "кадры не рисуются")
+                }
+            }
+            // ответа нет вообще — страница/рендер не отвечает
+            handler.postDelayed({
+                if (answered || isDestroyed || seq != pageHealthSeq) return@postDelayed
+                answered = true
+                pageHealthRecover(seq, stage, "страница не отвечает")
+            }, 3000L)
+        }, 1200L)
+    }
+
+    private fun pageHealthRecover(seq: Int, stage: Int, why: String) {
+        if (isDestroyed || seq != pageHealthSeq) return
+        android.util.Log.w("LTHealth", "белый экран: $why, ступень $stage")
+        debugLog("health", "белый экран: $why, ступень $stage")
+        when (stage) {
+            0 -> {
+                webView.onResume()
+                webView.visibility = View.INVISIBLE
+                handler.post {
+                    if (isDestroyed || seq != pageHealthSeq) return@post
+                    webView.visibility = View.VISIBLE
+                    webView.requestLayout()
+                    webView.invalidate()
+                    pageHealthStep(seq, 1)
+                }
+            }
+            1 -> {
+                webView.reload()
+                handler.postDelayed({ pageHealthStep(seq, 2) }, 4000L)
+            }
+            else -> recreate()
+        }
     }
 
     override fun onDestroy() {
