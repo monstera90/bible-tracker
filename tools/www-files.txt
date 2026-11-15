@@ -54,6 +54,7 @@ widgets.js
 claudetab.js
 usertabs.js
 tabreorder.js
+hotkeys.js
 system.js
 music.js
 pomodoro.js

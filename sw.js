@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.268";
+const APP_VERSION = "v0.39.269";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -179,6 +179,7 @@ const ASSETS = [
   "./claudetab.js",
   "./usertabs.js",
   "./tabreorder.js",
+  "./hotkeys.js",
   "./system.js",
   "./music.js",
   "./pomodoro.js",
