@@ -155,11 +155,11 @@ class QrPriorityTest {
             card("t1", dyn = "task", at = now - hour, tid = "A"), card("t2", dyn = "task", at = now + 2 * hour, tid = "B"),
             card("e", dyn = "event", at = now + 30 * hour), card("q")
         )
-        // прежней верхней была просроченная задача (650): гистерезис не должен оставлять её наверху
+        // прежней верхней была просроченная задача: календарь выше задач, гистерезис не должен оставлять её наверху
         val r = run(cfg(cards, true), snap(c, lastTop = "t1"))
         assertEquals(listOf("e", "t1", "q"), keys(r)) // задачи — одна карточка (первая по времени)
         assertEquals("e", r.anchorKey)
-        assertEquals(QrPriority.SCORE_TASK_OVERDUE + QrPriority.HYSTERESIS, scoreOf(r, "e"))
+        assertEquals(QrPriority.SCORE_CYCLE, scoreOf(r, "e")) // событие вне часа — в круге равных, выше любой задачи
     }
 
     @Test fun anchor_isFirstDyn_whenNoRecommended() {
@@ -299,7 +299,7 @@ class QrPriorityTest {
             card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 20 * min), card("al", alarmId = "AL1")
         )
         val r = run(cfg(cards, true), snap(c, alarms = mapOf("AL1" to now + 10 * min)))
-        assertEquals(listOf("al", "ev", "over", "sch", "bat"), keys(r)) // задачи — одна карточка: показана «over» (первая по времени)
+        assertEquals(listOf("al", "ev", "sch", "over", "bat"), keys(r)) // задачи — одна карточка: показана «over» (первая по времени)
     }
 
     @Test fun battery_low_raisesOnlyBatteryCards() {
@@ -348,17 +348,17 @@ class QrPriorityTest {
 
     @Test fun hysteresis_diff150_changes() {
         val now = cal(12).timeInMillis
-        val cards = listOf(card("sch", times = setOf("d")), card("over", dyn = "task", at = now - hour, tid = "B"))
-        val r = run(cfg(cards, true), snap(cal(12), lastTop = "sch")) // 500 → 650
-        assertEquals("over", r.topKey)
-        assertEquals(listOf("over", "sch"), keys(r))
+        val cards = listOf(card("sch", times = setOf("d")), card("ev", dyn = "event", at = now + 10 * min))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "sch")) // 500 → 750
+        assertEquals("ev", r.topKey)
+        assertEquals(listOf("ev", "sch"), keys(r))
     }
 
     @Test fun hysteresis_diffExactly100_changes() {
         val now = cal(12).timeInMillis
-        val cards = listOf(card("over", dyn = "task", at = now - hour, tid = "B"), card("ev", dyn = "event", at = now + 10 * min))
-        val r = run(cfg(cards, true), snap(cal(12), lastTop = "over")) // 650 → 750: «минимум на 100»
-        assertEquals("ev", r.topKey)
+        val cards = listOf(card("ev", dyn = "event", at = now + 10 * min), card("al", alarmId = "AL1"))
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "ev", alarms = mapOf("AL1" to now + 10 * min))) // 750 → 850: «минимум на 100»
+        assertEquals("al", r.topKey)
         // отрыв меньше 100 удержал бы: идущая тренировка (1040) против таймера (1020) — 20
         val c2 = listOf(card("t", live = listOf(Live("timer", "x"))), card("w", live = listOf(Live("workout", ""))))
         val r2 = run(cfg(c2, true), snap(cal(12), timers = setOf("x"), workout = true, lastTop = "t"))
@@ -842,6 +842,18 @@ class QrPriorityTest {
         val r2 = run(calm, snap(c))
         assertEquals(now + 60_000L + 1_000L, r2.cycleAt)
         assertEquals(cal(23, 0).timeInMillis + 5_000L, r2.nextChangeAt) // будильник ради круга не ставится: ближайшее — граница окон времени суток
+    }
+
+    @Test fun cycle_tasksAreBelowCalendarAndHabits_andOutsideTheCircle() {
+        val c = cal(18, 0)
+        val now = c.timeInMillis
+        val cf = cfgCycle(listOf(hab("run", setOf("e")), hab("read", setOf("e"))), listOf(card("q"), card("e", dyn = "event", at = now + 5 * hour),
+            card("t", dyn = "task", at = now - hour, tid = "T")))
+        val tops = (0..5).map { run(cf, snap(cal(18, it))).topKey }
+        assertEquals(setOf("e", "hab_0", "hab_1"), tops.toSet()) // задача (даже просроченная) наверх в круге не встаёт
+        val last = run(cf, snap(c)).cards.map { it.card.key }
+        assertEquals("t", last[3]) // после трёх участников круга
+        assertTrue(QrPriority.SCORE_TASK_OVERDUE < QrPriority.SCORE_CYCLE && QrPriority.SCORE_TASK_TODAY < QrPriority.SCORE_CYCLE)
     }
 
     @Test fun cycle_scheduledHabitNotDue_isLowerThanCircle() {

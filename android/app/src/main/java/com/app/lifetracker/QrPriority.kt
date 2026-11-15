@@ -1,5 +1,6 @@
 package com.app.lifetracker
-// Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие, задача на сегодня) имеют один балл [SCORE_CYCLE] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
+// Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CYCLE]), в круг равных входят только слоты привычек и событие.
+// Версия: 4.6 (15.11) — круг равных: привычки, у которых сейчас «их» время, и карточки календаря (событие) имеют один балл [SCORE_CYCLE] и по очереди встают наверх, каждая на [CYCLE_MS] (60 с) — [cycleOrder]; привычка не в своё время в круг не входит. Календарь больше не «выше» привычки (раньше событие поднималось над задачей на сегодня, а та стояла выше привычки — привычка не показывалась).
 // Версия: 4.5 (14.11) — карточка «Привычки» (`Cfg.habits`, `Cfg.habitCards`): привычки, у которых сейчас «их» время, встают в стопку каждая своей карточкой-слотом («hab_0», «hab_1» …) и участвуют в круге наравне с календарём; нет таких — один слот, который листают у краёв; все отмечены — карточек нет ([habitList], [habitSlots]).
 // Версия: 4.4 (14.11) — служебные карточки «Как тренировка?» / «Как настроение?» берут цвет из [Cfg] (`rpeColor`, `moodColor`).
 // Версия: 4.3 (14.11) — вторая служебная карточка «Как настроение?» ([QrMood.KEY], [Snapshot.moodPending]): стоит над всеми обычными карточками, под «Как тренировка?»; [check] знает обе.
@@ -46,9 +47,9 @@ object QrPriority {
     /** Событие календаря начнётся в ближайшие [SOON_MS]. */
     const val SCORE_EVENT_SOON = 750
     /** Задача календаря просрочена. */
-    const val SCORE_TASK_OVERDUE = 650
+    const val SCORE_TASK_OVERDUE = 480
     /** Задача календаря на сегодня (время ещё не прошло). */
-    const val SCORE_TASK_TODAY = 500
+    const val SCORE_TASK_TODAY = 470
     /** «Её» время суток и день недели ([scheduledNow]). */
     const val SCORE_SCHEDULED = 500
     /**
@@ -188,14 +189,7 @@ object QrPriority {
      * на сегодня — новый виджет вставал на задаче, а не на календаре. Более высокие баллы события («скоро», приоритет «наверх») не трогаются.
      */
     private fun lift(scored: MutableList<Scored>) {
-        var maxTask = 0
-        for (x in scored) if (x.card.dyn == "task" && x.score > SCORE_CYCLE && x.score > maxTask) maxTask = x.score // задача на сегодня стоит наравне с событием и привычкой (круг равных), поднимать событие над ней не нужно
-        if (maxTask <= 0) return
-        val want = maxTask + HYSTERESIS
-        for (i in scored.indices) {
-            val x = scored[i]
-            if (x.card.dyn == "event" && x.score < want) scored[i] = Scored(x.card, want, "Календарь выше задач")
-        }
+        // Задачи ниже события и привычки «в своё время» по приоритету ([SCORE_TASK_OVERDUE], [SCORE_TASK_TODAY] < [SCORE_CYCLE]): поднимать событие над ними не нужно.
     }
 
     /**
@@ -211,7 +205,8 @@ object QrPriority {
         val ps = sorted[idx].score
         val first = sorted[0].score
         if (ps <= 0 || first >= ps + HYSTERESIS) return top
-        if (ps == first && isCycleMember(sorted[idx].card) && isCycleMember(sorted[0].card)) return top // круг равных: смена верха по очереди, гистерезис её не держит
+        if (ps == first && isCycleMember(sorted[idx].card) && isCycleMember(sorted[0].card)) return top
+        if (sorted[idx].card.dyn == "task" && isCycleMember(sorted[0].card)) return top // календарь и привычка выше задач: прежняя верхняя задача их не удерживает // круг равных: смена верха по очереди, гистерезис её не держит
         if (isRinging(sorted[0].card, s) && !isRinging(sorted[idx].card, s)) return top
         sorted.add(0, sorted.removeAt(idx))
         return prev
@@ -242,8 +237,8 @@ object QrPriority {
         return out
     }
 
-    /** Участник круга равных: слот привычки или карточка календаря (событие, задача). */
-    private fun isCycleMember(c: Card): Boolean = c.dyn == "habit" || isCal(c)
+    /** Участник круга равных: слот привычки или карточка события календаря. Задачи в круг не входят: они ниже календаря и привычек по приоритету. */
+    private fun isCycleMember(c: Card): Boolean = c.dyn == "habit" || c.dyn == "event"
 
     /** Сколько участников круга равных в верхней группе [sorted] (карточки с баллом, как у первой; балл должен быть больше нуля). */
     private fun cycleSize(sorted: List<Scored>): Int {
@@ -545,7 +540,7 @@ object QrPriority {
         if (c.dyn == "task") {
             val at = if (rowTaskAt > 0L) rowTaskAt else c.at // по первой (самой срочной) задаче ряда
             if (at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
-            else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня: по очереди с привычками")
+            else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
         }
         if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
         if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
@@ -681,6 +676,7 @@ object QrPriority {
             val topS = result.cards.firstOrNull { it.card.key == result.mainTopKey && !isService(it.card.key) }
             if (prev != null && topS != null && prev !== topS && prev.score > 0 && topS.score < prev.score + HYSTERESIS &&
                 !(isCycleMember(prev.card) && isCycleMember(topS.card) && prev.score == topS.score) &&
+                !(prev.card.dyn == "task" && isCycleMember(topS.card)) &&
                 !(isRinging(topS.card, s) && !isRinging(prev.card, s))) bad.add("9: верхняя карточка сменилась без достаточного отрыва")
 
             // 10. и 11. Ручной приоритет: «вниз» — балл не выше нуля, «наверх» — не ниже прибавки (баллы считаются, только когда в основной части две карточки и больше)
