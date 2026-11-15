@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.4 (15.11) — любое нажатие на карточку виджета (`ACTION_SCAN_CODE` с верным `tok`) запоминается ([QrWidgets.noteTouch]): слайд-шоу виджета не листает стопку 30 с после него. Откат: ScanActivity.kt 13.3.
 // Версия: 13.3 (14.11) — `habnav` (-1 / 1, `wid`, `slot`): края карточки «Привычки» в виджете листают привычки ([QrWidgets.habitNav]); одно и двойное нажатие в центре — как у обычной привычки.
 // Версия: 13.2 (14.11) — `alnav` (-1 / 1, `wid`): края карточки «Будильники» в виджете листают будильники ([QrWidgets.alarmNav]).
 // Версия: 13.1 (14.11)
@@ -302,9 +303,15 @@ class ScanActivity : ComponentActivity() {
             }
         }
 
+    /** Нажатие на карточку виджета (любое: действие, край карточки, кнопки оценки): слайд-шоу виджета на 30 с замирает. */
+    private fun noteWidgetTouch(i: Intent?) {
+        if (i != null && i.action == ACTION_SCAN_CODE && QrWidgets.tokenOk(this, i.getStringExtra("tok"))) QrWidgets.noteTouch(applicationContext)
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        noteWidgetTouch(intent)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
         if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleEvent(intent)) {
@@ -379,6 +386,7 @@ class ScanActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        noteWidgetTouch(intent)
         if (handleRpe(intent) || handleMood(intent)) return // окно сканера уже открыто и остаётся как было
         if (handleAlarm(intent)) {
             if (!::webView.isInitialized) { // окна со страницей нет (ждали второго нажатия) — просто закрываемся

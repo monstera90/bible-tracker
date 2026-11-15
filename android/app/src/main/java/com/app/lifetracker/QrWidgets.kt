@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.13 (15.11) — слайд-шоу не листает стопку, пока пользователь её трогал меньше [TOUCH_PAUSE_MS] (30 с) назад: смахивание ([onPossibleSwipe]) и любое нажатие на карточку виджета (ScanActivity → [noteTouch]) запоминаются; пришёл срок [rotate] — переносится на 30 с после последнего касания. Откат: QrWidgets.kt 14.12.
 // Версия: 14.12 (15.11) — единая модель круга равных и карточек-групп (QrPriority 4.9): «Привычки» и «Будильники» — одна карточка-группа каждая (ключи «hab_0» / «alm_0»), элемент на ней выбирает круг равных ([QrPriority.Result.faces]) или нажатие у края (на [EVENT_RESET_MS], одинаково для всех групп — [GroupView], [groupViews], [groupNav]; хранится в [K_HABIDX]). Минутная смена элемента меняет только лицо карточки, адаптер стопки не пересоздаётся. Объяснение «Сейчас сверху» называет показанный элемент группы ([whyOf]).
 // Версия: 14.11 (15.11) — карточка «Привычки» в стопке одна (QrPriority 4.8): привычки «в своё время» сменяют друг друга на ней по кругу, а не лежат отдельными карточками; свайп листает группы, привычки листаются нажатием у края ([habitNav]). Выбор нажатием держится [EVENT_RESET_MS] (60 с) после последнего нажатия.
 // Версия: 14.10 (15.11) — круг равных ([QrPriority.cycleOrder]): привычки «в своё время» и календарь встают наверх по очереди, каждая на минуту; минутный обработчик [armCycle] перерисовывает виджет, пока экран включён. Страховка возврата стала точной: [GUARD_MS] = 60 с (было 75), проверка каждые [GUARD_TICK_MS] (15 с), а не раз в 75 с; при погашенном экране настройки виджетов не читаются.
@@ -136,6 +137,7 @@ object QrWidgets {
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
     private const val K_RETURN = "ret"
+    private const val K_TOUCH = "touch"       // время последнего касания карточек виджета пользователем, мс (слайд-шоу ждёт TOUCH_PAUSE_MS после него)
     private const val K_RETFIRST = "retfirst" // id виджета → время первого смахивания в текущей серии (потолок откладывания возврата)
     private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
     private const val K_AEVSEQ = "alarmEvSeq"
@@ -164,6 +166,8 @@ object QrWidgets {
     /** Шаг проверки страховки: стопка, не поставленная нами наверх дольше [GUARD_MS], возвращается не позже чем через этот шаг после срока. */
     private const val GUARD_TICK_MS = 15_000L
     private const val SWIPE_QUIET_MS = 4_000L
+    /** Сколько после касания карточек слайд-шоу их не листает. */
+    private const val TOUCH_PAUSE_MS = 30_000L
 
     /** Сколько ждать после последнего запроса фабрики, прежде чем считать смахивание законченным (анимация StackView ≈ 0,4 с). */
     private const val SWIPE_SETTLE_MS = 700L
@@ -206,6 +210,7 @@ object QrWidgets {
     private val returnWorked: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
 
     @Volatile private var guardOn = false
+    @Volatile private var lastTouchAt = 0L
     private val guardToken = Any()
     private val cycleToken = Any()
 
@@ -1574,6 +1579,12 @@ object QrWidgets {
         val app = ctx.applicationContext
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.rotate || visibleCount(app, cfg) < 2) return
+        // пользователь только что трогал карточки (нажатие или смахивание): не листаем, пока с касания не прошло 30 с — срок переносится на этот момент
+        val wait = touchedAt(app) + TOUCH_PAUSE_MS - System.currentTimeMillis()
+        if (wait > 0L) {
+            setAlarm(app, System.currentTimeMillis() + wait + 500L, rotatePi(app, id, true)!!)
+            return
+        }
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
         if (screenOn(pm) && !servicePending(app, cfg)) { // пока висит «Как тренировка?» или «Как настроение?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
@@ -1583,6 +1594,15 @@ object QrWidgets {
         }
         setAlarm(app, System.currentTimeMillis() + cfg.rotateMin * 60_000L, rotatePi(app, id, true)!!)
     }
+
+    /** Пользователь тронул карточки виджета (нажатие — из ScanActivity, смахивание — [onPossibleSwipe]): слайд-шоу ждёт [TOUCH_PAUSE_MS]. */
+    fun noteTouch(ctx: Context) {
+        val now = System.currentTimeMillis()
+        lastTouchAt = now
+        try { prefs(ctx).edit().putLong(K_TOUCH, now).apply() } catch (e: Exception) { }
+    }
+
+    private fun touchedAt(app: Context): Long = Math.max(lastTouchAt, prefs(app).getLong(K_TOUCH, 0L))
 
     /** Стопку только что переставили мы (обновление, возврат наверх, «после срабатывания»): запросы фабрики в ближайшие секунды — не смахивание. */
     private fun suppressSwipe(id: Int) {
@@ -1598,6 +1618,7 @@ object QrWidgets {
     fun onPossibleSwipe(ctx: Context, id: Int, n: Int) {
         if (n < 2 || swipeSuppressed(id)) return
         val app = ctx.applicationContext
+        noteTouch(app) // смахнули стопку сами — слайд-шоу не мешает ближайшие 30 с
         main.post {
             // Возврат наверх взводим ПЕРВЫМ и отдельно: сбой при рисовании точек (виджет удалили, лаунчер не принял обновление) раньше глотался общим catch
             // и до armReturn дело не доходило — стопка не возвращалась никогда.
