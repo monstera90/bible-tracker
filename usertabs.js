@@ -1,5 +1,6 @@
 /* ===========================================================================
    usertabs.js
+   Версия: 5.2 (16.11) — «Поделиться» отдаёт ссылку читаемой: процентные последовательности кириллицы и других не-ASCII символов (%D0%B...) декодируются в буквы (`readableUrl`), служебные %XX (пробел, /, ?, &, #, %) остаются, чтобы ссылка не ломалась; флаг SHARE_STRIP_SCHEME убирает «https://» (по умолчанию выключен). Откат: usertabs.js 5.1.
    Версия: 5.1 (15.11) — в форме адреса (долгое нажатие на кнопку вкладки) галочка «Зафиксировать иконку для этой вкладки» (`locks`, localStorage `userTabIconLock_v1`, только на этом устройстве): значок на кнопке остаётся тем, что был на момент включения, сайт его больше не меняет (`syncIcon`); снять галочку — значок снова обновляется. Kotlin не менялся. Откат: usertabs.js 5.0.
    Версия: 5.0 (13.11)
    Вкладки-сайты бокового ряда «Интернет» (кнопка «+» над вкладкой «Claude», set2s_10). Каждая вкладка — свой адрес, который открывается
@@ -344,10 +345,24 @@
     try{ if(window.SiteTabFab) window.SiteTabFab.mount(c, function(){ goHome(t); }, function(){ shareTab(t); }); }catch(e){}
   }
   // «Поделиться»: ссылка на ТЕКУЩУЮ страницу сайта (адрес берётся у оболочки, а не из t.home) — в системное меню Android
+  // WebView отдаёт адрес с процентным кодированием кириллицы; в буфере/мессенджерах читаемо только декодированное.
+  // Декодируем лишь не-ASCII байты (%80..%FF): %20, %2F, %3F, %26, %23, %25 остаются — ссылка не ломается.
+  var SHARE_STRIP_SCHEME = false; // true — отдавать без «https://» / «http://»
+  function readableUrl(url){
+    var out = String(url || "");
+    try{
+      out = out.replace(/(?:%[89A-Fa-f][0-9A-Fa-f])+/g, function(run){
+        try{ return decodeURIComponent(run); }catch(e){ return run; } // не валидный UTF-8 — оставляем как было
+      });
+    }catch(e){}
+    if(SHARE_STRIP_SCHEME) out = out.replace(/^https?:\/\//i, "");
+    return out;
+  }
   function shareTab(t){
     if(!t) return;
     var st = readState(t.id), url = String(st.url || "").trim();
     if(!url || url === "about:blank") return;
+    url = readableUrl(url);
     var title = String(st.title || "").trim();
     try{
       if(navigator.share){
