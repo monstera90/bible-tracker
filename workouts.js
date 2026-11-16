@@ -575,12 +575,19 @@
       ".wk-tip-ico svg{display:block;width:18px;height:18px;}" +
       ".wk-tip-text{margin-top:6px;line-height:1.35;}" +
       ".wk-tip-meta{font-size:.8em;}" +
-      ".wk-card.wk-wg{background:#8000ff;color:#fff;border:none;border-radius:22px;padding:16px 12px 14px;margin:6px 0 16px;text-align:center;box-shadow:0 5px 0 #6a00d6;}" +
-      ".wk-wg-ico{width:56px;height:56px;margin:0 auto;color:#fff;}" +
-      ".wk-wg-ico svg{display:block;width:56px;height:56px;}" +
-      ".wk-wg-top{margin-top:6px;font-size:1.2em;line-height:1.2;}" +
-      ".wk-wg-title{margin-top:4px;font-family:\"Palatino Linotype\",Georgia,serif;font-weight:bold;font-size:1.4em;line-height:1.15;}" +
-      ".wk-wg-big{margin-top:8px;font-size:2em;line-height:1.1;font-variant-numeric:tabular-nums;}" +
+      ".wk-flow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;}" +
+      ".wk-flow > *{grid-column:1 / -1;}" +
+      ".wk-flow > .wk-card.wk-wg{grid-column:auto;}" +
+      ".wk-card.wk-wg,.wk-flow > .wk-card.wk-wg:last-child{--s:var(--wg-w,160px);position:relative;box-sizing:border-box;width:100%;height:calc(var(--s) * 1.02);margin:0 0 calc(var(--s) * 0.04 + 8px);padding:0;border:none;border-radius:calc(var(--s) * 0.12);background:#8000ff;color:#fff;box-shadow:0 calc(var(--s) * 0.04) 0 #6a00d6;overflow:hidden;text-align:center;}" +
+      ".wk-wg-ico{position:absolute;left:50%;top:calc(var(--s) * 0.119);width:calc(var(--s) * 0.229);height:calc(var(--s) * 0.229);margin-left:calc(var(--s) * -0.1145);color:#fff;}" +
+      ".wk-wg-ico svg{display:block;width:100%;height:100%;}" +
+      ".wk-wg-top{position:absolute;left:5%;right:5%;top:calc(var(--s) * 0.358);font-size:calc(var(--s) * 0.1);line-height:1.2;white-space:nowrap;}" +
+      ".wk-wg-title{position:absolute;left:7%;right:7%;top:calc(var(--s) * 0.4825);font-family:\"Palatino Linotype\",Georgia,serif;font-weight:bold;font-size:calc(var(--s) * 0.108);line-height:1.1;overflow:hidden;}" +
+      ".wk-wg-big{position:absolute;left:4%;right:4%;top:calc(var(--s) * 0.73);font-size:calc(var(--s) * 0.145);line-height:1;font-weight:bold;white-space:nowrap;font-variant-numeric:tabular-nums;}" +
+      ".wk-wg.wk-wg2 .wk-wg-ico{top:calc(var(--s) * 0.107);}" +
+      ".wk-wg.wk-wg2 .wk-wg-top{top:calc(var(--s) * 0.342);}" +
+      ".wk-wg.wk-wg2 .wk-wg-title{top:calc(var(--s) * 0.4485);}" +
+      ".wk-wg.wk-wg2 .wk-wg-big{top:calc(var(--s) * 0.80);}" +
       ".wk-tip-cat{margin:14px 0 2px;font-weight:bold;color:var(--wood-dark);}" +
       ".wk-tip-row{padding:8px 2px;border-top:1px solid var(--groove-shadow);cursor:pointer;line-height:1.35;}" +
       ".wk-tip-cat + .wk-tip-row{border-top:none;}" +
@@ -747,7 +754,40 @@
     f.innerHTML = flowHtml();
     bindFlow();
   }
+  // размер карточек-виджетов: две в ряд, S = ширина карточки; всё внутри (значок, строки) считается от S, как лицо карточки виджета
+  var WG_GAP = 8; // = column-gap у .wk-flow
+  function sizeWg(){
+    var f = document.getElementById("wkFlow");
+    if(!f) return;
+    if(!f.clientWidth){ setTimeout(sizeWg, 60); return; } // вкладка ещё не измерима — повторить
+    var S = Math.floor((f.clientWidth - WG_GAP) / 2 * 100) / 100;
+    f.style.setProperty("--wg-w", S + "px");
+    function shrink(el, minPx, tooWide){
+      el.style.fontSize = "";
+      var size = parseFloat(window.getComputedStyle(el).fontSize) || 0;
+      while(size > minPx && tooWide(el)){ size -= 0.5; el.style.fontSize = size + "px"; }
+    }
+    Array.prototype.forEach.call(f.querySelectorAll(".wk-wg"), function(card){
+      var wide = function(el){ return el.scrollWidth > el.clientWidth + 1; };
+      var top = card.querySelector(".wk-wg-top"), title = card.querySelector(".wk-wg-title"), big = card.querySelector(".wk-wg-big");
+      card.classList.remove("wk-wg2");
+      if(top) shrink(top, S * 0.075, wide);
+      if(big) shrink(big, S * 0.08, wide);
+      if(title){
+        title.style.fontSize = "";
+        var fs = parseFloat(window.getComputedStyle(title).fontSize) || 0;
+        var tall = function(el){ var cur = parseFloat(window.getComputedStyle(el).fontSize) || fs; return wide(el) || el.scrollHeight > cur * 1.1 * 2.2; }; // не больше двух строк
+        shrink(title, S * 0.075, tall);
+        fs = parseFloat(window.getComputedStyle(title).fontSize) || fs;
+        if(title.scrollHeight > fs * 1.1 * 1.5) card.classList.add("wk-wg2");
+      }
+    });
+  }
+  var wgResizeTimer = null;
+  window.addEventListener("resize", function(){ if(wgResizeTimer) clearTimeout(wgResizeTimer); wgResizeTimer = setTimeout(sizeWg, 120); });
+
   function bindFlow(){
+    sizeWg();
     var lc = document.getElementById("wkLoadCard");
     if(lc) lc.addEventListener("click", function(){ infoOpen = !infoOpen; repaintFlow(); });
     var tc = document.getElementById("wkTipCard");
