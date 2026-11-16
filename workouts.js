@@ -1,6 +1,6 @@
 /* ===========================================================================
    workouts.js
-   Версия: 16.0 (13.11)
+   Версия: 17.0 (16.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
    Версия: 1.2 (27.10) — панель записи закреплена внизу над нижним рядом (не прокручивается), отступ до ряда = зазору между кнопками ряда; список тренировок прокручивается в оставшейся области (`.wk-scroll`).
@@ -9,13 +9,16 @@
    между шестерёнкой и «Картой дней года»). `window.WorkoutsTab.{setStore, render, drain, refreshIfOpen, refreshTabMark, start}`. Виджет «Как тренировка?» (widgets.js, `rpeAsk`; мост ≥33): страница сообщает оболочке, какая запись ждёт оценки (`syncWidgetRpe`, из `refreshTabMark` и `drain`), и забирает оценки, поставленные кнопками 1…10 на карточке виджета (`drainWidgetRpe` → `applyRpe`, в конце `drain`).
 
    Что на экране:
-   • период: «1 мес. / 3 мес. / 6 мес. / Год» (кнопки в нижнем ряду), стрелки «‹ ›» листают период назад и вперёд (свайп влево/вправо по
-     экрану — то же); выбор периода хранится в `workoutsPeriod_v1`. Период всегда заканчивается выбранным месяцем и не уходит
-     в будущее дальше текущего месяца;
+   • ГЛАВНЫЙ экран (`render`) — стопка карточек: (1) месяц — название текущего месяца, километры и набранная высота за него (нажатие открывает экран «Тренировки»);
+     (2) «Нагрузка за 7 дней» — баллы (нажатие раскрывает/скрывает пояснение прямо в карточке); (3) «Совет дня» (нажатие скрывает до следующего открытия вкладки);
+     (4) отдельная карточка на каждое достижение последней недели (награда, 50 %/75 %/достижение цели месяца, рекорд нагрузки; `recentNotices`, `achCardHtml`) —
+     через 7 дней после события карточка исчезает сама; нажатие открывает кубок на нужной части и виде. Нижний ряд: «i», импорт, советы, кубок, «Тренировки», запись, «домик»-пустышка;
+   • экран «Тренировки» (`renderList`, кнопка `#wkListBtn` или нажатие на карточку месяца) — прежнее содержимое вкладки:
+     период «1 мес. / 3 мес. / 6 мес. / Год» (кнопки в нижнем ряду вместе с «домиком», выбор хранится в `workoutsPeriod_v1`), стрелки «‹ ›» листают период назад и вперёд
+     (свайп влево/вправо по экрану — то же); период всегда заканчивается выбранным месяцем и не уходит в будущее дальше текущего месяца;
    • итог за период: километры (одна десятая, «10,7 км»; сотые в записях остаются и участвуют в суммах), число тренировок,
      общее время. За несколько месяцев ниже — строки по месяцам (тап по месяцу открывает его целиком);
-   • список тренировок периода по дням (новые сверху): дата, дистанция, общее время; тап по записи — «Удалить» (два нажатия);
-   • нижний ряд `.mdeditor-fab-row`: кнопка «Запись» и «домик»-пустышка (как на других вкладках).
+   • список тренировок периода по дням (новые сверху): дата, дистанция, общее время; долгое нажатие по записи — удаление.
 
    Запись (только в APK, мост `LifeTrackerNative` версии 17 — `WorkoutTracker.kt`/`WorkoutService.kt`):
    «Запись» → `workoutStart()`: «Поиск спутников» (время не идёт, показывается число найденных спутников) → «Связь установлена»
@@ -35,9 +38,9 @@
    (`startNative` отвечает "rpe"; кнопка «Запись» приглушена; `start()` для QR «Комбинированный» тоже отвечает "rpe"). Баллы тренировки =
    минуты × оценка; минуты — `Math.round(totalMs / 60000)` (общее время существующего таймера, с учётом и без учёта километров),
    баллы не хранятся, а считаются из `totalMs` и `rpe` (`loadOf`). Баллы показаны в строке записи списка и на итоговой карточке.
-   Кнопка-индикатор `#wkLoadBtn` (размер обычной кнопки ряда, самая левая в ряду, слева от «1 мес.») показывает сумму баллов за 7 дней: сегодня и 6 предыдущих
+   Карточка нагрузки `#wkLoadCard` (главный экран, под карточкой месяца; число — `#wkLoadVal`) показывает сумму баллов за 7 дней: сегодня и 6 предыдущих
    календарных дней по дню начала тренировки (`loadWindowStart`: календарная дата, не 7×24 ч — безопасно при переводе часов; дни выпадают сами в полночь).
-   Записи без оценки в сумму не входят (в том числе все записи, сделанные до появления «Нагрузки»). Нажатие на кнопку открывает/закрывает справку.
+   Записи без оценки в сумму не входят (в том числе все записи, сделанные до появления «Нагрузки»). Нажатие на карточку раскрывает/скрывает справку внутри неё.
    Импорт (кнопка со стрелкой вверх в нижнем ряду, слева от индикатора нагрузки, `#wkImportBtn`, скрытый `<input type=\"file\" id=\"wkImportInput\">`; `onImportFile`) принимает два вида файла, определяет их по содержимому:
    (1) локальный архив «Экспортировать личные данные» (ZIP с data.json или сам data.json, `readLocalArchive`): берутся ТОЛЬКО записи `wk:*` из `rawState.data` (метры, время, оценка), остальные данные не трогаются; уже имеющиеся id пропускаются, метка `needRpe` не переносится;
    (2) CSV-выгрузка стороннего трекера (`parseCsv`, колонки `date`, `distance_km`, `type_label`/`type_code`, `has_workout`): берутся только пробежки (`CSV_RUN_LABELS`/`CSV_RUN_CODES`) с километражем > 0 — дата и километры, без времени и баллов. Запись {start (дата и часы:минуты из колонки), end=start, m, rawM, totalMs:0, how:\"imp\", imp:1}, id `imp-ГГГГММДД-ЧЧММ` (повторный импорт не дублирует). Импортированные записи не попадают в `records()` для календаря (нет длительности).
@@ -51,7 +54,7 @@
    Для экспорта — `WorkoutsTab.exportRecords()` (читаемый раздел `workouts` в data.json, собирает my.js).
    Часть «Цели»: цель — на текущий месяц, три типа (`GOAL_TYPES`: километраж, набор высоты, время тренировок) для КАЖДОГО вида тренировки отдельно; варианты — `GOAL_OPTS`/`goalOpts(kind, type)` (километраж: бег 50/100/200/300/500 км, ходьба 30/60/100/150/200 км, велосипед 100/200/400/600/1000 км; высота: бег и ходьба 300/600/1000/2000/3000 м, велосипед 500/1000/2000/4000/6000 м; время 5/10/20/30/40 ч у всех). Пока цель типа и вида в месяце не достигнута, другую того же типа и вида поставить нельзя; предлагаются только значения больше уже набранного за месяц; после достижения можно поставить следующую. Прогресс — только по записям вида цели (км — `m`, высота — `up`, время — `totalMs`), полоса заполняется сама. Запись цели — `wkgoal:<id>` = {type, month, target, setAt[, kind, p50, p75, done]}: `kind` — `walk`/`bike` (у бега поля нет); id бега — `<тип>-<месяц>-<значение>`, у ходьбы и велосипеда с префиксом `walk-`/`bike-` (`goalId`); метки времени 50 %/75 %/достигнута едут в облако. Цели прошлых месяцев — список «Прошлые цели».
    Часть «Награды»: каталог `AWARD_DEFS` (`buildAwardDefs`) отдельно по видам (у каждой награды поле `kind`; `awardsBodyHtml(kind)` показывает награды выбранного вида). **Бег** (`buildRunAwards`, id прежние: `first`, `d5`, `c100`, `gt_km_50`…; условие — тренировки вида «Бег»): первая тренировка, первые 5 / 10 км, первый полумарафон, первый марафон (одна тренировка не короче 98 % дистанции — как в рекордах), общий километраж, число тренировок, серии дней подряд, время и набор высоты за одну тренировку и суммарно (Эверест 8849 м), скорость (5 км быстрее 30/25 мин, 10 км быстрее 60/50 мин, полумарафон быстрее 2 ч, марафон быстрее 4 ч), привычки (ранняя пташка, сова, год в движении). **Ходьба и велосипед** (`buildKindAwards(kind)`, id с префиксом `walk_`/`bike_`): первая тренировка, дистанция за одну тренировку (ходьба 5/10/20/30 км, велосипед 20/50/100/200 км), общий километраж (ходьба 50/250/500/1000 км, велосипед 200/1000/2500/5000 км), число тренировок, серии дней, время за одну тренировку (1/2/3 ч); скорости, высоты за одну тренировку и привычек у них нет. **Цели месяца** (`addGoalAwards`, у каждого вида свои): по награде за каждое значение цели, «Первая цель», «Тройная цель». Условия считаются по записям своего вида (`awardCtx(since, kind)`), раз полученная награда хранится — `wkaward:<id>` = {ts (когда заслужена), at}; неполученные показаны бледно с прогрессом (`prog`). **Обнуление:** долгое нажатие на полученную награду (`askResetAward`, `bindRowLongPress(row, onPress)`) → плашка с крестиком (`AppConfirmBar.openGrid`) → `resetAward`: запись `wkaward:<id>` заменяется на `{reset: ts}` (не «получена»: `awardsMap` берёт только записи с `ts`), сообщение `a:<id>` стирается; `awardResets`/`awardCtxFor(def)` → `awardCtx(since, kind)` считают только записи с `start ≥ reset` и цели с `done ≥ reset`, прогресс бледной награды тоже с нуля.
-   Сообщения: награда, 50 %, 75 % цели и достигнутая цель (в тексте назван вид; в записи сообщения поле `tk` — вид, нажатие открывает кубок на этом виде) (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются в области совета дня вместо него (`noticeToShow`, карточка `#wkNoticeCard`; совет дня в это время не выбирается). Видно весь день события; на следующие дни — пока экран кубка не открывали (`markNoticesSeen`), сколько бы дней ни прошло. Нажатие на карточку открывает экран кубка на нужной части. Рекорд нагрузки: при сохранении оценки (`saveRpe` → `checkLoadRecord`) сумма баллов за `LOAD_DAYS` дней, оканчивающихся днём записи (все виды вместе, как на кнопке `#wkLoadBtn`), сравнивается с лучшей суммой за любое более раннее окно; больше — сообщение «Рекорд нагрузки» (ключ `srpe:<id записи>`, `kind:"load"`, нажатие открывает «Рекорды»); пока история короче окна, рекорда нет. О новой награде сообщение есть всегда; молчат только награды старше 3 дней при самом первом пересчёте на устройстве (`AWARD_BASE_KEY`).
+   Сообщения: награда, 50 %, 75 % цели и достигнутая цель (в тексте назван вид; в записи сообщения поле `tk` — вид) (`evalProgress` на открытии вкладки, после забора записи, при открытии экрана кубка) складываются в `workoutsNotices_v1` (localStorage, только это устройство) и показываются на главном экране отдельными карточками (`recentNotices`, `achCardHtml`, класс `.wk-ach`) ровно неделю (`ACH_MS`) с момента события; совет дня они больше не заменяют. Нажатие на карточку открывает экран кубка на нужной части и виде. Рекорд нагрузки: при сохранении оценки (`saveRpe` → `checkLoadRecord`) сумма баллов за `LOAD_DAYS` дней, оканчивающихся днём записи (все виды вместе, как в карточке `#wkLoadCard`), сравнивается с лучшей суммой за любое более раннее окно; больше — сообщение «Рекорд нагрузки» (ключ `srpe:<id записи>`, `kind:"load"`, нажатие открывает «Рекорды»); пока история короче окна, рекорда нет. О новой награде сообщение есть всегда; молчат только награды старше 3 дней при самом первом пересчёте на устройстве (`AWARD_BASE_KEY`).
    Хранилище — провайдер от my.js (`setStore`, раздел «ТРЕНИРОВКИ» в my.js): запись лежит в личном `state` под ключом
    `wk:<id>` = {c, t} и едет в облако вместе с остальными данными и в экспорт; удаление — тумбстоун {c:null, t}.
    =========================================================================== */
@@ -110,7 +113,8 @@
   ];
   var TROPHY_TAB_KEY = "workoutsTrophyTab_v1"; // какая часть экрана кубка открыта (только это устройство)
   var NOTICE_KEY = "workoutsNotices_v1";       // сообщения о целях и наградах, показываемые вместо совета дня (только это устройство)
-  var NOTICE_KEEP_MAX = 60;                    // сколько сообщений хранится (непрочитанные не пропадают по времени, только если их стало больше)
+  var ACH_MS = 7 * 86400000;                   // карточка достижения на главном экране живёт неделю с момента события
+  var NOTICE_KEEP_MAX = 60;                    // сколько сообщений хранится
   var AWARD_BASE_KEY = "workoutsAwardsBase_v1"; // «первый пересчёт наград на этом устройстве уже был» (только это устройство)
   var NOTICE_RECENT_MS = 3 * 86400000;         // только при самом первом пересчёте: награды старше молчат (старая история не сыплется сообщениями)
   var GOAL_TYPES = [                           // типы месячных целей (одинаковы у всех видов тренировки)
@@ -173,6 +177,8 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.5"></circle><path d="M8.7 13.6L7 21l5-2.6 5 2.6-1.7-7.4"></path></svg>';
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
+  var LIST_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11"></path><path d="M9 12h11"></path><path d="M9 18h11"></path><circle cx="4.5" cy="6" r="1" fill="currentColor" stroke="none"></circle><circle cx="4.5" cy="12" r="1" fill="currentColor" stroke="none"></circle><circle cx="4.5" cy="18" r="1" fill="currentColor" stroke="none"></circle></svg>';
   var CHECK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>';
   var STOP_ICON_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg>';
@@ -193,6 +199,7 @@
   var lastLoadCheck = 0;   // когда в последний раз пересчитывали кнопку-индикатор
   var pendCache = null;    // {at, val}: короткий кэш pendingRecord (чтобы не перебирать все записи на каждом тике)
   var tabMarkTimer = null; // таймер подсветки язычка вкладки
+  var listScreen = false;  // открыт экран «Тренировки» (период, итоги, список) вместо главного
   var infoScreen = false;  // открыт боковой экран вместо вкладки: «Тренировки — кнопки» («i») или «Советы»
   var tipsCache = null;    // {at, val}: короткий кэш списка советов
   var tipHidden = false;   // карточка совета закрыта нажатием (до следующего открытия вкладки)
@@ -340,12 +347,12 @@
     allRecords().forEach(function(r){ if(r.start >= from) s += loadOf(r); });
     return s;
   }
+  function loadValText(){ var n = Math.round(weekLoad()); return n + " " + pointsWord(n); }
   function updateLoadBtn(){
-    var b = document.getElementById("wkLoadBtn");
+    var b = document.getElementById("wkLoadVal");
     if(!b) return;
-    var t = fmtPoints(weekLoad());
+    var t = loadValText();
     if(b.textContent !== t) b.textContent = t;
-    b.classList.toggle("long", t.length >= 5);
     lastLoadCheck = Date.now();
   }
 
@@ -551,10 +558,12 @@
       ".wk-kind-menu .wk-kind-btn svg{width:20px;height:20px;}" +
       "#wkRecBtn.wk-active{color:#e53935;}" +
       "#wkRecBtn.wk-blocked{opacity:.45;}" +
-      ".wk-load{padding:0;font:inherit;font-size:12px;font-weight:bold;line-height:1;font-variant-numeric:tabular-nums;color:var(--wood-dark);overflow:hidden;}" +
-      ".wk-load.long{font-size:10px;}" +
-      ".wk-load.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
-      ".wk-info .wk-note{color:var(--ink);}" +
+      ".wk-month,.wk-load-card,.wk-ach,.wk-tip{cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+      ".wk-month .wk-month-name{font-weight:bold;color:var(--wood-dark);font-size:1.1em;}" +
+      ".wk-load-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}" +
+      ".wk-load-val{font-size:1.4em;font-weight:bold;font-variant-numeric:tabular-nums;color:var(--wood-dark);white-space:nowrap;}" +
+      ".wk-load-info .wk-note{color:var(--ink);}" +
+      ".wk-flow > .wk-card:last-child{margin-bottom:6px;}" +
       ".wk-rpe-q{font-weight:bold;font-size:1.1em;}" +
       ".wk-rpe-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px;}" +
       ".wk-rpe-btn{height:44px;border-radius:10px;border:1px solid var(--groove-shadow);background:transparent;color:var(--ink);font:inherit;font-size:1.15em;font-weight:bold;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
@@ -621,33 +630,132 @@
   // ---------- главный экран ----------
   function fabRowHtml(){
     var active = lastState && lastState.status && lastState.status !== "idle";
-    var lt = fmtPoints(weekLoad());
     return '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="wkInfoBtn" title="Информация" aria-label="Информация">' + INFO_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkImportBtn" title="Загрузить тренировки из файла" aria-label="Загрузить тренировки из файла">' + IMPORT_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkTipsBtn" title="Советы" aria-label="Советы">' + TIP_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkRecordsBtn" title="Рекорды" aria-label="Рекорды">' + CUP_ICON_SVG + '</button>' +
-      '<button type="button" class="mdeditor-fab-btn wk-load' + (lt.length >= 5 ? " long" : "") + (infoOpen ? " on" : "") + '" id="wkLoadBtn" title="Нагрузка за 7 дней" aria-label="Нагрузка за 7 дней">' + esc(lt) + '</button>' +
-      PERIODS.map(function(p){
-        return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
-      }).join("") +
+      '<button type="button" class="mdeditor-fab-btn" id="wkListBtn" title="Тренировки" aria-label="Тренировки">' + LIST_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn' + (active ? ' wk-active' : '') + (pendingRecord() && !active ? ' wk-blocked' : '') + '" id="wkRecBtn" title="' + (active ? "Идёт запись" : "Записать тренировку") + '">' + REC_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="wkHomeStub" tabindex="-1" aria-disabled="true">' + HOME_ICON_SVG + '</button>' +
       '</div>' +
       '<input type="file" id="wkImportInput" accept=".zip,.json,.csv,text/csv,application/zip,application/json" style="display:none;">';
   }
 
+  // нижний ряд экрана «Тренировки»: периоды и «домик» (возврат на главный экран)
+  function listFabRowHtml(){
+    return '<div class="mdeditor-fab-row">' +
+      PERIODS.map(function(p){
+        return '<button type="button" class="mdeditor-fab-btn wk-per' + (p.months === months ? " on" : "") + '" data-months="' + p.months + '">' + p.label + '</button>';
+      }).join("") +
+      tipsHomeBtnHtml("wkListHomeBtn", "Назад к тренировкам") +
+      '</div>';
+  }
+
+  // перерисовать тот экран, что открыт сейчас (главный или «Тренировки»)
+  function redraw(){ if(listScreen) renderList(); else render(); }
+
+  // ---------- карточки главного экрана ----------
+  function monthCardHtml(){
+    var cm = curMonth(), a = cm.getTime(), b = addMonths(cm, 1).getTime();
+    var recs = allRecords().filter(function(r){ return r.start >= a && r.start < b; });
+    return '<div class="wk-card wk-total wk-month" id="wkMonthCard"><div class="wk-month-name">' + esc(MONTHS[cm.getMonth()]) + '</div>' +
+      '<div class="wk-km">' + esc(fmtKm(sumM(recs))) + '<span class="wk-up">• ' + fmtUpHtml(sumUp(recs)) + '</span></div></div>';
+  }
+
+  function loadCardHtml(){
+    return '<div class="wk-card wk-load-card" id="wkLoadCard"><div class="wk-load-row"><span class="wk-live-head">Нагрузка за 7 дней</span>' +
+      '<span class="wk-load-val" id="wkLoadVal">' + esc(loadValText()) + '</span></div>' +
+      (infoOpen ? '<div class="wk-load-info">' + loadInfoHtml() + '</div>' : "") + '</div>';
+  }
+
+  // «Сегодня» / «Вчера» / «12.11 · чт»
+  function achDayLabel(ts){
+    var diff = dayIndex(dayKey()) - dayIndex(dayKey(new Date(ts)));
+    if(diff <= 0) return "Сегодня";
+    if(diff === 1) return "Вчера";
+    return dayLabel(ts);
+  }
+  function achHead(n){
+    if(n.kind === "award") return "Награда";
+    if(String(n.k).indexOf("gd:") === 0) return "Цель достигнута";
+    if(n.kind === "goal") return "Цель месяца";
+    if(n.kind === "load") return "Рекорд нагрузки";
+    return "Достижение";
+  }
+  // отдельная карточка на каждое достижение последней недели; нажатие открывает кубок на нужной части и виде
+  function achCardHtml(n){
+    var tab = n.tab === "awards" ? "awards" : (n.tab === "records" ? "records" : "goals");
+    var ico = (n.kind === "award" || String(n.k).indexOf("gd:") === 0) ? MEDAL_ICON_SVG : CUP_ICON_SVG;
+    return '<div class="wk-card wk-tip wk-ach" data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + ico + '</span><span>' + esc(achHead(n)) + '</span></div>' +
+      '<div class="wk-tip-text">' + esc(n.text) + '</div>' +
+      '<div class="wk-note wk-tip-meta">' + esc(achDayLabel(n.ts)) + ' · Нажмите, чтобы открыть</div></div>';
+  }
+
+  // нагрузка, совет дня и достижения недели — всё под карточкой месяца, перерисовывается отдельно от неё
+  function flowHtml(){
+    var html = loadCardHtml();
+    var tip = tipHidden ? null : dayTip();
+    if(tip) html += tipCardHtml(tip);
+    recentNotices().forEach(function(n){ html += achCardHtml(n); });
+    return html;
+  }
+  function repaintFlow(){
+    var f = document.getElementById("wkFlow");
+    if(!f) return;
+    f.innerHTML = flowHtml();
+    bindFlow();
+  }
+  function bindFlow(){
+    var lc = document.getElementById("wkLoadCard");
+    if(lc) lc.addEventListener("click", function(){ infoOpen = !infoOpen; repaintFlow(); });
+    var tc = document.getElementById("wkTipCard");
+    if(tc) tc.addEventListener("click", function(){ tipHidden = true; repaintFlow(); }); // нажатие скрывает совет до следующего открытия вкладки
+    Array.prototype.forEach.call(document.querySelectorAll("#wkFlow .wk-ach"), function(cd){
+      cd.addEventListener("click", function(){ setTrophyKind(cd.getAttribute("data-kind")); renderTrophyScreen(cd.getAttribute("data-tab")); });
+    });
+  }
+
+  // ---------- главный экран ----------
   function render(){
     var c = container();
     if(!c) return;
     pendCache = null;
     infoScreen = false;
+    listScreen = false;
+    ensureStyle();
+    evalProgress();
+    var html = '<div class="wk-root" id="' + rootId + '">' +
+      '<div class="wk-scroll">' + monthCardHtml() + '<div class="wk-flow" id="wkFlow">' + flowHtml() + '</div></div>' +
+      '<div id="wkLive"></div>' +
+      '</div>' + fabRowHtml();
+    c.innerHTML = html;
+    lastLoadCheck = Date.now();
+    bind(c);
+    lastShape = "";
+    pollOnce(true);
+    startPoll();
+    refreshTabMark();
+  }
+
+  // ---------- экран «Тренировки»: период, итоги, список ----------
+  function openList(){
+    loadPeriod();
+    endMonth = curMonth();
+    openedId = null;
+    renderList();
+  }
+  function renderList(){
+    var c = container();
+    if(!c) return;
+    pendCache = null;
+    infoScreen = false;
+    listScreen = true;
     ensureStyle();
     loadPeriod();
     clampEnd();
-    evalProgress();
     var recs = inRange(allRecords());
-    var html = '<div class="wk-root" id="' + rootId + '">' +
+    c.innerHTML = '<div class="wk-root" id="' + rootId + '">' +
       '<div class="wk-scroll">' +
       '<h3 class="common-tab-title">Тренировки</h3>' +
       '<div class="wk-nav"><button type="button" id="wkPrev" aria-label="Назад">‹</button><div class="wk-title">' + esc(periodTitle()) +
@@ -657,14 +765,8 @@
       '</div></div>' +
       byMonthHtml(recs) +
       listHtml(recs) +
-      '</div>' +
-      '<div id="wkLive"></div>' +
-      '</div>' + fabRowHtml();
-    c.innerHTML = html;
-    lastLoadCheck = Date.now();
-    bind(c);
-    lastShape = "";
-    pollOnce(true);
+      '</div></div>' + listFabRowHtml();
+    bindList(c);
     startPoll();
     refreshTabMark();
   }
@@ -705,7 +807,7 @@
   }
 
   function listHtml(recs){
-    if(!recs.length) return '<div class="wk-empty">В этом периоде тренировок нет.<br>Нажмите кнопку записи внизу, чтобы начать.</div>';
+    if(!recs.length) return '<div class="wk-empty">В этом периоде тренировок нет.</div>';
     if(months !== 1) return "";
     var pend = pendingRecord(), pid = pend ? pend.id : "";
     return recs.map(function(r){
@@ -729,36 +831,14 @@
     }).join("");
   }
 
+  // главный экран
   function bind(c){
-    var seg = c.querySelectorAll(".wk-per");
-    Array.prototype.forEach.call(seg, function(b){
-      b.addEventListener("click", function(){
-        months = parseInt(b.getAttribute("data-months"), 10) || 1;
-        savePeriod();
-        openedId = null;
-        render();
-      });
-    });
-    var prev = document.getElementById("wkPrev"), next = document.getElementById("wkNext");
-    if(prev) prev.addEventListener("click", function(){ shift(-1); });
-    if(next) next.addEventListener("click", function(){ shift(1); });
-    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-month]"), function(row){
-      row.addEventListener("click", function(){
-        var p = String(row.getAttribute("data-month")).split("-");
-        months = 1; savePeriod();
-        endMonth = monthStart(parseInt(p[0], 10), parseInt(p[1], 10));
-        render();
-      });
-    });
-    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), function(r){ bindRowLongPress(r); });
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
-    var lb = document.getElementById("wkLoadBtn");
-    if(lb) lb.addEventListener("click", function(){
-      infoOpen = !infoOpen;
-      lb.classList.toggle("on", infoOpen);
-      paintLive(true);
-    });
+    var mc = document.getElementById("wkMonthCard");
+    if(mc) mc.addEventListener("click", openList);
+    var lsb = document.getElementById("wkListBtn");
+    if(lsb) lsb.addEventListener("click", openList);
     var ib = document.getElementById("wkInfoBtn");
     if(ib) ib.addEventListener("click", renderInfoScreen);
     var tb = document.getElementById("wkTipsBtn");
@@ -774,6 +854,37 @@
         if(f) onImportFile(f);
       });
     }
+    bindFlow();
+  }
+
+  // экран «Тренировки»
+  function bindList(c){
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-per"), function(b){
+      b.addEventListener("click", function(){
+        months = parseInt(b.getAttribute("data-months"), 10) || 1;
+        savePeriod();
+        openedId = null;
+        renderList();
+      });
+    });
+    var prev = document.getElementById("wkPrev"), next = document.getElementById("wkNext");
+    if(prev) prev.addEventListener("click", function(){ shift(-1); });
+    if(next) next.addEventListener("click", function(){ shift(1); });
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-month]"), function(row){
+      row.addEventListener("click", function(){
+        var p = String(row.getAttribute("data-month")).split("-");
+        months = 1; savePeriod();
+        endMonth = monthStart(parseInt(p[0], 10), parseInt(p[1], 10));
+        renderList();
+      });
+    });
+    Array.prototype.forEach.call(c.querySelectorAll(".wk-row[data-id]"), function(r){ bindRowLongPress(r); });
+    var hb = document.getElementById("wkListHomeBtn");
+    if(hb) hb.addEventListener("click", function(){
+      // «Действие ВПЕРЁД»: шаг «назад» вернёт на этот экран — тот же приём, что у справки «i»
+      if(window.AppNav) window.AppNav.push(function(){ renderList(); });
+      render();
+    });
     bindSwipe(c);
   }
 
@@ -783,7 +894,7 @@
     if(n.getTime() > curMonth().getTime()) n = curMonth();
     endMonth = n;
     openedId = null;
-    render();
+    renderList();
   }
 
   var swipeEl = null, swipeStart = null, swipeEnd = null;
@@ -795,13 +906,13 @@
     }
     var sx = 0, sy = 0, on = false;
     swipeStart = function(e){
-      if(!document.getElementById(rootId) || !e.touches || e.touches.length !== 1){ on = false; return; }
+      if(!listScreen || !document.getElementById(rootId) || !e.touches || e.touches.length !== 1){ on = false; return; }
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; on = true;
     };
     swipeEnd = function(e){
       if(!on) return;
       on = false;
-      if(!document.getElementById(rootId)) return;
+      if(!listScreen || !document.getElementById(rootId)) return;
       var t = e.changedTouches && e.changedTouches[0];
       if(!t) return;
       var dx = t.clientX - sx, dy = t.clientY - sy;
@@ -835,7 +946,7 @@
       try{ if(STORE) STORE.remove(id); }catch(e){}
       pendCache = null;
       openedId = null;
-      render();
+      redraw();
     }, { label: "Удалить запись?", onCancel: clearRowMark });
   }
   // долгое нажатие на полученную награду → плашка с крестиком «Обнулить»; нажатие мимо — отмена
@@ -1024,14 +1135,8 @@
     var pend = active ? null : pendAny;
     var recBtn = document.getElementById("wkRecBtn");
     if(recBtn) recBtn.classList.toggle("wk-blocked", !!pendAny && !active);
-    // сообщение о награде / половине / трёх четвертях цели занимает место совета дня (и тогда совет дня не выбирается и не «сгорает»)
-    var notice = (!active && !pend) ? noticeToShow() : null;
-    var tip = (!active && !pend && !notice) ? dayTip() : null;
-    var calm = !tipHidden && !infoOpen && !importMsg && !message;
-    var showNotice = !!notice && calm;
-    var showTip = !!tip && calm;
     var shape = (active ? st.status + ":" + (st.fix ? 1 : 0) + ":" + ((st.gaps || []).length) : "idle") + "|" + (res ? res.id : "") + "|" + message + messageAction +
-      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + (infoOpen ? "i" : "") + "|" + importMsg + "|" + (showTip ? tip.id + ":" + tip.text.length : "") + "|" + (showNotice ? notice.sig : "");
+      "|" + (pend ? pend.id + ":" + rpeSel : "") + "|" + importMsg;
     if(!force && shape === lastShape && active){
       updateLiveNumbers(box, st);
       return;
@@ -1039,7 +1144,6 @@
     if(!force && shape === lastShape) return;
     lastShape = shape;
     var html = "";
-    if(infoOpen) html += infoCardHtml();
     if(importMsg) html += '<div class="wk-msg" id="wkImportMsg">' + esc(importMsg) + '</div>';
     if(message){
       html += '<div class="wk-msg">' + esc(message) +
@@ -1048,8 +1152,6 @@
     if(active) html += liveCardHtml(st);
     else if(pend) html += rpeCardHtml(pend);
     else if(res) html += resultCardHtml(res);
-    if(showNotice) html += noticeCardHtml(notice);
-    else if(showTip) html += tipCardHtml(tip);
     box.innerHTML = html;
     var gb = document.getElementById("wkGpsBtn");
     if(gb) gb.addEventListener("click", function(){ var n = nat(); if(n) try{ n.openLocationSettings(); }catch(e){} });
@@ -1059,22 +1161,11 @@
     if(sb) sb.addEventListener("click", onStopTap);
     var im = document.getElementById("wkImportMsg");
     if(im) im.addEventListener("click", function(){ importMsg = ""; lastShape = ""; paintLive(true); });
-    var ic = document.getElementById("wkInfoCard");
-    if(ic) ic.addEventListener("click", function(){
-      infoOpen = false;
-      var lb = document.getElementById("wkLoadBtn");
-      if(lb) lb.classList.remove("on");
-      paintLive(true);
-    });
     Array.prototype.forEach.call(box.querySelectorAll(".wk-rpe-btn"), function(b){
       b.addEventListener("click", function(){ rpeSel = parseInt(b.getAttribute("data-rpe"), 10) || 0; paintLive(true); });
     });
     var rs = document.getElementById("wkRpeSave");
     if(rs) rs.addEventListener("click", saveRpe);
-    var nc = document.getElementById("wkNoticeCard");
-    if(nc) nc.addEventListener("click", function(){ setTrophyKind(nc.getAttribute("data-kind")); renderTrophyScreen(nc.getAttribute("data-tab")); }); // нажатие открывает экран кубка на нужной части и виде
-    var tc = document.getElementById("wkTipCard");
-    if(tc) tc.addEventListener("click", function(){ tipHidden = true; lastShape = ""; paintLive(true); }); // нажатие закрывает карточку до следующего открытия вкладки
     var rc = document.getElementById("wkResultCard");
     if(rc) rc.addEventListener("click", function(){ saveLastResult(null); lastShape = ""; paintLive(true); }); // нажатие на карточку закрывает её
     if(active) updateLiveNumbers(box, st);
@@ -1164,13 +1255,12 @@
       '<div class="wk-btns"><button type="button" class="wk-save" id="wkRpeSave"' + (rpeOk(rpeSel) ? "" : " disabled") + '>Сохранить</button></div></div>';
   }
 
-  // краткая справка по кнопке-индикатору
-  function infoCardHtml(){
-    return '<div class="wk-card wk-info" id="wkInfoCard"><div class="wk-live-head"><span>Нагрузка (метод sRPE)</span></div>' +
-      '<div class="wk-note">sRPE (session RPE) — простой способ оценить, сколько нагрузки дала тренировка. После неё вы оцениваете, насколько она была тяжёлой, по шкале от 1 (очень легко) до 10 (максимум усилий).</div>' +
+  // краткая справка внутри карточки «Нагрузка за 7 дней»
+  function loadInfoHtml(){
+    return '<div class="wk-note">sRPE (session RPE) — простой способ оценить, сколько нагрузки дала тренировка. После неё вы оцениваете, насколько она была тяжёлой, по шкале от 1 (очень легко) до 10 (максимум усилий).</div>' +
       '<div class="wk-note">Баллы тренировки = минуты × оценка. Например, 40 минут с оценкой 6 дают 240 баллов.</div>' +
-      '<div class="wk-note">Число на кнопке — сумма баллов за последние 7 дней: сегодня и шесть предыдущих дней, старые дни выпадают сами. Тренировки без оценки в сумму не входят. Сравнивайте недели между собой: резкий скачок вверх — повод дать телу время на восстановление.</div>' +
-      '<div class="wk-note">Нажмите на карточку, чтобы закрыть.</div></div>';
+      '<div class="wk-note">Число в карточке — сумма баллов за последние 7 дней: сегодня и шесть предыдущих дней, старые дни выпадают сами. Тренировки без оценки в сумму не входят. Сравнивайте недели между собой: резкий скачок вверх — повод дать телу время на восстановление.</div>' +
+      '<div class="wk-note">Нажмите на карточку, чтобы скрыть пояснение.</div>';
   }
 
   function resultCardHtml(r){
@@ -1199,11 +1289,11 @@
     html += row(REC_ICON_SVG, "Как приложение борется с ошибками GPS. Каждая точка сглаживается с учётом заявленной погрешности, а шаг засчитывается, только когда вы действительно ушли дальше этой погрешности — «петли» и дрожание на месте километры не растят. Если спутниковый датчик скорости показывает, что вы стоите, небольшие смещения тоже не считаются. Точки, до которых пришлось бы бежать быстрее 32 км/ч, отбрасываются; если GPS «уехал» в сторону и держится там, это считается сдвигом: переход к нему в километры не входит. Число таких случаев показано в записи («выбросов GPS»).");
     html += row(REC_ICON_SVG, "Потеря связи. Если годной точки (погрешность до 20 м) нет больше 10 секунд, километры не считаются, а время идёт — на записи это видно как «без учёта км». Когда сигнал вернулся, расстояние между точкой потери и точкой возврата не добавляется. Под густой листвой, в ущельях и между высокими домами километраж может быть немного неточным.");
     html += row(REC_ICON_SVG, "Набор высоты («↑ м») считается по высоте GPS: она сглаживается, подъём засчитывается после изменения больше 3 м. Для записи достаточно разрешения геолокации «Во время использования приложения» (с включённым «Точным местоположением»): запись идёт и при выключенном экране, пока висит уведомление тренировки. Начинайте запись при открытом приложении и не ограничивайте его в расходе батареи (на Xiaomi — «Без ограничений» и «Автозапуск»), иначе система может остановить запись. Записи хранятся на устройстве и входят в облачную синхронизацию и экспорт.");
-    html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Число слева в нижнем ряду — нагрузка за 7 дней: баллы = минуты × оценка. Нажатие открывает пояснение.");
-    html += row('<span style="font-size:11px;font-weight:bold;">1 мес.</span>', "Период: месяц, 3 месяца, полгода, год. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок. Нажатие на строку записи открывает «Удалить» (нужно нажать дважды).");
+    html += row('<span style="font-size:12px;font-weight:bold;">0</span>', "Главный экран — стопка карточек. Сверху месяц: километры и набранная высота за текущий месяц (нажатие открывает экран «Тренировки»). Ниже «Нагрузка за 7 дней»: баллы = минуты × оценка, нажатие раскрывает пояснение. Ниже «Совет дня», а затем отдельная карточка на каждое достижение последней недели (награда, половина или три четверти цели, достигнутая цель, рекорд нагрузки); через неделю карточка исчезает, нажатие на неё открывает кубок.");
+    html += row(LIST_ICON_SVG, "Экран «Тренировки» (кнопка или нажатие на карточку месяца): период «1 мес.», «3 мес.», «6 мес.», «Год» — кнопки в нижнем ряду, «домик» возвращает на главный экран. Стрелки ‹ › и свайп листают назад и вперёд, сверху — сумма километров и число тренировок, ниже — список записей.");
     html += row(UP_SVG, "Удалить тренировку или внесённую высоту — долгое нажатие на строке списка, затем крестик на плашке (нажатие мимо — отмена). Высота рядом с километражом — сумма набора за выбранный период. Метры, внесённые карточкой «+ к высоте» (или её QR-кодом), добавляются к последней сегодняшней тренировке, а если сегодня тренировки не было — в общий счётчик высоты отдельной строкой «внесено вручную».");
     html += row(IMPORT_ICON_SVG, "Загружает тренировки из файла. Подходят два вида: архив «Экспортировать личные данные» (ZIP или data.json) — из него берутся только тренировки, остальные данные не меняются; и CSV-выгрузка стороннего трекера — из неё берутся только пробежки: дата и километры (время и баллы не переносятся). Уже имеющиеся тренировки повторно не добавляются.");
-    html += row(TIP_ICON_SVG, "Советы: один совет в день показывается внизу вкладки, когда запись не идёт. Нажатие на карточку закрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
+    html += row(TIP_ICON_SVG, "Советы: один совет в день показывается карточкой «Совет дня» на главном экране. Нажатие на карточку скрывает её до следующего открытия вкладки. Кнопка открывает список советов: добавить, изменить, удалить; у каждого — категория и необязательные отметки: тяжесть последней тренировки (1–3, 4–6, 7–10) и её дистанция (короткая/длинная). Без отметок совет подходит всегда.");
     html += row(CUP_ICON_SVG, "Рекорды: самое долгое время и самая длинная дистанция, а также лучшее время на 5 км, 10 км, полумарафоне и марафоне. На дистанцию подходит запись длиной от 98 % до 110 % этой дистанции (время пересчитывается на ровную дистанцию); импортированные записи без времени в лучших временах не участвуют. Пока подходящей записи нет, пишет «ожидается».");
     html += row(INFO_ICON_SVG, "Эта справка. Тренировки входят в экспорт личных данных: дата, километры, время и баллы.");
     c.innerHTML =
@@ -1368,7 +1458,10 @@
   function goalAwardTitle(kind, type, target){ return "Цель месяца (" + KIND_LC[kindKey(kind)] + "): " + targetLabel(type, target) + goalType(type).awardSuffix; }
   function goalAwardText(kind, type, target){ return goalType(type).awardText + " (тренировки " + kindCond(kind) + "): " + targetLabel(type, target) + "."; }
 
-  // пересчёт целей: отметки 50 % / 75 % / «достигнута»; для каждой отметки — сообщение вместо совета дня
+  function goalDoneText(g){ return "Цель «" + goalLabel(g) + "» (" + KIND_LC[g.kind] + ") достигнута! Награда: «" + goalAwardTitle(g.kind, g.type, g.target) + "»."; }
+  function awardNoticeText(def){ return "Новая награда (" + KIND_LC[def.kind] + "): «" + def.title + "». " + def.text; }
+
+  // пересчёт целей: отметки 50 % / 75 % / «достигнута»; для каждой отметки — запись о достижении (карточка на главном экране)
   function evalGoals(){
     var goals = goalsList();
     if(!goals.length) return;
@@ -1391,7 +1484,7 @@
         if(!c.p75) c.p75 = now;
         changed = true;
         pushNotice({ k: "gd:" + g.id, kind: "goal", tab: "goals", tk: g.kind,
-          text: "Цель «" + goalLabel(g) + who + " достигнута! Награда: «" + goalAwardTitle(g.kind, g.type, g.target) + "»." });
+          text: goalDoneText(g) });
       } else if(g.month === curKey){
         if(pct >= 75 && !c.p75){
           c.p75 = now; if(!c.p50) c.p50 = now; changed = true;
@@ -1797,7 +1890,7 @@
       if(!(ts > 0)) return;
       items.push({ id: def.id, c: { ts: ts, at: now } });
       if(def.noNotice || (!base && ts < now - NOTICE_RECENT_MS)) return;
-      pushNotice({ k: "a:" + def.id, kind: "award", tab: "awards", tk: def.kind, text: "Новая награда (" + KIND_LC[def.kind] + "): «" + def.title + "». " + def.text });
+      pushNotice({ k: "a:" + def.id, kind: "award", tab: "awards", tk: def.kind, text: awardNoticeText(def) });
     });
     if(items.length){ try{ STORE.putAwardMany(items); }catch(e){} }
     if(!base){ try{ localStorage.setItem(AWARD_BASE_KEY, "1"); }catch(e){} }
@@ -1832,9 +1925,10 @@
     return html;
   }
 
-  // ---------- сообщения о целях и наградах (вместо совета дня) ----------
-  // Событие (награда / 50 % / 75 % / цель достигнута) записывается на устройстве и показывается в области совета дня весь день события;
-  // на следующие дни остаётся, пока человек не открыл экран кубка (хоть через месяц). Открыл — на следующий день уже совет дня.
+  // ---------- достижения недели (карточки главного экрана) ----------
+  // Событие (награда / 50 % / 75 % / цель достигнута / рекорд нагрузки) записывается на устройстве (`workoutsNotices_v1`) и неделю
+  // показывается отдельной карточкой на главном экране; через ACH_MS карточка исчезает сама. К записям добавляются полученные за неделю
+  // награды и достигнутые цели, о которых на этом устройстве записи нет (получены на другом устройстве).
   function dayIndex(key){
     var p = String(key).split("-");
     return Math.round(Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)) / 86400000);
@@ -1844,48 +1938,37 @@
     return Array.isArray(v) ? v : [];
   }
   function pushNotice(it){
-    var list = readNotices(), today = dayKey();
+    var list = readNotices(), now = Date.now();
     if(list.some(function(x){ return x && x.k === it.k; })) return;
-    it.day = today; it.ts = Date.now(); it.seen = 0;
+    it.day = dayKey(); it.ts = now;
     list.push(it);
-    var ti = dayIndex(today);
-    list = list.filter(function(x){ return x && x.day && (!x.seen ? true : ti - dayIndex(x.day) <= 1); });
+    list = list.filter(function(x){ return x && num(x.ts) > 0 && now - num(x.ts) < ACH_MS; });
     if(list.length > NOTICE_KEEP_MAX) list = list.slice(list.length - NOTICE_KEEP_MAX);
     writeJson(NOTICE_KEY, list);
     lastShape = "";
   }
-  function visibleNotices(){
-    var today = dayKey(), ti = dayIndex(today);
-    return readNotices().filter(function(x){
-      if(!x || !x.day) return false;
-      var age = ti - dayIndex(x.day);
-      return age === 0 || (!x.seen && age > 0);
-    }).sort(function(a, b){ return num(b.ts) - num(a.ts); });
-  }
-  function markNoticesSeen(){
-    var list = readNotices(), ch = false;
-    list.forEach(function(x){ if(x && !x.seen){ x.seen = 1; ch = true; } });
-    if(ch) writeJson(NOTICE_KEY, list);
-  }
-  function noticeToShow(){
-    var vis = visibleNotices();
-    if(!vis.length) return null;
-    var shown = vis.slice(0, 3);
-    var hasAward = shown.some(function(x){ return x.kind === "award" || String(x.k).indexOf("gd:") === 0; });
-    var nLoad = shown.filter(function(x){ return x.kind === "load"; }).length;
-    return {
-      sig: shown.map(function(x){ return x.k; }).join(","),
-      head: hasAward ? "Награда" : (nLoad === shown.length ? "Рекорд нагрузки" : (nLoad ? "Рекорды и цели" : "Цель месячного плана")),
-      lines: shown.map(function(x){ return x.text; }),
-      more: vis.length - shown.length,
-      tab: shown[0].tab === "awards" ? "awards" : (shown[0].tab === "records" ? "records" : "goals"),
-      tk: kindKey(shown[0].tk) // вид первого сообщения: нажатие открывает кубок на нём (у старых сообщений поля нет — бег)
-    };
-  }
-  function noticeCardHtml(n){
-    return '<div class="wk-card wk-tip wk-notice" id="wkNoticeCard" data-tab="' + esc(n.tab) + '" data-kind="' + esc(n.tk) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + CUP_ICON_SVG + '</span><span>' + esc(n.head) + '</span></div>' +
-      n.lines.map(function(l){ return '<div class="wk-tip-text">' + esc(l) + '</div>'; }).join("") +
-      '<div class="wk-note wk-tip-meta">' + (n.more > 0 ? "и ещё " + n.more + " · " : "") + 'Нажмите, чтобы открыть</div></div>';
+  function recentNotices(){
+    var now = Date.now(), have = {}, out = [];
+    readNotices().forEach(function(x){
+      if(x && x.text && num(x.ts) > 0 && now - num(x.ts) < ACH_MS){ out.push(x); have[x.k] = true; }
+    });
+    try{
+      var stored = awardsMap();
+      awardDefs().forEach(function(d){
+        var st = stored[d.id], k = "a:" + d.id;
+        if(!st || d.noNotice || have[k] || !(now - num(st.ts) < ACH_MS)) return;
+        out.push({ k: k, kind: "award", tab: "awards", tk: d.kind, ts: num(st.ts), text: awardNoticeText(d) });
+        have[k] = true;
+      });
+      goalsList().forEach(function(g){
+        var k = "gd:" + g.id;
+        if(!g.done || have[k] || !(now - num(g.done) < ACH_MS)) return;
+        out.push({ k: k, kind: "goal", tab: "goals", tk: g.kind, ts: num(g.done), text: goalDoneText(g) });
+        have[k] = true;
+      });
+    }catch(e){}
+    out.sort(function(a, b){ return num(b.ts) - num(a.ts); });
+    return out;
   }
 
   // ---------- сам экран ----------
@@ -1901,7 +1984,6 @@
     trophyKind = kind;
     var keep = document.getElementById("wkTrophy") ? { c: c.scrollTop, b: document.getElementById("wkTrophy").scrollTop } : null;
     evalProgress();
-    markNoticesSeen();
     var body = tab === "goals" ? goalsBodyHtml(kind) : (tab === "awards" ? awardsBodyHtml(kind) : recordsBodyHtml(kind));
     c.innerHTML = swHtml(tab) + kindSwHtml(kind) + '<div class="task-info-body" id="wkTrophy">' + body + '</div><div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="wkTrophyInfoBtn" title="Как это работает" aria-label="Как это работает">' + INFO_ICON_SVG + '</button>' +
@@ -2550,7 +2632,7 @@
     if(infoScreen) return;
     var a = document.activeElement;
     if(a && a.tagName === "INPUT") return;
-    render();
+    redraw();
   }
 
   window.WorkoutsTab = {
