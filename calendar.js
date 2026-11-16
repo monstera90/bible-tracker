@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.3 (16.11) — `CalendarTab.openTask(taskId)`: форма задачи календаря по id задачи (одно нажатие на карточку задачи в виджете, my.js `__ltOpenTaskForm`). Откат: calendar.js 18.2.
    Версия: 18.2 (14.11) — `CalendarTab.openEvent(id, at)`: форма конкретного мероприятия по нажатию на карточку события в виджете (my.js `__ltOpenCalendarEvent`).
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
    Версия: 7.0 (25.10)
@@ -1669,6 +1670,18 @@
       if(!ev || isTask(ev)) return false;
       at = +at;
       openForm(ev, isFinite(at) && at > 0 ? at : ev.start);
+      return true;
+    },
+    // форма редактирования ЗАДАЧИ календаря по id самой задачи (нажатие на карточку задачи в виджете — та же форма, что по нажатию на задачу в календаре).
+    // false — вкладка не на экране или записи календаря с такой задачей (ещё) нет; my.js повторяет попытку, пока хранилище не загрузилось
+    openTask: function(taskId){
+      if(!container()) return false;
+      taskId = String(taskId || "");
+      if(!taskId) return false;
+      var found = null;
+      load().forEach(function(ev){ if(!found && isTask(ev) && String(ev.taskId) === taskId) found = ev; });
+      if(!found) return false;
+      openForm(found, found.start);
       return true;
     },
     // для проверки/других модулей: мероприятия на отрезке [from, to) — [{id,title,at,dur,repeat}]

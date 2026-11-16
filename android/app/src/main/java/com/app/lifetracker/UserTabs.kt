@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.5 (16.11) — мышь и тачпад: окна под кнопками («поделиться», «весь экран», «домик») пропускают и «общие» события (dispatchGenericMotionEvent), а не только касания.
 // Версия: 8.4 (16.11) — горячие клавиши физической клавиатуры из WebView вкладки-сайта уходят странице (hotkeyForwarder). Откат: UserTabs.kt 8.3.
 
 import android.annotation.SuppressLint
@@ -139,6 +140,16 @@ private class SiteWebView(context: Context) : SelectionMenuWebView(context) {
                 if (abs(scrollY - y) > 2 || abs(scrollX - x) > 2) scrollTo(x, y)
             }, d)
         }
+    }
+
+    /**
+     * Мышь и тачпад: наведение, нажатие и отпускание кнопки (ACTION_HOVER_*, ACTION_BUTTON_PRESS/RELEASE) и колесо приходят не как касания, а как «общие» события движения,
+     * и Chromium берёт нажатия мыши именно из них. Без этого окна под кнопками работали только для пальца: нажатие мышью оседало на странице сайта под кнопкой.
+     * Над окном (и пока нажатие, начатое в окне, не закончилось) событие отдаётся нижнему (главному) WebView.
+     */
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        if (holes.isNotEmpty() && (passThrough || inHole(ev.x, ev.y))) return false
+        return super.dispatchGenericMotionEvent(ev)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
