@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
    Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
    Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
    Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
@@ -22357,6 +22358,8 @@
     if(getHideStatusBarEnabled()){ exitToNormalDisplayMode(); return; }
     enterFullscreenDisplayMode();
   }
+  // вход для горячих клавиш (hotkeys.js, Ctrl+F): та же функция, что у кнопки в нижней панели, поэтому из режима, включённого кнопкой, можно выйти клавишей и наоборот
+  window.DisplayMode = { toggleFullscreen: handleFullscreenBtnTap, isFullscreen: getHideStatusBarEnabled };
   function setTaskText(id, text){
     var task = getTaskById(id);
     if(!task) return;

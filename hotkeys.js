@@ -1,4 +1,5 @@
 /* hotkeys.js
+   Версия: 1.1 (16.11) — Ctrl+←/→/↑/↓ работают и в полноэкранном режиме / режиме чтения (язычки там спрятаны: измерение идёт с временно снятым `.reading-mode-active`, `measureWithTabsRevealed`); новая клавиша Ctrl+F — включить/выключить полноэкранный режим (`window.DisplayMode.toggleFullscreen` из my.js; работает и если режим включён кнопкой на экране). Откат: hotkeys.js 1.0.
    Версия: 1.0 (15.11) — горячие клавиши физической (bluetooth) клавиатуры. Первые четыре: Ctrl+←/→ — по язычкам нижнего ряда, Ctrl+↑/↓ — по язычкам бокового ряда.
 
    Как это устроено
@@ -90,18 +91,31 @@
     });
     return list;
   }
+  // В полноэкранном режиме и режиме чтения ряды язычков спрятаны (display:none, класс .reading-mode-active на окне настроек) — у них нет размеров, и ни «видимость», ни
+  // порядок по координатам не определить. Поэтому измерение идёт с временно снятым классом: всё в одном синхронном проходе, кадр между снятием и возвратом не рисуется,
+  // человек ничего не видит. Само нажатие на язычок делается уже после возврата класса — как будто ряды и не показывались.
+  function measureWithTabsRevealed(fn){
+    var ov = document.getElementById("settingsModalOverlay");
+    var hidden = !!ov && ov.classList.contains("reading-mode-active");
+    if(hidden) ov.classList.remove("reading-mode-active");
+    try{ return fn(); }
+    finally{ if(hidden) ov.classList.add("reading-mode-active"); }
+  }
   // шаг по кругу: dir = +1 (дальше по экрану: вправо / вниз) или -1 (назад: влево / вверх)
   function stepRow(ids, axis, dir){
-    var list = usableTabs(visibleRow(ids), axis);
-    if(!list.length) return false;
-    var cur = -1;
-    for(var i = 0; i < list.length; i++){ if(list[i].classList.contains("active")){ cur = i; break; } }
-    var next;
-    if(cur === -1) next = dir > 0 ? 0 : list.length - 1;
-    else next = (cur + dir + list.length) % list.length;
-    if(list.length === 1 && cur === 0) return true; // единственный язычок — переходить некуда, но клавишу не отдаём странице
-    var btn = list[next];
-    try{ btn.click(); }catch(e){}
+    var btn = measureWithTabsRevealed(function(){
+      var list = usableTabs(visibleRow(ids), axis);
+      if(!list.length) return false;
+      var cur = -1;
+      for(var i = 0; i < list.length; i++){ if(list[i].classList.contains("active")){ cur = i; break; } }
+      var next;
+      if(cur === -1) next = dir > 0 ? 0 : list.length - 1;
+      else next = (cur + dir + list.length) % list.length;
+      if(list.length === 1 && cur === 0) return null; // единственный язычок — переходить некуда, но клавишу не отдаём странице
+      return list[next];
+    });
+    if(btn === false) return false;
+    if(btn) { try{ btn.click(); }catch(e){} }
     return true;
   }
 
@@ -110,6 +124,15 @@
   register("ctrl+arrowleft",  function(){ return stepRow(BOTTOM_ROWS, "x", -1); });
   register("ctrl+arrowdown",  function(){ return stepRow(SIDE_ROWS, "y", +1); });
   register("ctrl+arrowup",    function(){ return stepRow(SIDE_ROWS, "y", -1); });
+
+  // Ctrl+F — полноэкранный режим: первое нажатие включает, повторное выключает. Работает и тогда, когда режим включён кнопкой на экране (общий флаг, одна и та же
+  // функция, что у кнопки в нижней панели: my.js → window.DisplayMode). Не требует открытого окна настроек и работает в полях ввода (браузерный поиск по Ctrl+F здесь отдан приложению).
+  register("ctrl+f", function(){
+    var dm = window.DisplayMode;
+    if(!dm || typeof dm.toggleFullscreen !== "function") return false;
+    dm.toggleFullscreen();
+    return true;
+  }, { always: true, inEditable: true });
 
   // ---------- диспетчер ----------
   document.addEventListener("keydown", function(ev){

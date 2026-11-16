@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 50.0 (16.11) — лицо таймера (сетка вкладки 9 и показ по скану) как у карточки «Таймеры» в виджете: название, кольцо и минуты (`timerFaceHtml`, `timerFaceState`, `timerNumText`); цифры и дуга меняются раз в минуту (и при пуске/паузе/стопе), посекундно таймер идёт в острове; цвет лица — цвет таймера (из карточки или из кода). Откат: itemcards.js 49.1.
    Версия: 49.1 (15.11) — «Конструктор виджетов»: для галочки «Отображать таймеры» все обычные таймеры пользователя отдаёт `widgetTimers` (скрытые таймеры не входят), у лица таймера появилось поле `seconds` (заданное время, с). Откат: itemcards.js 49.0.
    Версия: 49.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
    Версия: 47.4 (14.11) — «Конструктор виджетов»: привычки убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Отображать карточки привычек» все привычки отдаёт `widgetHabits`, у лица привычки появилось поле `last` (последний отмеченный день, ГГГГ-ММ-ДД). Откат: itemcards.js 47.3.
@@ -966,11 +967,46 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     h += '<text x="50" y="' + (F.timeBase * 100).toFixed(1) + '" font-size="' + (F.timeFs * 100).toFixed(1) + '" text-anchor="middle" fill="#fff" font-weight="700" font-family="sans-serif">' + escapeHtml(alarmClock(c)) + '</text>';
     return h + '</svg>';
   }
+  // ---------- лицо таймера (как в виджете, QrTimerFace.kt: числа — доли ширины карточки ×100) ----------
+  var TF_R = 25.75; // радиус кольца по центру штриха: внешний 27,65 минус половина толщины 3,8
+  // Число в кольце — как QrTimerFace.numberText: от часа «Ч:ММ» (минуты вверх), от минуты — минуты вверх, короче минуты у не запущенного — «0:СС»; у идущего ниже «1» не опускается
+  function timerNumText(sec, running){
+    sec = Math.max(0, sec | 0);
+    if(sec >= 3600){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + pad2(tm % 60); }
+    if(sec >= 60 || running) return String(Math.max(1, Math.ceil(sec / 60)));
+    return "0:" + pad2(sec);
+  }
+  // Что показывать сейчас: число, доля кольца (остаток / заданное, 1 — целое кольцо) и ключ перерисовки. Ключ меняется, только когда меняется число минут
+  // (или состояние: запуск, пауза, остановка) — так лицо «тикает» раз в минуту, как в виджете; посекундно таймер идёт в острове
+  function timerFaceState(c){
+    var info = timerInfo(runId(c)), total = c.seconds | 0;
+    if(!info) return { num: timerNumText(total, false), frac: 1, key: "i", running: false, paused: false };
+    var sec = Math.ceil(info.leftMs / 1000);
+    var frac = total > 0 ? Math.max(0, Math.min(1, info.leftMs / (total * 1000))) : 1;
+    return {
+      num: timerNumText(sec, info.running), frac: frac,
+      key: (info.running ? "r" + (info.endAt || 0) : "p") + ":" + Math.ceil(sec / 60),
+      running: !!info.running, paused: !info.running
+    };
+  }
+  function timerArcAttrs(frac){
+    var full = frac >= 0.999;
+    return { dash: full ? "100 100" : (Math.max(0, frac) * 100).toFixed(2) + " 100", trackOpacity: full ? "0" : "0.3" };
+  }
+  function timerFaceHtml(c){
+    var st = timerFaceState(c), a = timerArcAttrs(st.frac), title = String(c.title || "Таймер").trim() || "Таймер";
+    var tw = title.length * 10.8 * 0.56, num = st.num;
+    var h = '<svg class="item-card-timer-svg" viewBox="0 0 100 102" aria-hidden="true">';
+    h += '<text x="50" y="18.4" font-size="10.8" text-anchor="middle" fill="#fff" font-weight="700"' + (tw > 86 ? ' textLength="86" lengthAdjust="spacingAndGlyphs"' : '') + ' font-family="\'Palatino Linotype\',Georgia,serif">' + escapeHtml(title) + '</text>';
+    h += '<circle class="tf-track" cx="50" cy="59" r="' + TF_R + '" fill="none" stroke="#fff" stroke-width="3.8" stroke-opacity="' + a.trackOpacity + '"/>';
+    h += '<circle class="tf-arc" cx="50" cy="59" r="' + TF_R + '" fill="none" stroke="#fff" stroke-width="3.8" pathLength="100" stroke-dasharray="' + a.dash + '" transform="rotate(-90 50 59)"/>';
+    h += '<text class="tf-num' + (st.paused ? ' paused' : '') + '" data-id="' + escapeHtml(c.id) + '" data-key="' + escapeHtml(st.key) + '" x="50" y="' + (59 + (num.length > 3 ? 20 : 29) * 0.355).toFixed(1) + '" font-size="' + (num.length > 3 ? 20 : 29) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + escapeHtml(num) + '</text>';
+    return h + '</svg>';
+  }
   function cardFrontHtml(c){
     var icon = iconSvg(c.icon);
-    if(c.type === "timer"){
-      return '<div class="item-card-title"></div>' +
-        '<div class="item-card-time" data-id="' + escapeHtml(c.id) + '">' + escapeHtml(timerTextFor(c)) + '</div>' +
+    if(c.type === "timer"){ // лицо как у карточки «Таймеры» в виджете (QrTimerFace.kt): название, кольцо и минуты; цифры и дуга обновляются раз в минуту
+      return '<div class="item-card-title" style="display:none;"></div>' + timerFaceHtml(c) +
         '<div class="item-card-timer-btns">' +
           '<button type="button" class="item-card-stop-btn" title="Остановить таймер">Стоп</button>' +
         '</div>';
@@ -2220,29 +2256,34 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       if(t.id !== id) continue;
       if(t.running){
         var left = t.endAt - Date.now();
-        return left > 0 ? { running: true, leftMs: left } : null;
+        return left > 0 ? { running: true, leftMs: left, endAt: t.endAt } : null;
       }
       return { running: false, leftMs: t.remainingMs || 0 };
     }
     return null;
   }
-  function timerTextFor(c){
-    var info = timerInfo(runId(c));
-    return formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
-  }
-  // обновляет цифры на всех видимых карточках-таймерах; true — есть идущий или приостановленный таймер
+  // обновляет лица всех видимых карточек-таймеров (цифры и дугу кольца) — только когда изменился ключ: раз в минуту, а также при запуске, паузе и остановке;
+  // true — есть идущий или приостановленный таймер
   function updateTimerTexts(){
     var any = false;
-    var nodes = document.querySelectorAll(".item-card-time[data-id]");
+    var nodes = document.querySelectorAll(".tf-num[data-id]");
     for(var i = 0; i < nodes.length; i++){
-      var id = nodes[i].getAttribute("data-id");
-      var c = findCard(id);
+      var node = nodes[i];
+      var c = findCard(node.getAttribute("data-id"));
       if(!c) continue;
-      var info = timerInfo(runId(c));
-      nodes[i].textContent = formatTimer(info ? Math.ceil(info.leftMs / 1000) : c.seconds);
-      nodes[i].classList.toggle("running", !!(info && info.running));
-      nodes[i].classList.toggle("paused", !!(info && !info.running));
-      if(info) any = true;
+      var st = timerFaceState(c);
+      if(st.key !== "i") any = true;
+      if(node.getAttribute("data-key") === st.key) continue;
+      node.setAttribute("data-key", st.key);
+      var num = st.num;
+      node.textContent = num;
+      node.setAttribute("font-size", num.length > 3 ? 20 : 29);
+      node.setAttribute("y", (59 + (num.length > 3 ? 20 : 29) * 0.355).toFixed(1));
+      node.classList.toggle("paused", st.paused);
+      var svg = node.parentNode, a = timerArcAttrs(st.frac);
+      var arc = svg && svg.querySelector(".tf-arc"), track = svg && svg.querySelector(".tf-track");
+      if(arc) arc.setAttribute("stroke-dasharray", a.dash);
+      if(track) track.setAttribute("stroke-opacity", a.trackOpacity);
     }
     return any;
   }
@@ -2251,7 +2292,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     tickTimer = setInterval(function(){
       refreshTimers();
       var active = updateTimerTexts();
-      var visible = !!document.querySelector(".item-card-time[data-id]");
+      var visible = !!document.querySelector(".tf-num[data-id]");
       if(!active || !visible){ clearInterval(tickTimer); tickTimer = null; }
     }, 1000);
   }

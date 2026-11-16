@@ -380,7 +380,7 @@ object QrWidgets {
                         val times = HashSet<String>()
                         val ta = d.optJSONArray("times")
                         if (ta != null) for (x in 0 until ta.length()) ta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) times.add(it) }
-                        timerList.add(Card(key, d.optString("code", ""), d.optString("title", ""), live, times, emptySet(), "none", QrTimerFace.COLOR, "timer", 0L, sec = sec))
+                        timerList.add(Card(key, d.optString("code", ""), d.optString("title", ""), live, times, emptySet(), "none", parseColor(d.optString("color", ""), QrTimerFace.COLOR), "timer", 0L, sec = sec)) // цвет лица — цвет таймера на вкладке QR-кодов
                         if (timerList.size >= QrPriority.TIMER_NAV_MAX) break
                     }
                 }
@@ -569,7 +569,7 @@ object QrWidgets {
         if (c.key == QrMood.KEY) return QrMood.render(ctx, c.color)
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
-        if (c.dyn == "timer") return QrTimerFace.render(c.title, timerStateOf(ctx, c), c.sec) // таймер рисует оболочка: кольцо и минуты меняются сами
+        if (c.dyn == "timer") return QrTimerFace.render(c.title, timerStateOf(ctx, c), c.sec, c.color) // таймер рисует оболочка: кольцо и минуты меняются сами
         if (c.dyn == "event" || c.dyn == "task") dynBitmap(ctx, c)?.let { return it }
         if (c.alarmId.isNotEmpty() && CardAlarms.isArmed(ctx, c.alarmId)) { // будильник заведён — лицо с надписью «Заведён» (`<ключ>_on.png`)
             val on = File(imgDir(ctx), c.key + "_on.png")
