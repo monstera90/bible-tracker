@@ -13646,6 +13646,30 @@
   // рендера и для повторного включения кнопкой "Сбросить обложку" — mdeditor-cover-reset-btn).
   // draggable="false" — вместе с CSS (-webkit-user-drag:none, components.css) убирает системное
   // перетаскивание/контекстное меню картинки на долгом нажатии.
+  // Цветной выступ под обложкой (как у карточек QR-кодов): цвет — средний по нижней части видимой области обложки, темнее на 20 %
+  // (та же формула, что cardShade в itemcards.js). Нет доступа к пикселям — остаётся серый по умолчанию.
+  function applyCoverShade(thumb){
+    var img = thumb ? thumb.querySelector("img") : null;
+    if(!img) return;
+    function go(){
+      try{
+        var nw = img.naturalWidth, nh = img.naturalHeight;
+        if(!nw || !nh) return;
+        var target = 1 / 1.02, ar = nw / nh, vh = ar < target ? nh * ar / target : nh;
+        var y0 = (nh - vh) / 2 + vh * 0.7, sh = vh * 0.3;
+        var cv = document.createElement("canvas"); cv.width = 24; cv.height = 8;
+        var g = cv.getContext("2d");
+        g.drawImage(img, 0, y0, nw, sh, 0, 0, 24, 8);
+        var d = g.getImageData(0, 0, 24, 8).data, r = 0, gr = 0, b = 0, n = 0;
+        for(var i = 0; i < d.length; i += 4){ if(d[i + 3] < 128) continue; r += d[i]; gr += d[i + 1]; b += d[i + 2]; n++; }
+        if(!n) return;
+        function hx(v){ var t = Math.round(v / n * 0.8).toString(16); return t.length < 2 ? "0" + t : t; }
+        thumb.style.setProperty("--cover-shade", "#" + hx(r) + hx(gr) + hx(b));
+      }catch(e){}
+    }
+    if(img.complete && img.naturalWidth) go(); else img.addEventListener("load", go);
+  }
+
   function loadBookCoverIntoThumb(idx, hash){
     if(!hash) return;
     getBookCoverUrl(hash).then(function(url){
@@ -13654,6 +13678,7 @@
       if(!thumb) return;
       thumb.classList.remove("book-cover-placeholder");
       thumb.innerHTML = '<img src="' + url + '" alt="" draggable="false">';
+      applyCoverShade(thumb);
     });
   }
 
@@ -13680,6 +13705,7 @@
         '</div>';
       card.querySelector(".book-cover-name").textContent = it.name;
       gridEl.appendChild(card);
+      applyCoverShade(card.querySelector(".book-cover-thumb")); // заглушка: выступ по её цвету
       if(it.hash && !isBookCoverDisabled(it.hash)) loadBookCoverIntoThumb(idx, it.hash);
     });
     bindBooksRowActions(gridEl, items, true);
