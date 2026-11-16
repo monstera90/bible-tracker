@@ -494,7 +494,7 @@
       if(e < rd){ var w = win(e); if(w > prev) prev = w; }
     });
     if(!(prev > 0) || cur <= prev) return;
-    pushNotice({ k: "srpe:" + rec.id, kind: "load", tab: "records", tk: kindOf(rec),
+    pushNotice({ k: "srpe:" + rec.id, kind: "load", tab: "records", tk: kindOf(rec), val: cur,
       text: "Рекорд нагрузки: " + cur + " " + pointsWord(cur) + " за " + LOAD_DAYS + " дней! Прежний рекорд — " + prev + "." });
   }
 
@@ -683,13 +683,34 @@
     if(n.kind === "load") return "Рекорд нагрузки";
     return "Достижение";
   }
+  var MONTHS_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+  // «14 ноября»
+  function achDateText(ts){ var d = new Date(ts); return d.getDate() + " " + MONTHS_GEN[d.getMonth()]; }
+  // название награды по ключу сообщения «a:<id>»
+  function awardTitleOf(n){
+    var id = String(n.k).slice(2), t = "";
+    try{ awardDefs().forEach(function(d){ if(d.id === id) t = d.title; }); }catch(e){}
+    if(!t){ var m = /«([^»]+)»/.exec(String(n.text || "")); t = m ? m[1] : ""; }
+    return t;
+  }
+  // значение рекорда нагрузки: поле `val`, у старых сообщений — число из текста
+  function loadValueOf(n){
+    var v = Number(n.val);
+    if(!(v > 0)){ var m = /Рекорд нагрузки:\s*(\d+)/.exec(String(n.text || "")); v = m ? Number(m[1]) : 0; }
+    return v > 0 ? v + " " + pointsWord(v) : String(n.text || "");
+  }
   // отдельная карточка на каждое достижение последней недели; нажатие открывает кубок на нужной части и виде
+  // «Награда» — значок вида тренировки, «Награда», название, дата; «Рекорд» — кубок, «Рекорд», баллы, дата; остальные — как были
   function achCardHtml(n){
     var tab = n.tab === "awards" ? "awards" : (n.tab === "records" ? "records" : "goals");
-    var ico = (n.kind === "award" || String(n.k).indexOf("gd:") === 0) ? MEDAL_ICON_SVG : CUP_ICON_SVG;
-    return '<div class="wk-card wk-tip wk-ach" data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + ico + '</span><span>' + esc(achHead(n)) + '</span></div>' +
-      '<div class="wk-tip-text">' + esc(n.text) + '</div>' +
-      '<div class="wk-note wk-tip-meta">' + esc(achDayLabel(n.ts)) + ' · Нажмите, чтобы открыть</div></div>';
+    var isAward = n.kind === "award", isLoad = n.kind === "load";
+    var ico = isAward ? KINDS[kindKey(n.tk)].svg : ((String(n.k).indexOf("gd:") === 0) ? MEDAL_ICON_SVG : CUP_ICON_SVG);
+    var head = isLoad ? "Рекорд" : achHead(n);
+    var body = isAward ? awardTitleOf(n) : (isLoad ? loadValueOf(n) : n.text);
+    var meta = (isAward || isLoad) ? achDateText(n.ts) : (achDayLabel(n.ts) + ' · Нажмите, чтобы открыть');
+    return '<div class="wk-card wk-tip wk-ach" data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + ico + '</span><span>' + esc(head) + '</span></div>' +
+      '<div class="wk-tip-text">' + esc(body) + '</div>' +
+      '<div class="wk-note wk-tip-meta">' + esc(meta) + '</div></div>';
   }
 
   // нагрузка, совет дня и достижения недели — всё под карточкой месяца, перерисовывается отдельно от неё
