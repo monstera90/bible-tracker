@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.11 (15.11) — галочка «Отображать таймеры» (`timers`, время суток каждого таймера в этом виджете — `timerCfg`, экран «Таймеры» по нажатию на карточку в форме): в стопку добавляется одна карточка со ВСЕМИ таймерами пользователя (обычные карточки-таймеры вкладки QR-кодов; `widgetTimers` в itemcards.js; в оболочку уходят до `MAX_TIMERS` штук в поле `tmr`: ключ, название, `sec`, `live`, `times`). Лицо рисует оболочка (QrTimerFace.kt: зелёная карточка, кольцо и минуты, кольцо перерисовывается раз в минуту). Идущий таймер — выше всего (выше «Как тренировка?» и календаря), несколько идущих сменяют друг друга по минуте; таймер «в своё время суток» — выше календаря и привычек; края карточки листают таймеры, центр запускает показанный. Откат: widgets.js 6.10.
    Версия: 6.10 (15.11) — тексты в форме описывают общее правило круга равных: любые карточки с одинаковым верхним баллом сменяют друг друга по минуте, а карточка-группа («Привычки», «Будильники») всегда одна, и по минутам меняется её элемент (оболочка: QrPriority 4.9).
    Версия: 6.9 (15.11) — в описании «Переключение по релевантности» добавлен круг равных (привычки «в своё время» и календарь по очереди по минуте).
    Версия: 6.8 (15.11) — под «Показывать события календаря» галочка «Показывать только мероприятия на сегодня и на завтра» (`eventsSoon`, по умолчанию выключена; уходит в оболочку полем `eventsSoon`): карточка события показывает только сегодня и завтра, нет событий — карточки в стопке нет.
@@ -42,6 +43,8 @@
   var DYN_LAST_KEY = "widgetsDynColors_v1"; // последний выбранный цвет карточек задач/событий: {task, event}
   var MAX_TASKS = 12; // задач, между которыми листает единственная карточка задач (ближайшие по времени, просроченные первыми; то же число — QrPriority.TASK_NAV_MAX)
   var MAX_HABITS = 24; // привычек, которые уходят оболочке для карточек привычек (то же число — QrPriority.HABIT_NAV_MAX)
+  var MAX_TIMERS = 24; // таймеров, между которыми листает карточка «Таймеры» (то же число — QrPriority.TIMER_NAV_MAX)
+  var TIMER_COLOR = "#55cc0a"; // зелёный образца заказчика: цвет карточки «Таймеры» (в оболочке — QrTimerFace.COLOR)
   var MAX_ALARMS = 16; // будильников, между которыми листает карточка будильников (то же число — QrPriority.ALARM_NAV_MAX)
   var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
@@ -109,7 +112,7 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.eventsSoon = !!w.events && !!w.eventsSoon; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.eventsSoon = !!w.events && !!w.eventsSoon; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.timers = !!w.timers; w.timerCfg = normTimerCfg(w.timerCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
         w.rpeColor = normHex(w.rpeColor) || RPE_COLOR; w.moodColor = normHex(w.moodColor) || RPE_COLOR; // служебные карточки: пусто — фиолетовый макета, как было до палитры
       });
@@ -132,8 +135,24 @@
       return w.habitCfg[cid];
     }
     function trimHabitCfg(w, cid){ var h = w.habitCfg && w.habitCfg[cid]; if(h && !h.times.length && !h.days.length) delete w.habitCfg[cid]; }
+    // время суток таймеров этого виджета: {<id таймера>: {times:["m"|"d"|"e"]}}; пустые записи не хранятся (таймер без времени суток «своего» времени не имеет)
+    function normTimerCfg(o){
+      var out = {};
+      if(o && typeof o === "object") Object.keys(o).forEach(function(cid){
+        var v = o[cid]; if(!v || typeof v !== "object") return;
+        var t = (Array.isArray(v.times) ? v.times : []).filter(function(k){ return k === "m" || k === "d" || k === "e"; });
+        if(t.length) out[cid] = { times: t };
+      });
+      return out;
+    }
+    function timerCfgOf(w, cid){
+      if(!w.timerCfg || typeof w.timerCfg !== "object") w.timerCfg = {};
+      if(!w.timerCfg[cid]) w.timerCfg[cid] = { times: [] };
+      return w.timerCfg[cid];
+    }
+    function trimTimerCfg(w, cid){ var h = w.timerCfg && w.timerCfg[cid]; if(h && !h.times.length) delete w.timerCfg[cid]; }
     function normHex(v){ return (typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v)) ? v.toLowerCase() : ""; }
-    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.habits || w.rpeAsk || w.moodAsk); }
+    function hasContent(w){ return !!(w.cards.length || w.battery || w.batteryMulti || w.tasks || w.events || w.alarms || w.habits || w.timers || w.rpeAsk || w.moodAsk); }
     function normAfter(v){ return (v === "hide" || v === "end") ? v : "none"; }
     function normPrio(v){ return (v === "top" || v === "low") ? v : "normal"; }
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
@@ -361,6 +380,7 @@
     function hhmm(ts){ var d = new Date(ts), h = d.getHours(), m = d.getMinutes(); return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m; }
     function usesAlarms(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].alarms) return true; return false; }
     function usesHabits(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].habits) return true; return false; }
+    function usesTimers(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].timers) return true; return false; }
     function usesDyn(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].tasks || data.list[i].events) return true; return false; }
     // что нужно карточкам: {tasks:[{at,title}], events:[{at,title}]}; задачи — открытые на сегодня и просроченные, события — ещё не начавшиеся
     function buildFeed(){
@@ -445,6 +465,10 @@
         try{ habitRows = ic.widgetHabits().slice(0, MAX_HABITS); }catch(e){ habitRows = []; }
         habitRows.forEach(function(f){ ids[f.id] = 1; });
       }
+      var timerRows = []; // все обычные таймеры пользователя для карточки «Таймеры» (у кого в виджете включена галочка); лицо рисует оболочка, картинки не нужны
+      if(usesTimers()){
+        try{ timerRows = (typeof ic.widgetTimers === "function" ? ic.widgetTimers() : []).filter(function(f){ return f.seconds > 0; }).slice(0, MAX_TIMERS); }catch(e){ timerRows = []; }
+      }
       Object.keys(ids).forEach(function(id){ var f = ic.widgetFace(id); if(f) faces[id] = f; });
       var keys = Object.keys(faces);
       var feed = usesDyn() ? buildFeed() : null;
@@ -462,7 +486,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], timers: !!w.timers, tmr: w.timers ? timerRows.map(function(f){ var tc = (w.timerCfg && w.timerCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, sec: f.seconds, live: f.live, times: tc.times || [] }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -726,6 +750,25 @@
       var hex = cardsOf().paletteColor("");
       return faceHtml({ type: "habit", title: "Бег", color: hex, shade: cardsOf().cardShade(hex), svg: "", big: "", sub: "" }, "");
     }
+    // Число в кольце карточки «Таймеры» — как в оболочке (QrTimerFace.numberText для не запущенного таймера): от часа «Ч:ММ», от минуты — минуты вверх, короче — «0:СС»
+    function timerNumText(sec){
+      sec = Math.max(0, sec | 0);
+      if(sec >= 3600){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + (tm % 60 < 10 ? "0" : "") + (tm % 60); }
+      if(sec >= 60) return String(Math.ceil(sec / 60));
+      return "0:" + (sec < 10 ? "0" : "") + sec;
+    }
+    // Карточка «Таймеры» в форме: образец лица (в виджете её рисует оболочка, QrTimerFace.kt; числа — доли ширины карточки ×100, сняты с образца заказчика: название, кольцо с минутами);
+    // берётся первый таймер пользователя, нет таймеров — образец «Таймер» / 23
+    function timersFaceHtml(){
+      var list = [];
+      try{ list = typeof cardsOf().widgetTimers === "function" ? cardsOf().widgetTimers() : []; }catch(e){ list = []; }
+      var title = list.length ? (list[0].title || "Таймер") : "Таймер", num = list.length ? timerNumText(list[0].seconds) : "23";
+      var shade = cardsOf().cardShade(TIMER_COLOR);
+      var t = '<text x="50" y="18.4" font-size="10.8" text-anchor="middle" fill="#fff" font-weight="700" font-family="\'Palatino Linotype\',Georgia,serif">' + esc(title.length > 16 ? title.slice(0, 15) + "…" : title) + '</text>';
+      t += '<circle cx="50" cy="59" r="25.75" fill="none" stroke="#fff" stroke-width="3.8"/>';
+      t += '<text x="50" y="' + (59 + 29 * 0.355).toFixed(1) + '" font-size="' + (num.length > 3 ? 20 : 29) + '" text-anchor="middle" fill="#fff" font-family="sans-serif">' + esc(num) + '</text>';
+      return '<div class="wg-card wg-bat-card" style="background:' + TIMER_COLOR + ';box-shadow:0 4px 0 ' + shade + ';"><svg viewBox="0 0 100 102" aria-hidden="true">' + t + '</svg></div>';
+    }
     function tasksFaceHtml(w){ return dynFaceHtml("task", dynHex(w, "task")); }
     function eventsFaceHtml(w){ return dynFaceHtml("event", dynHex(w, "event")); }
     // Строка списка виджетов: что в стопке, кроме карточек QR-кодов
@@ -737,6 +780,7 @@
       if(w.events) extra.push("события");
       if(w.alarms) extra.push("будильники");
       if(w.habits) extra.push("привычки");
+      if(w.timers) extra.push("таймеры");
       if(w.rpeAsk) extra.push("вопрос о тренировке");
       if(w.moodAsk) extra.push("вопрос о настроении");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
@@ -798,7 +842,7 @@
       data.list.forEach(function(w){
         var f = w.cards.length ? cardsOf().widgetFace(w.cards[0].cid) : null;
         html += '<div class="wg-row" data-id="' + esc(w.id) + '">' +
-          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : (w.alarms ? cardsOf().paletteColor("") : (w.habits ? cardsOf().paletteColor("") : "var(--gold)"))))))) + ';"></div>' +
+          '<div class="wg-row-ico" style="background:' + (f ? f.color : (w.battery ? batHex(w) : (w.batteryMulti ? bat2Hex(w) : (w.tasks ? dynHex(w, "task") : (w.events ? dynHex(w, "event") : (w.alarms ? cardsOf().paletteColor("") : (w.habits ? cardsOf().paletteColor("") : (w.timers ? TIMER_COLOR : "var(--gold)")))))))) + ';"></div>' +
           '<div class="wg-row-txt"><div class="wg-row-name">' + esc(wname(w)) + '</div>' +
           '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
@@ -831,6 +875,7 @@
       if(w.events) html += '<div class="wg-slot" data-bat="1" id="wgEventsSlot">' + eventsFaceHtml(w) + '</div>'; // образец карточки события
       if(w.alarms) html += '<div class="wg-slot" data-bat="1" id="wgAlarmsSlot">' + alarmsFaceHtml() + '</div>'; // карточка будильников (в виджете одна на все будильники, листается у краёв)
       if(w.habits) html += '<div class="wg-slot" data-habits="1" id="wgHabitsSlot">' + habitsFaceHtml() + '</div>'; // карточка привычек (нажатие — время суток и дни каждой привычки)
+      if(w.timers) html += '<div class="wg-slot" data-timers="1" id="wgTimersSlot">' + timersFaceHtml() + '</div>'; // карточка таймеров (нажатие — время суток каждого таймера)
       if(w.rpeAsk) html += '<div class="wg-slot" data-bat="1" id="wgRpeSlot">' + rpeFaceHtml(w) + '</div>'; // образец «Как тренировка?» (в виджете она стоит над всеми карточками, пока есть запись без оценки)
       if(w.moodAsk) html += '<div class="wg-slot" data-bat="1" id="wgMoodSlot">' + moodFaceHtml(w) + '</div>'; // образец «Как настроение?» (в виджете она стоит над всеми обычными карточками с 20:30, пока сегодня не отмечено настроение)
       html += '</div>';
@@ -858,6 +903,8 @@
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgHabits"' + (w.habits ? ' checked' : '') + '>Отображать карточки привычек</label>';
       if(w.habits) html += '<div class="wg-hint">Нажмите на карточку привычек выше, чтобы задать время суток и дни недели каждой привычки: привычка в своё время встаёт в круг наравне с календарём.</div>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgTimers"' + (w.timers ? ' checked' : '') + '>Отображать таймеры</label>';
+      if(w.timers) html += '<div class="wg-hint">Нажмите на карточку таймеров выше, чтобы выбрать каждому таймеру время суток (необязательно): в своё время таймер встаёт выше календаря. Идущий таймер всегда наверху.</div>';
       html += checkRow("wgRpe", w.rpeAsk, "Спрашивать о тренировке", ["icfColors5", "wgrpe"], rpeHex(w));
       if(w.rpeAsk) html += palBlock(["icfColors5", "wgrpe"]);
       html += checkRow("wgMood", w.moodAsk, "Спрашивать о настроении", ["icfColors6", "wgmood"], moodHex(w));
@@ -881,6 +928,7 @@
       ["Показывать только мероприятия на сегодня и на завтра", "Появляется под «Показывать события календаря», по умолчанию выключена. Если включена, карточка события показывает только события на сегодня и на завтра; когда на эти два дня событий нет, карточки календаря в стопке нет. Если выключена — события ближайшей недели."],
       ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает все будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он (если звонят несколько — по очереди, по минуте); перед звонком (за 30 минут) — тот, что скоро зазвонит; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова возвращается к этому правилу. Нет галочки — карточки будильников в стопке нет."],
       ["Отображать карточки привычек", "Карточки ваших привычек (карточки «Привычка» вкладки QR-кодов). Нажмите на карточку привычек в форме и задайте каждой привычке время суток и дни недели. Карточка привычек в стопке всегда одна. Привычка, у которой сейчас её время, участвует в круге равных (при «Переключении по релевантности»): по минутам на карточке показывается очередная такая привычка. Привычки не в своё время в круг не попадают. Нажатие у левого или правого края карточки листает все привычки (выбор держится минуту после последнего нажатия), одно нажатие в центре открывает карту дней привычки, двойное — отмечает её выполненной: исчезает только эта привычка, до конца дня. Когда отмечены все привычки, карточки привычек в стопке нет совсем. Нет галочки — привычек в стопке нет."],
+      ["Отображать таймеры", "Одна карточка со всеми вашими таймерами (карточки «Таймер» вкладки QR-кодов; скрытые таймеры не входят): зелёная, с названием, кольцом и числом минут. Не запущенный таймер показывает заданное время, идущий — остаток; кольцо и минуты перерисовываются раз в минуту. Нажатие у левого или правого края листает таймеры, нажатие в центре запускает показанный таймер (идущий не трогает). Идущий таймер — самая важная карточка: она встаёт наверх выше «Как тренировка?», календаря и всего остального, даже без «Переключения по релевантности». Если идут два таймера и больше, они сменяют друг друга по очереди, каждый на минуту. Нажмите на карточку таймеров в форме и выберите таймеру время суток — необязательно: в своё время (если таймер не запущен) он встаёт выше календаря и привычек и сменяет такие же по минутам; без времени суток таймер наверх не поднимается, его можно найти, листая карточку у краёв. Нет галочки — карточки таймеров в стопке нет."],
       ["Спрашивать о тренировке", "После тренировки, пока вы не оценили нагрузку, наверху стопки появляется карточка «Как тренировка?» с кнопками от 1 до 10. Нажатие на число сразу сохраняет оценку, и карточка исчезает. Если пролистнуть на другую карточку, через минуту она вернётся наверх; порядок остальных карточек не меняется. Нет галочки — карточки нет."],
       ["Спрашивать о настроении", "Каждый вечер в 20:30, если за день вы ни разу не отметили настроение (ни в приложении, ни в виджете), наверху стопки появляется карточка «Как настроение?» с восемью эмодзи — теми же чувствами, что на вкладке настроения. Нажатие на эмодзи сразу записывает настроение, и карточка исчезает; не отметили — в полночь она уходит сама, а завтра вечером придёт снова. Она стоит выше календаря и остальных карточек (как «Как тренировка?»); если ждут обе, «Как тренировка?» выше. Если пролистнуть на другую карточку, через минуту она вернётся наверх. Нет галочки — карточки нет."]
     ];
@@ -907,6 +955,24 @@
         WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (hc.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
         html += '</div><div class="wg-chips wg-habit-days">';
         DAYS.forEach(function(d, i){ html += '<div class="wg-chip' + (hc.days.indexOf(i + 1) >= 0 ? ' on' : '') + '" data-d="' + (i + 1) + '">' + d + '</div>'; });
+        html += '</div></div>';
+      });
+      html += fabRow(homeBtn("К виджету"));
+      return html;
+    }
+
+    // экран «Таймеры»: у каждого таймера — время суток (необязательно), только для этого виджета
+    function timersHtml(a){
+      var w = a.w, list = [];
+      try{ list = typeof cardsOf().widgetTimers === "function" ? cardsOf().widgetTimers().slice(0, MAX_TIMERS) : []; }catch(e){ list = []; }
+      var html = '<h3 class="common-tab-title">Таймеры</h3>';
+      html += '<div class="wg-hint">Время суток — необязательно. Если таймер не запущен и сейчас его время суток, он встаёт выше календаря и привычек (при «Переключении по релевантности»), а несколько таких таймеров сменяют друг друга по минутам. Таймер без времени суток наверх не поднимается: его можно найти, листая карточку таймеров нажатием у левого и правого края. Идущий таймер всегда наверху, что бы тут ни стояло.</div>';
+      if(!list.length) html += '<div class="wg-empty">Таймеров пока нет.<br>Создайте их на вкладке QR-кодов: «+» → «Таймер».</div>';
+      list.forEach(function(f){
+        var tc = (w.timerCfg && w.timerCfg[f.id]) || { times: [] };
+        html += '<div class="wg-habit" data-cid="' + esc(f.id) + '"><div class="wg-sec"><span class="wg-habit-dot" style="background:' + TIMER_COLOR + ';"></span>' + esc(f.title || "Таймер") + ' · ' + esc(f.big) + '</div>';
+        html += '<div class="wg-chips wg-timer-times">';
+        WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (tc.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
         html += '</div></div>';
       });
       html += fabRow(homeBtn("К виджету"));
@@ -966,6 +1032,7 @@
       else if(top.s === "pick") body = pickHtml(top.a);
       else if(top.s === "info") body = infoHtml();
       else if(top.s === "habits") body = habitsHtml(top.a);
+      else if(top.s === "timers") body = timersHtml(top.a);
       el.innerHTML = '<div class="mdeditor-tab widgets-tab" id="widgetsTabRoot">' + body + '</div>';
       bind(top);
     }
@@ -990,6 +1057,8 @@
         bindPick(top.a);
       } else if(top.s === "habits"){
         bindHabits(top.a);
+      } else if(top.s === "timers"){
+        bindTimers(top.a);
       }
     }
     function commitDraft(a){
@@ -1000,6 +1069,7 @@
       Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-slot"), function(s){
         s.addEventListener("click", function(){
           if(s.getAttribute("data-habits")){ go("habits", { w: w, form: a }); return; } // карточка привычек: время суток и дни каждой привычки
+          if(s.getAttribute("data-timers")){ go("timers", { w: w, form: a }); return; } // карточка таймеров: время суток каждого таймера
           if(s.getAttribute("data-bat")) return; // карточку заряда не выбирают и не настраивают по времени — только цвет под галочкой
           if(s.getAttribute("data-add")) go("pick", { w: w, draft: a.draft, replace: -1, form: a });
           else go("card", { w: w, i: parseInt(s.getAttribute("data-i"), 10), form: a });
@@ -1048,6 +1118,11 @@
       var hab = $("wgHabits");
       hab.addEventListener("change", function(){
         w.habits = hab.checked;
+        commitDraft(a); changed(); render();
+      });
+      var tmrCb = $("wgTimers");
+      tmrCb.addEventListener("change", function(){
+        w.timers = tmrCb.checked;
         commitDraft(a); changed(); render();
       });
       var rpe = $("wgRpe");
@@ -1143,6 +1218,16 @@
         });
         Array.prototype.forEach.call(blk.querySelectorAll(".wg-habit-days .wg-chip"), function(ch){
           ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggle(hc.days, parseInt(ch.getAttribute("data-d"), 10)); ch.classList.toggle("on"); trimHabitCfg(w, cid); changed(); });
+        });
+      });
+    }
+    function bindTimers(a){
+      var w = a.w;
+      function toggle(arr, v){ var i = arr.indexOf(v); if(i >= 0) arr.splice(i, 1); else arr.push(v); arr.sort(); }
+      Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-habit"), function(blk){
+        var cid = blk.getAttribute("data-cid");
+        Array.prototype.forEach.call(blk.querySelectorAll(".wg-timer-times .wg-chip"), function(ch){
+          ch.addEventListener("click", function(){ var tc = timerCfgOf(w, cid); toggle(tc.times, ch.getAttribute("data-k")); ch.classList.toggle("on"); trimTimerCfg(w, cid); changed(); });
         });
       });
     }

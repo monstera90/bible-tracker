@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.1 (15.11) — «Конструктор виджетов»: для галочки «Отображать таймеры» все обычные таймеры пользователя отдаёт `widgetTimers` (скрытые таймеры не входят), у лица таймера появилось поле `seconds` (заданное время, с). Откат: itemcards.js 49.0.
    Версия: 49.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
    Версия: 47.4 (14.11) — «Конструктор виджетов»: привычки убраны из списка выбора (`widgetCards`, `widgetFilters`); для галочки «Отображать карточки привычек» все привычки отдаёт `widgetHabits`, у лица привычки появилось поле `last` (последний отмеченный день, ГГГГ-ММ-ДД). Откат: itemcards.js 47.3.
    Версия: 47.3 (14.11) — карта привычки (и схема заметок «Сегодня») открывается прокрученной в самый низ, к сегодняшней неделе, всегда: `scrollMapToBottom` повторяет прокрутку, пока лента не получила размер (раньше одна попытка в следующем кадре — при открытии из виджета или сразу после смены вкладки она срабатывала до раскладки, и карта оставалась наверху).
@@ -3385,6 +3386,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     f.shade = cardShade(f.color);
     if(c.type === "timer"){
       f.big = formatTimer(c.seconds | 0);
+      f.seconds = c.seconds | 0; // заданное время: по нему оболочка рисует кольцо и минуты карточки «Таймеры» в виджете
       var tt = timerQrTitle(c.title);
       f.live.push({ k: "timer", id: timerCodeId(c.seconds | 0, tt, !!c.noIsland) }); // запущенный по коду
       f.live.push({ k: "timer", id: runId(c) });                                       // запущенный кнопкой карточки
@@ -3429,6 +3431,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     return loadCards().filter(function(c){ return c.type === "alarm" && alarmHM(c); }).map(widgetFace).sort(function(a, b){
       return a.big < b.big ? -1 : (a.big > b.big ? 1 : (a.title < b.title ? -1 : (a.title > b.title ? 1 : 0)));
     });
+  }
+
+  // Все обычные таймеры пользователя (лица для карточки «Таймеры» в виджете) — в порядке сетки карточек; скрытый таймер (`noIsland`) нигде не показывается, в виджет тоже не идёт
+  function widgetTimerList(){
+    reloadCards();
+    return loadCards().filter(function(c){ return c.type === "timer" && !c.noIsland && (c.seconds | 0) > 0; }).map(widgetFace);
   }
 
   // Все привычки пользователя (лица для карточек «Привычки» в виджете) — в порядке сетки карточек
@@ -4194,6 +4202,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     widgetFilters: widgetFilterList,
     widgetAlarms: widgetAlarmList,
     widgetHabits: widgetHabitList,
+    widgetTimers: widgetTimerList,
     // выбор цвета для виджета (карточка «Заряд», widgets.js): та же палитра и те же запомненные цвета, что в форме карточки
     colorPalette: function(type, domId){ ensureHabitStyles(); return colorPaletteHtml(type || "battery", domId); },
     paletteColor: function(hex){ return effColor({ color: hex }); },

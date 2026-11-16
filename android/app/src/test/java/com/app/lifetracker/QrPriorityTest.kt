@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.4 (15.11) — карточка «Таймеры» (timers_*): идущий таймер выше всего, в том числе выше «Как тренировка?» и без «релевантности»; два идущих сменяют друг друга по минутам; таймер «в своё время суток» выше календаря и привычек; минутная перерисовка только пока идёт таймер.
 // Версия: 4.3 (15.11) — единая модель круга равных и карточек-групп: будильники — группа «alm_0» (элементы со своими баллами, alarmRow_*, alarmGroup_*), лицо группы в Result.faces вместо habitIdx; в круг входит любая карточка верхнего яруса (cycle_ordinaryCards_*), равные баллы гистерезис не держит (cycle_equalScoreNotHeld_*).
 // Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
 // Версия: 4.1 (14.11) — служебная карточка «Как настроение?» (mood_*): над календарём, под «Как тренировка?».
@@ -991,6 +992,90 @@ class QrPriorityTest {
             val r = run(cf, snap(cal(18, m)))
             assertEquals(0, r.faces["hab_0"]) // обе привычки утренние: группа не в ярусе, показана первая
         }
+    }
+
+
+    // ---------- карточка «Таймеры» ----------
+
+    private fun tmr(key: String, sec: Int = 600, times: Set<String> = emptySet()) =
+        Card(key = key, code = "", title = key, live = listOf(Live("timer", "id_" + key)), times = times, days = emptySet(), dyn = "timer", sec = sec)
+
+    private fun cfgTimers(timers: List<Card>, cards: List<Card> = emptyList(), relevance: Boolean = true, rpeAsk: Boolean = false) =
+        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk, timers = true, timerCards = timers)
+
+    @Test fun timers_active_isFirst_aboveRpeAndCalendar() {
+        val c = cal(12, 0)
+        val ev = card("e", dyn = "event", at = c.timeInMillis + hour / 2) // событие скоро (750)
+        val cf = cfgTimers(listOf(tmr("t1"), tmr("t2")), listOf(ev), relevance = true, rpeAsk = true)
+        val r = run(cf, snap(c, rpe = true, timers = setOf("id_t2")))
+        assertEquals(listOf("tmr_0", QrRpe.KEY, "e"), keys(r)) // таймер выше «Как тренировка?» и календаря
+        assertEquals("tmr_0", r.topKey)
+        assertEquals("tmr_0", r.anchorKey)
+        assertEquals(1, r.faces["tmr_0"]) // показан тот таймер, что идёт
+        assertEquals(QrPriority.nextCycleAt(c.timeInMillis), r.minuteAt) // кольцо перерисовывается раз в минуту
+    }
+
+    @Test fun timers_active_isFirst_evenWithoutRelevance() {
+        val c = cal(12, 0)
+        val cf = cfgTimers(listOf(tmr("t1")), listOf(card("a"), card("b")), relevance = false)
+        val r = run(cf, snap(c, timers = setOf("id_t1")))
+        assertEquals(listOf("tmr_0", "a", "b"), keys(r))
+        assertEquals("tmr_0", r.topKey)
+        val idle = run(cf, snap(c)) // не идёт: порядок пользователя, карточка таймеров в конце, наверх не поднимается
+        assertEquals(listOf("a", "b", "tmr_0"), keys(idle))
+        assertEquals("", idle.topKey)
+        assertEquals(Long.MAX_VALUE, idle.minuteAt)
+    }
+
+    @Test fun timers_twoActive_alternateEveryMinute() {
+        val cf = cfgTimers(listOf(tmr("t1"), tmr("t2"), tmr("t3")))
+        val seen = ArrayList<Int>()
+        for (m in 0..5) {
+            val c = cal(12, m)
+            val r = run(cf, snap(c, timers = setOf("id_t1", "id_t3")))
+            assertEquals("tmr_0", r.topKey)
+            val i = r.faces["tmr_0"]!!
+            assertTrue(i == 0 || i == 2) // только идущие: t1 и t3
+            seen.add(i)
+        }
+        for (k in 1 until seen.size) assertTrue(seen[k] != seen[k - 1]) // каждую минуту — другой
+    }
+
+    @Test fun timers_dueInOwnTime_beatsCalendarAndHabits() {
+        val c = cal(12, 0)
+        val ev = card("e", dyn = "event", at = c.timeInMillis + 5 * hour)
+        val cf = cfgTimers(listOf(tmr("t1", times = setOf("d")), tmr("t2")), listOf(ev))
+        val r = run(cf, snap(c))
+        assertEquals("tmr_0", r.topKey) // «дневной» таймер в 12:00 выше календаря
+        assertEquals(0, r.faces["tmr_0"])
+        assertEquals(Long.MAX_VALUE, r.minuteAt) // не запущен — перерисовывать раз в минуту нечего
+        val held = run(cf, snap(c, lastTop = "e")) // и гистерезис прежний календарь не держит (950 ≥ 500 + 100)
+        assertEquals("tmr_0", held.topKey)
+        val night = run(cf, snap(cal(2, 0))) // ночью «его» времени нет
+        assertTrue(night.topKey != "tmr_0")
+    }
+
+    @Test fun timers_noTimesNotRunning_doesNotRise() {
+        val c = cal(12, 0)
+        val ev = card("e", dyn = "event", at = c.timeInMillis + 5 * hour)
+        val r = run(cfgTimers(listOf(tmr("t1"), tmr("t2")), listOf(ev)), snap(c))
+        assertEquals("e", r.topKey) // у таймера без времени суток балла нет: наверху календарь
+        assertEquals(1, keys(r).count { it == "tmr_0" }) // но карточка «Таймеры» в стопке есть
+    }
+
+    @Test fun timers_activeBeatsRingingAlarm() {
+        val c = cal(12, 0)
+        val cf = cfgTimers(listOf(tmr("t1")), listOf(card("al", alarmId = "id_al")))
+        val r = run(cf, snap(c, timers = setOf("id_t1"), alarms = mapOf("id_al" to c.timeInMillis - 1000L), ringing = setOf("id_al")))
+        assertEquals("tmr_0", r.topKey) // идущий таймер выше звонящего будильника
+        assertEquals(listOf("tmr_0", "al"), keys(r))
+    }
+
+    @Test fun timers_scoresInResult() {
+        val c = cal(12, 0)
+        val cf = cfgTimers(listOf(tmr("t1", times = setOf("d")), tmr("t2")))
+        assertEquals(QrPriority.SCORE_TIMER_DUE, run(cf, snap(c)).cards.first { it.card.key == "tmr_0" }.score)
+        assertEquals(QrPriority.SCORE_TIMER_ACTIVE, run(cf, snap(c, timers = setOf("id_t2"))).cards.first { it.card.key == "tmr_0" }.score)
     }
 
     private val SCORE = QrPriority.SCORE_CYCLE

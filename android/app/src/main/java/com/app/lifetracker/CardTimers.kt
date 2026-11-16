@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 9.1 (15.11) — [faceOf] / [Face]: остаток и заданное время таймера для лица карточки-таймера в виджете (QrTimerFace), без доступа к хранилищу извне. Откат: CardTimers.kt 9.0.
 // Версия: 9.0 (15.11)
 // Версия: 5.7 (24.10) — скрытый таймер (`Timer.hidden`, `start(..., hidden)`): идёт и срабатывает как обычный, но без уведомления «идёт», острова, плашки в приложении, службы тика и этапов цвета; в конце — обычные вибрация и «Таймер закончился»; `listJson` отдаёт `hidden`. Откат: CardTimers.kt 5.6.
 // Версия: 5.6 (24.10) — этапы цвета значка: остался один, красный за 2 минуты до конца (`scheduleStages`); жёлтый убран, но его будильник от прежней версии снимается (`LEGACY_STAGE_YELLOW`). Откат: CardTimers.kt 5.5.
@@ -159,6 +160,17 @@ object CardTimers {
             )
         }
         arr.toString()
+    }
+
+    /** Состояние таймера для лица в виджете: идёт ли ([running]), сколько осталось ([leftMs]; у приостановленного — остаток на паузе) и заданное время ([totalMs]). */
+    class Face(val running: Boolean, val leftMs: Long, val totalMs: Long)
+
+    /** Состояние таймера [id] для карточки виджета; null — такого таймера нет (не запущен, отменён или сработал). Дошедший до конца, но ещё не сработавший по будильнику, тоже считается отсутствующим. */
+    fun faceOf(ctx: Context, id: String): Face? = synchronized(LOCK) {
+        val t = load(ctx)[id] ?: return@synchronized null
+        val now = System.currentTimeMillis()
+        if (t.running && t.endAt <= now) return@synchronized null
+        Face(t.running, if (t.running) t.endAt - now else t.remainingMs, t.durationMs)
     }
 
     /** Есть ли таймер с таким id (идёт или на паузе; сработавший и отменённый убираются). Для виджета «по релевантности». */

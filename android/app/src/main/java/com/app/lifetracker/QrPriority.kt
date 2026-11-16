@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (15.11) — карточка «Таймеры» (`Cfg.timers`, `Cfg.timerCards`): третья карточка-группа «tmr_0» ([TIMER_SLOT_KEY]), элемент — один таймер из карточек QR-кодов. Идущий таймер — [SCORE_TIMER_ACTIVE] (1200): карточка встаёт наверх стопки выше всего, в том числе выше «Как тренировка?» и «Как настроение?», и при любом режиме (даже без «релевантности»); несколько идущих сменяют друг друга на ней раз в минуту ([CYCLE_MS]). Таймер «в своё время суток» ([habitDue]-правило, `Card.times`) — [SCORE_TIMER_DUE] (950): выше календаря, привычек и будильника «скоро». Раз в минуту, пока идёт таймер, виджет перерисовывается ([Result.minuteAt]) — перерисовывается кольцо.
 // Версия: 4.9 (15.11) — единая модель круга равных и карточек-групп: в круг входит любая карточка верхнего яруса (не только привычки и события); карточка-группа (привычки «hab_0», будильники «alm_0» — [groups]) всегда одна в стопке, у каждого её элемента свой балл, балл карточки — балл лучшего элемента, очередей у неё столько, сколько элементов с верхним баллом ([Card.cycleN]); какой элемент показать, отдаёт [Result.faces] (вместо одиночного habitIdx). Будильники больше не отдельные карточки: [alarmCards] — элементы группы [ALARM_SLOT_KEY], снимок без alarmIndex, [alarmRowScore] заменён баллами элементов.
 // Версия: 4.8 (15.11) — карточка «Привычки» в стопке всегда одна ([habitSlots], ключ [HABIT_SLOT_KEY]): свайп листает группы, привычки листаются только нажатием у края. Привычки «в своё время» по-прежнему сменяют друг друга и календарь раз в минуту, но очередь каждой — очередь на одной карточке ([Card.cycleN], [Result.habitIdx]), а не отдельная карточка стопки.
 // Версия: 4.7 (15.11) — задачи ниже календаря и привычек: [SCORE_TASK_OVERDUE] = 480, [SCORE_TASK_TODAY] = 470 (< [SCORE_CYCLE]), в круг равных входят только слоты привычек и событие.
@@ -41,6 +42,16 @@ object QrPriority {
     const val SCORE_STOPWATCH = 1010
     /** Звонит будильник карточки: выше любых занятий; гистерезис не держит прежнюю верхнюю карточку. */
     const val SCORE_ALARM_RINGING = 1100
+    /**
+     * Идёт (или на паузе) таймер карточки «Таймеры»: самый высокий приоритет из всех — выше звонящего будильника, занятий и служебных «Как тренировка?» / «Как настроение?».
+     * Карточка с таким баллом всегда стоит самой первой, даже без «релевантности» ([build]). Несколько идущих таймеров — один и тот же балл, на карточке они сменяют друг друга по минутам.
+     */
+    const val SCORE_TIMER_ACTIVE = 1200
+    /**
+     * Не запущенный таймер, у которого сейчас «его» время суток (`Card.times`, настройка таймера в форме виджета): выше календаря, привычек «в своё время» и будильника «скоро»
+     * (950 ≥ 850 + [HYSTERESIS], иначе прежняя верхняя карточка удерживалась бы гистерезисом) и ниже занятий и звонящего будильника. Таймер без времени суток этого балла не получает.
+     */
+    const val SCORE_TIMER_DUE = 950
     /**
      * Будильник карточки сработает в ближайшие [ALARM_SOON_MS] (заведённый позже — 0). Выше [SCORE_EVENT_SOON] ровно на [HYSTERESIS] (750 + 100):
      * иначе событие, уже стоящее наверху, удерживалось бы гистерезисом и будильник не мог его заменить.
@@ -140,7 +151,9 @@ object QrPriority {
          * Карточка-группа ([groups]: «Привычки», «Будильники») → номер её элемента ([Group.items], с нуля), который показывает расчёт: элемент по очереди круга, если карточка в верхнем ярусе,
          * иначе элемент по умолчанию ([Group.defaultIdx]). Выбор нажатием у края и его срок (60 с) накладывает оболочка ([QrWidgets.groupViews]).
          */
-        val faces: Map<String, Int> = emptyMap()
+        val faces: Map<String, Int> = emptyMap(),
+        /** Когда нужно перерисовать виджет ради кольца таймера: начало следующей минуты, пока идёт хоть один таймер карточки «Таймеры»; иначе [Long.MAX_VALUE]. Не зависит от «релевантности». */
+        val minuteAt: Long = Long.MAX_VALUE
     )
 
     // ---------- построение ----------
@@ -184,25 +197,42 @@ object QrPriority {
         }
         val faces = HashMap<String, Int>()
         for (g in gs) if (main.any { it.card.key == g.key }) faces[g.key] = faceOf(g, start[g.key], turn)
+        // Идущий таймер: карточка «Таймеры» всегда первая (над служебными тоже), при любом режиме; между идущими таймерами лицо меняется раз в минуту
+        val tg = gs.firstOrNull { it.dyn == "timer" }
+        var lead: Scored? = null
+        if (tg != null && tg.best >= SCORE_TIMER_ACTIVE) {
+            val at = main.indexOfFirst { it.card.key == TIMER_SLOT_KEY }
+            if (at >= 0) {
+                val m = main.removeAt(at)
+                var hi = tg.best
+                for (x in main) if (x.score > hi) hi = x.score
+                lead = Scored(m.card, hi, tg.reasons[tg.topIdx[0]])
+                top = TIMER_SLOT_KEY
+                val tops = tg.topIdx
+                faces[TIMER_SLOT_KEY] = tops[Math.floorMod(s.now / CYCLE_MS, tops.size.toLong()).toInt()]
+            }
+        }
         val out = ArrayList<Scored>()
+        if (lead != null) out.add(lead)
         if (s.rpePending) out.add(Scored(rpeCard(cfg), 0, "Ждёт оценки тренировки"))
         if (s.moodPending) out.add(Scored(moodCard(cfg), 0, "Сегодня настроение ещё не отмечено"))
         out.addAll(main)
         val serviceKey = serviceKeyOf(s)
-        val topKey = if (serviceKey.isNotEmpty()) serviceKey else top
+        val topKey = if (lead != null) TIMER_SLOT_KEY else if (serviceKey.isNotEmpty()) serviceKey else top
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
-        val topScored: Scored? = if (serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
+        val topScored: Scored? = if (lead != null || serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
         // у группы наверху называем тот элемент, который она на самом деле показывает (а не заголовок слота)
         var topTitle = topScored?.card?.title ?: ""
         var topReason = topScored?.reason ?: ""
         val topGroup = if (topScored != null) gs.firstOrNull { it.key == topScored.card.key } else null
-        if (topGroup != null && top.isNotEmpty() && serviceKey.isEmpty()) {
+        if (topGroup != null && top.isNotEmpty() && (serviceKey.isEmpty() || lead != null)) {
             val i = (faces[topGroup.key] ?: topGroup.defaultIdx).coerceIn(0, topGroup.items.size - 1)
             topTitle = topGroup.items[i].title
             if (topGroup.reasons[i].isNotEmpty()) topReason = topGroup.reasons[i]
         }
-        return Result(out, topKey, anchorOf(cfg, s, main, top), next, top, topTitle, topReason, cycleAt, faces)
+        val minuteAt = if (lead != null) nextCycleAt(s.now) else Long.MAX_VALUE
+        return Result(out, topKey, anchorOf(cfg, s, main, top, lead != null), next, top, topTitle, topReason, cycleAt, faces, minuteAt)
     }
 
     /**
@@ -376,7 +406,8 @@ object QrPriority {
      * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
      * иначе (только «по релевантности») рекомендованная карточка, а если такой нет — верхняя карточка события или задачи календаря. Пусто — своего места нет.
      */
-    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String): String {
+    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String, timerLead: Boolean = false): String {
+        if (timerLead) return TIMER_SLOT_KEY // идущий таймер выше всего, в том числе служебных карточек и без «релевантности»
         val service = serviceKeyOf(s)
         if (service.isNotEmpty()) return service
         if (!cfg.relevance) return ""
@@ -465,13 +496,17 @@ object QrPriority {
     const val ALARM_SLOT_PREFIX = "alm_"
     const val ALARM_SLOT_KEY = ALARM_SLOT_PREFIX + "0"
 
+    /** Ключ карточки «Таймеры» в стопке (одна на все таймеры карточек QR-кодов). */
+    const val TIMER_SLOT_PREFIX = "tmr_"
+    const val TIMER_SLOT_KEY = TIMER_SLOT_PREFIX + "0"
+
     /** Ключ карточки-группы? Один список на все виды: оболочка и [check] различают по нему слот и обычную карточку. */
-    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY
+    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY || key == TIMER_SLOT_KEY
 
     private fun isGroup(c: Card): Boolean = isGroupKey(c.key)
 
     /** Все карточки-группы виджета с их элементами и баллами (пустые группы — нет карточки). Единственное место, где перечислены виды групп. */
-    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(alarmGroup(cfg, s), habitGroup(cfg, s))
+    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(timerGroup(cfg, s), alarmGroup(cfg, s), habitGroup(cfg, s))
 
     /** Карточка группы в стопке: лицо элемента по умолчанию, [Card.cycleN] — очередей круга, [Card.gscore] / [Card.greason] — балл и причина. */
     private fun slotOf(g: Group): Card {
@@ -494,6 +529,35 @@ object QrPriority {
             else { scores.add(0); reasons.add("") }
         }
         return Group(ALARM_SLOT_KEY, "alarm", list, scores, reasons, defaultAlarmIndex(list, s))
+    }
+
+    // ---------- карточка «Таймеры» ----------
+
+    /** Сколько таймеров принимает карточка «Таймеры» (то же число — MAX_TIMERS в widgets.js). */
+    const val TIMER_NAV_MAX = 24
+
+    /** Таймеры карточки «Таймеры»: все таймеры пользователя в порядке сетки карточек, не больше [TIMER_NAV_MAX]; нет галочки — пусто. */
+    fun timerList(cfg: Cfg): List<Card> = if (!cfg.timers) emptyList() else cfg.timerCards.take(TIMER_NAV_MAX)
+
+    /** Таймер идёт или на паузе: любой из его id ([Card.live]: запущенный кнопкой карточки и запущенный по коду) есть среди [Snapshot.activeTimerIds]. */
+    fun timerActive(c: Card, s: Snapshot): Boolean = c.live.any { it.k == "timer" && it.id.isNotEmpty() && it.id in s.activeTimerIds }
+
+    /**
+     * Таймеры: элемент — один таймер. Идёт — [SCORE_TIMER_ACTIVE]; не запущен, но сейчас «его» время суток и день ([scheduledNow]) — [SCORE_TIMER_DUE]; иначе 0 (в круг не входит, доступен краем).
+     * По умолчанию показан первый идущий, иначе первый «в своё время», иначе первый в ряду. Несколько идущих (или несколько «в своё время») сменяют друг друга по минутам.
+     */
+    private fun timerGroup(cfg: Cfg, s: Snapshot): Group? {
+        val list = timerList(cfg)
+        if (list.isEmpty()) return null
+        val scores = ArrayList<Int>()
+        val reasons = ArrayList<String>()
+        for (c in list) {
+            if (timerActive(c, s)) { scores.add(SCORE_TIMER_ACTIVE); reasons.add("Идёт таймер") }
+            else if (scheduledNow(c, s.cal)) { scores.add(SCORE_TIMER_DUE); reasons.add("Сейчас его время" + windowName(c, s.cal)) }
+            else { scores.add(0); reasons.add("") }
+        }
+        val def = scores.indices.firstOrNull { scores[it] == SCORE_TIMER_ACTIVE } ?: scores.indices.firstOrNull { scores[it] == SCORE_TIMER_DUE } ?: 0
+        return Group(TIMER_SLOT_KEY, "timer", list, scores, reasons, def)
     }
 
     /** Привычки: элемент — одна не отмеченная сегодня привычка ([habitList]); «в своё время» — [SCORE_CYCLE], остальные 0 (в круг не входят, доступны краем). */
@@ -679,15 +743,20 @@ object QrPriority {
         val cards = result.cards.map { it.card }
         val keys = cards.map { it.key }
 
-        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая; «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
+        // 0. Идущий таймер карточки «Таймеры» ([SCORE_TIMER_ACTIVE]) — самая первая карточка, над служебными; нет идущего — её нет наверху «по праву таймера»
+        val timerLifted = groups(cfg, s).any { it.dyn == "timer" && it.best >= SCORE_TIMER_ACTIVE }
+        val lead = if (timerLifted) 1 else 0
+        if (timerLifted && keys.firstOrNull() != TIMER_SLOT_KEY) bad.add("0: идёт таймер, но карточка «Таймеры» не первая")
+
+        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая (после идущего таймера); «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
         val rpeAt = keys.indexOf(QrRpe.KEY)
         if (s.rpePending) {
-            if (rpeAt != 0) bad.add("1: rpePending, но «Как тренировка?» не первая")
+            if (rpeAt != lead) bad.add("1: rpePending, но «Как тренировка?» не первая")
         } else if (rpeAt >= 0) bad.add("1: «Как тренировка?» есть без rpePending")
         if (keys.count { it == QrRpe.KEY } > 1) bad.add("1: «Как тренировка?» больше одной")
         val moodAt = keys.indexOf(QrMood.KEY)
         if (s.moodPending) {
-            if (moodAt != (if (s.rpePending) 1 else 0)) bad.add("1: moodPending, но «Как настроение?» не на своём месте")
+            if (moodAt != lead + (if (s.rpePending) 1 else 0)) bad.add("1: moodPending, но «Как настроение?» не на своём месте")
         } else if (moodAt >= 0) bad.add("1: «Как настроение?» есть без moodPending")
         if (keys.count { it == QrMood.KEY } > 1) bad.add("1: «Как настроение?» больше одной")
         val main = cards.filter { !isService(it.key) }
@@ -724,13 +793,14 @@ object QrPriority {
             val rest = main.filter { it.key in order && !(it.after == "end" && s.movedAt.containsKey(it.key)) } // слоты привычек не из cfg.cards — их место определяет сама стопка
             val pos = rest.map { order.indexOf(it.key) }
             for (i in 1 until pos.size) if (pos[i] < pos[i - 1]) bad.add("5: нарушен порядок пользователя")
-            if (result.topKey.isNotEmpty() && !isService(result.topKey)) bad.add("5: topKey не пуст без релевантности")
+            if (result.topKey.isNotEmpty() && !isService(result.topKey) && !(timerLifted && result.topKey == TIMER_SLOT_KEY)) bad.add("5: topKey не пуст без релевантности")
         }
 
         // 7. topKey — первая карточка основной части (или служебная карточка наверху)
         if (result.topKey.isNotEmpty() && !isService(result.topKey) && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
-        if (result.topKey == QrRpe.KEY && rpeAt != 0) bad.add("7: topKey — rpe, но её нет наверху")
-        if (result.topKey == QrMood.KEY && moodAt != 0) bad.add("7: topKey — настроение, но его нет наверху")
+        if (result.topKey == QrRpe.KEY && rpeAt != lead) bad.add("7: topKey — rpe, но её нет наверху")
+        if (result.topKey == QrMood.KEY && moodAt != lead) bad.add("7: topKey — настроение, но его нет наверху")
+        if (timerLifted && result.topKey != TIMER_SLOT_KEY) bad.add("7: идёт таймер, но topKey — не карточка «Таймеры»")
 
         // 8. При «релевантности» основная часть (без перенесённых) идёт по убыванию баллов; удержанная верхняя карточка — вне счёта
         if (cfg.relevance) {
