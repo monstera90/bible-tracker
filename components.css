@@ -3704,14 +3704,15 @@
      разнобой в размерах карточек и незакрывающиеся промежутки между
      рядами при скрытых подписях (баг найден и исправлен 22.09). */
   .book-cover-thumb{
-    /* как карточка QR-кода (.item-card): тело 1,02 ширины + цветной выступ снизу 0,04 ширины, скругление 0,12 ширины.
-       Сама плитка — выступ (цвет --cover-shade ставит my.js по цвету обложки, applyCoverShade), обложка лежит поверх сверху. */
-    position:relative;
     width:100%;
-    aspect-ratio:1 / 1.06;
-    border-radius:12% / 11.32%;
+    aspect-ratio:1220/1737;
+    border-radius:6px;
     overflow:hidden;
-    background:var(--cover-shade, #8d8678);
+    background:#dcd6cc;
+    border:1px solid #a89f8f;
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
   /* -webkit-user-drag/-webkit-touch-callout/user-select:none — вместе с JS
      (contextmenu preventDefault, draggable="false" у самого <img>, см.
@@ -3720,11 +3721,7 @@
      долгому нажатию на обложку (ТЗ пользователя от 22.09) — своё раскрытие
      кнопок долгим нажатием уже есть, системное меню поверх него лишнее. */
   .book-cover-thumb img{
-    position:absolute; left:0; top:0;
-    width:100%; height:96.23%; /* тело 1,02 из 1,06 */
-    border-radius:12% / 11.76%;
-    background:#dcd6cc;
-    object-fit:cover; display:block;
+    width:100%; height:100%; object-fit:cover; display:block;
     -webkit-user-drag:none;
     -webkit-touch-callout:none;
     -webkit-user-select:none;
