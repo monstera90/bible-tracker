@@ -5,6 +5,7 @@
    Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
    Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
    Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
+   Версия: 149.5 (16.11) — «Проверка обновлений»: если веб-обновление уже скачано и ждёт перезагрузки, проверка APK всё равно идёт (тихо, при открытии вкладки): кнопка «Скачать и установить приложение» и строка про приложение появляются, как только стало известно о новой сборке; нет новой сборки — вкладка выглядит как раньше. Откат: my.js 149.4.
    Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
    Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
    Версия: 149.2 (13.11)
@@ -9865,19 +9866,22 @@
       setApkStatus(t);
       if(apkBtn) apkBtn.style.display = st.newer ? "" : "none";
     }
-    function apkCheck(done){
+    // quiet — тихая проверка (веб-обновление уже скачано и ждёт перезагрузки): ничего не показываем, пока не найдена новая сборка
+    function apkCheck(done, quiet){
       if(!apkOk || apkChecking){ if(done) done(); return; }
       apkChecking = true;
       var before = apkReadState().checkSeq || 0;
-      if(apkStatusEl) apkStatusEl.style.display = "";
-      setApkStatus("Приложение: проверяю…");
-      try{ native.apkCheckNow(); }catch(e){ apkChecking = false; setApkStatus("Приложение: не удалось запустить проверку: " + e); if(done) done(); return; }
+      if(!quiet){
+        if(apkStatusEl) apkStatusEl.style.display = "";
+        setApkStatus("Приложение: проверяю…");
+      }
+      try{ native.apkCheckNow(); }catch(e){ apkChecking = false; if(!quiet) setApkStatus("Приложение: не удалось запустить проверку: " + e); if(done) done(); return; }
       var started = Date.now();
       (function poll(){
         if(!alive()){ apkChecking = false; return; }
         var st = apkReadState();
-        if((st.checkSeq || 0) > before){ apkChecking = false; apkRender(st); renderDetails(); if(done) done(); return; }
-        if(Date.now() - started > 60000){ apkChecking = false; setApkStatus("Приложение: ответа нет дольше минуты."); if(done) done(); return; }
+        if((st.checkSeq || 0) > before){ apkChecking = false; if(!quiet || st.newer) apkRender(st); renderDetails(); if(done) done(); return; }
+        if(Date.now() - started > 60000){ apkChecking = false; if(!quiet) setApkStatus("Приложение: ответа нет дольше минуты."); if(done) done(); return; }
         setTimeout(poll, UPDATES_POLL_MS);
       })();
     }
@@ -10008,7 +10012,10 @@
     // уже скачанное, но не применённое обновление — сразу предлагаем перезагрузку
     if(nativeOk){
       var st0 = updatesReadNativeState();
-      if(st0.pending && canRestart) showReload("Обновление " + st0.pending + " уже скачано. Осталось перезагрузить приложение.");
+      if(st0.pending && canRestart){
+        showReload("Обновление " + st0.pending + " уже скачано. Осталось перезагрузить приложение.");
+        if(apkOk) apkCheck(null, true); // веб-обновление ждёт ответа — проверку приложения не пропускаем
+      }
       else if(st0.busy) setStatus("Сейчас идёт фоновая проверка. Нажмите «" + UPDATES_LABEL_CHECK + "», чтобы дождаться результата.");
     }
   }
