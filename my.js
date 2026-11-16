@@ -3115,55 +3115,16 @@
             lbl.setAttribute("for", input.id);
             lbl.textContent = chapterNum;
 
-            // ---- долгое нажатие: открыть главу в JW Library / jw.org ----
-            var LONG_PRESS_MS = 300;
-            var pressTimer = null;
-            var longPressFired = false;
-            var pressStartXY = null;
-            var MOVE_CANCEL_PX = 10;
-
-            function clearPressTimer(){
-              clearTimeout(pressTimer);
-              pressTimer = null;
-            }
-            function startPress(x, y){
-              longPressFired = false;
-              pressStartXY = {x:x, y:y};
-              clearPressTimer();
-              pressTimer = setTimeout(function(){
-                longPressFired = true;
-                window.open(chapterLink(thisBookNumber, chapterNum), "_blank");
-              }, LONG_PRESS_MS);
-            }
-            function movePress(x, y){
-              if(!pressStartXY) return;
-              var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
-              if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
-            }
-
-            item.addEventListener("touchstart", function(e){
-              var t = e.touches[0];
-              startPress(t.clientX, t.clientY);
-            }, {passive:true});
-            item.addEventListener("touchmove", function(e){
-              var t = e.touches[0];
-              movePress(t.clientX, t.clientY);
-            }, {passive:true});
-            item.addEventListener("touchend", clearPressTimer);
-            item.addEventListener("touchcancel", clearPressTimer);
-
-            // Поддержка мыши — удобно для отладки на десктопе.
-            item.addEventListener("mousedown", function(e){ startPress(e.clientX, e.clientY); });
-            item.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-            item.addEventListener("mouseup", clearPressTimer);
-            item.addEventListener("mouseleave", clearPressTimer);
+            // ---- долгое нажатие / правый клик: открыть главу в JW Library / jw.org (общая логика — press.js) ----
+            var press = LTPress.bind(item, { ms: 300, onLong: function(){
+              window.open(chapterLink(thisBookNumber, chapterNum), "_blank");
+            } });
 
             input.addEventListener("click", function(e){
-              if(longPressFired){
+              if(press.consume()){
                 // Долгое нажатие уже открыло ссылку — гасим обычный цикл отметки, чтобы одно и то
                 // же нажатие не делало два дела.
                 e.preventDefault();
-                longPressFired = false;
                 return;
               }
               if(!getColorMarkEnabled()) return; // обычный режим — обрабатывается в "change"
@@ -3178,7 +3139,7 @@
             });
 
             input.addEventListener("change", function(){
-              if(longPressFired){ longPressFired = false; return; }
+              if(press.consume()) return;
               if(getColorMarkEnabled()) return; // цветовой режим — уже обработано в "click"
               var prevRec = state[key];
               state[key] = {c: input.checked, t: Date.now()};
@@ -13574,42 +13535,13 @@
     bindBooksOutsideClickOnce();
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
     var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
-    var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
-    var pressTimer = null, pressStartXY = null, longPressFired = false;
-    function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
-    function startPress(rowEl, x, y){
-      if(!rowEl) return;
-      var it = items[Number(rowEl.dataset.index)];
+    // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js)
+    var press = LTPress.bind(containerEl, { sel: rowSelector, ms: 350, blockAll: true, onLong: function(info){
+      var it = items[Number(info.el.dataset.index)];
       if(!it) return;
-      longPressFired = false;
-      pressStartXY = { x: x, y: y };
-      clearPressTimer();
-      pressTimer = setTimeout(function(){
-        longPressFired = true;
-        revealedBookDeleteRows.add(it.name.toLowerCase());
-        rowEl.querySelectorAll(actionBtnSelector).forEach(function(btn){ btn.classList.add("visible"); });
-      }, LONG_PRESS_MS);
-    }
-    function movePress(x, y){
-      if(!pressStartXY) return;
-      var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
-      if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
-    }
-    containerEl.addEventListener("touchstart", function(e){
-      var t = e.touches[0];
-      startPress(e.target.closest(rowSelector), t.clientX, t.clientY);
-    }, {passive:true});
-    containerEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
-    containerEl.addEventListener("touchend", clearPressTimer);
-    containerEl.addEventListener("touchcancel", clearPressTimer);
-    containerEl.addEventListener("mousedown", function(e){
-      startPress(e.target.closest(rowSelector), e.clientX, e.clientY);
-    });
-    containerEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-    containerEl.addEventListener("mouseup", clearPressTimer);
-    containerEl.addEventListener("mouseleave", clearPressTimer);
-    // Блокирует системное контекстное меню Chrome/Android по долгому нажатию на обложку.
-    containerEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+      revealedBookDeleteRows.add(it.name.toLowerCase());
+      info.el.querySelectorAll(actionBtnSelector).forEach(function(btn){ btn.classList.add("visible"); });
+    } });
 
     containerEl.addEventListener("click", function(e){
       var rowEl = e.target.closest(rowSelector);
@@ -13617,7 +13549,7 @@
       var it = items[Number(rowEl.dataset.index)];
       if(!it) return;
       if(isCoverMode && e.target.closest(".mdeditor-cover-reset-btn")){
-        longPressFired = false;
+        press.reset();
         var nowDisabled = !isBookCoverDisabled(it.hash);
         setBookCoverDisabled(it.hash, nowDisabled);
         var idx = Number(rowEl.dataset.index);
@@ -13633,26 +13565,26 @@
         return;
       }
       if(e.target.closest(".mdeditor-note-btn")){
-        longPressFired = false;
+        press.reset();
         openBookNoteFromList(it);
         return;
       }
       if(e.target.closest(".mdeditor-delete-btn")){
-        longPressFired = false;
+        press.reset();
         confirmDeleteBook(it);
         return;
       }
       if(e.target.closest(".mdeditor-share-btn")){
-        longPressFired = false;
+        press.reset();
         shareBookFile(it);
         return;
       }
       if(e.target.closest(".mdeditor-edit-btn")){
-        longPressFired = false;
+        press.reset();
         openBookRenameDialog(it);
         return;
       }
-      if(longPressFired){ longPressFired = false; return; }
+      if(press.consume()) return;
       if(revealedBookDeleteRows.size){ hideRevealedBookActionButtons(); return; }
       openBookReader(it.name);
     });
@@ -15889,7 +15821,19 @@
     rootEl.addEventListener("click", function(e){
       if(Date.now() < swallowUntil){ e.preventDefault(); e.stopPropagation(); }
     }, true);
-    rootEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    // правый клик мышью / клавиша «Меню» — то же, что удержание на слове (подчёркивает слово под указателем), но сразу;
+    // contextmenu от касания игнорируем — касание обрабатывает свой таймер
+    rootEl.addEventListener("contextmenu", function(e){
+      e.preventDefault();
+      if(!LTPress.fromMouse(e)) return;
+      var tg = e.target;
+      if(tg && tg.closest && tg.closest("a, button, .book-reader-image-wrap")) return;
+      cancel();
+      if(active){ active = null; ltHlClear(); }
+      start = { x: e.clientX, y: e.clientY };
+      fire();
+      commit();
+    });
     // Системное выделение (долгое нажатие, двойной тап) в тексте книги отменяем целиком.
     rootEl.addEventListener("selectstart", function(e){ e.preventDefault(); });
   }
@@ -16115,27 +16059,42 @@
     setTaskText(id, newText);
     view.innerHTML = taskTextInner(newText, linkifyHtml).html;
   }
+  // Подходит ли место под маркер по удержанию (только режим чтения, текст своей задачи): {view, id, session} или null.
+  function taskHoldTarget(e){
+    var ov = document.getElementById("settingsModalOverlay");
+    if(!ov || !ov.classList.contains("reading-mode-active")) return null;
+    var tg = e.target;
+    if(!tg || !tg.closest) return null;
+    if(tg.closest("a, button, .task-actions, .task-img-wrap, .task-flag-dot, .task-editable")) return null;
+    var view = tg.closest(".task-text-view");
+    if(!view || view.classList.contains("task-archive-text") || view.classList.contains("task-has-img")) return null;
+    var body = view.closest(".task-body");
+    if(!body || !body.querySelector(".task-edit-btn")) return null; // чужая/общая только для чтения или не задача
+    var id = body.getAttribute("data-id");
+    var task = id ? getTaskById(id) : null;
+    if(!task || !task.c || !task.c.text) return null;
+    var session = ltDomSession(view, function(n){
+      var el = n.nodeType === 3 ? n.parentElement : n;
+      return el && el.closest ? el.closest(".fmt-line") : null;
+    }, body, "fmt", ".fmt-mark, .fmt-bullet");
+    return { view: view, id: id, session: session };
+  }
   function bindTaskHoldMarker(){
     document.addEventListener("touchstart", function(e){
       if(!e.touches || e.touches.length !== 1) return;
-      var ov = document.getElementById("settingsModalOverlay");
-      if(!ov || !ov.classList.contains("reading-mode-active")) return;
-      var tg = e.target;
-      if(!tg || !tg.closest) return;
-      if(tg.closest("a, button, .task-actions, .task-img-wrap, .task-flag-dot, .task-editable")) return;
-      var view = tg.closest(".task-text-view");
-      if(!view || view.classList.contains("task-archive-text") || view.classList.contains("task-has-img")) return;
-      var body = view.closest(".task-body");
-      if(!body || !body.querySelector(".task-edit-btn")) return; // чужая/общая только для чтения или не задача
-      var id = body.getAttribute("data-id");
-      var task = id ? getTaskById(id) : null;
-      if(!task || !task.c || !task.c.text) return;
-      var session = ltDomSession(view, function(n){
-        var el = n.nodeType === 3 ? n.parentElement : n;
-        return el && el.closest ? el.closest(".fmt-line") : null;
-      }, body, "fmt", ".fmt-mark, .fmt-bullet");
-      ltRunHold(e, view, session, function(range){ commitTaskHoldMark(view, id, range); }, document.getElementById("settingsTabContent"));
+      var h = taskHoldTarget(e);
+      if(!h) return;
+      ltRunHold(e, h.view, h.session, function(range){ commitTaskHoldMark(h.view, h.id, range); }, document.getElementById("settingsTabContent"));
     }, { passive: true });
+    // правый клик мышью / клавиша «Меню» — то же, что удержание (отмечается слово под указателем), но сразу
+    document.addEventListener("contextmenu", function(e){
+      if(!LTPress.fromMouse(e)) return;
+      var h = taskHoldTarget(e);
+      if(!h) return;
+      e.preventDefault();
+      if(!h.session.begin(e.clientX, e.clientY)) return;
+      commitTaskHoldMark(h.view, h.id, h.session.end());
+    });
   }
   bindTaskHoldMarker();
 
@@ -22899,7 +22858,7 @@
 
   // Тап/долгое нажатие (250мс) — общий хелпер для чемоданчика и кружка-флажка: короткий клик даёт
   // onTap (шаг цикла), удержание — onHold (сброс отметки). Тот же приём, что и у долгого нажатия по
-  // главе Библии (см. LONG_PRESS_MS/pressTimer/MOVE_CANCEL_PX в chapters-grid выше), просто вынесен
+  // главе Библии (общая логика долгого нажатия и правого клика — press.js), просто вынесен
   // в переиспользуемую функцию — нужен сразу двум кнопкам и сразу в двух местах (обычные вкладки
   // задач и "Все задачи проекта", см. bindTaskRowActions/bindRowActions). sdvig пальца/мыши больше
   // MOVE_CANCEL_PX отменяет удержание, как и в исходном приёме.
@@ -22967,7 +22926,15 @@
       touchHandled = true;
       var t = e.touches[0]; start(t.clientX, t.clientY);
     }, {passive:true});
-    el.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    // правый клик / клавиша «Меню» — то же, что удержание, но сразу (касание обрабатывает свой таймер)
+    el.addEventListener("contextmenu", function(e){
+      e.preventDefault();
+      if(!LTPress.fromMouse(e)) return;
+      clearTimer();
+      holdGuardOn();
+      onHold();
+      holdGuardRelease();
+    });
     el.addEventListener("touchmove", function(e){ var t = e.touches[0]; move(t.clientX, t.clientY); }, {passive:true});
     el.addEventListener("touchend", function(e){
       clearTimer();
@@ -22980,7 +22947,7 @@
       onTap();
     }, {passive:false});
     el.addEventListener("touchcancel", function(){ clearTimer(); holdGuardRelease(); touchHandled = false; });
-    el.addEventListener("mousedown", function(e){ start(e.clientX, e.clientY); });
+    el.addEventListener("mousedown", function(e){ if(e.button !== 0 || LTPress.emulated()) return; start(e.clientX, e.clientY); });
     el.addEventListener("mousemove", function(e){ move(e.clientX, e.clientY); });
     el.addEventListener("mouseup", function(){ clearTimer(); holdGuardRelease(); });
     // click остаётся рабочим путём только для мыши/клавиатуры — тач уже обработан выше вручную в

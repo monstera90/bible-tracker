@@ -208,14 +208,22 @@ class QuickTaskActivity : ComponentActivity() {
             background = selectable()
             contentDescription = "Напоминание"
             setOnClickListener { onClockTap() }
-            setOnLongClickListener {
+            onLongOrContextClick {
                 remindAt = 0L
                 updateClock()
-                true
             }
         }
         row.addView(clockHolder, gapParams(ViewGroup.LayoutParams.WRAP_CONTENT, sdp(22f)))
         row.addView(iconButton(R.drawable.ic_qt_check, "Сохранить", true) { save() })
+    }
+
+    /**
+     * Долгое нажатие пальцем и правый клик мыши (клавиатуры) делают одно и то же — как в веб-части (press.js).
+     * Правый клик Android присылает не как долгое нажатие, а как «контекстный клик» (API 23+).
+     */
+    private fun View.onLongOrContextClick(action: () -> Unit) {
+        setOnLongClickListener { action(); true }
+        if (Build.VERSION.SDK_INT >= 23) setOnContextClickListener { action(); true }
     }
 
     private fun selectable(): android.graphics.drawable.Drawable? {
@@ -254,10 +262,9 @@ class QuickTaskActivity : ComponentActivity() {
             flag = if (flag == "red") "yellow" else "red"
             updateFlag()
         }
-        holder.setOnLongClickListener {
+        holder.onLongOrContextClick {
             flag = null
             updateFlag()
-            true
         }
         return holder
     }
@@ -278,10 +285,9 @@ class QuickTaskActivity : ComponentActivity() {
             work = if (work == null) "work" else if (work == "work") "check" else "work"
             updateWork()
         }
-        holder.setOnLongClickListener {
+        holder.onLongOrContextClick {
             work = null
             updateWork()
-            true
         }
         return holder
     }

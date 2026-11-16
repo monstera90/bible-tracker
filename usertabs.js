@@ -214,29 +214,13 @@
   }
   // долгое нажатие на кнопку вкладки — форма адреса (изменить адрес, обновить, удалить); сработавшее нажатие гасит последующий click
   function bindLongPress(btn, cb){
-    var tm = null, fired = false, sx = 0, sy = 0;
-    function start(e){
-      fired = false;
-      var p = (e.touches && e.touches[0]) || e;
-      sx = p.clientX; sy = p.clientY;
-      clearTimeout(tm);
-      tm = setTimeout(function(){ if(window.TabReorder && window.TabReorder.busy()) return; fired = true; cb(); }, LONG_PRESS_MS);
-    }
-    function move(e){
-      var p = (e.touches && e.touches[0]) || e;
-      if(Math.abs(p.clientX - sx) > 10 || Math.abs(p.clientY - sy) > 10) clearTimeout(tm);
-    }
-    function end(){ clearTimeout(tm); }
-    btn.addEventListener("touchstart", start, { passive: true });
-    btn.addEventListener("touchmove", move, { passive: true });
-    btn.addEventListener("touchend", end);
-    btn.addEventListener("touchcancel", end);
-    btn.addEventListener("mousedown", start);
-    btn.addEventListener("mouseup", end);
-    btn.addEventListener("mouseleave", end);
-    btn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    // долгое нажатие и правый клик — одинаково (press.js); правый клик открывает форму сразу
+    var press = LTPress.bind(btn, { ms: LONG_PRESS_MS, blockAll: true, onLong: function(){
+      if(window.TabReorder && window.TabReorder.busy()) return;
+      cb();
+    } });
     btn.addEventListener("click", function(e){
-      if(fired){ fired = false; e.stopImmediatePropagation(); e.preventDefault(); }
+      if(press.consume()){ e.stopImmediatePropagation(); e.preventDefault(); }
     }, true);
   }
   function buildButton(t){

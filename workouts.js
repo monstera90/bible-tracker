@@ -855,34 +855,11 @@
     }, { label: "Обнулить награду?", text: "Обнулить награду?", onCancel: clearRowMark });
   }
   function bindRowLongPress(row, onPress){
-    var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
-    function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
-    function down(e, isTouch){
-      if(isTouch) lastTouchAt = Date.now();
-      else if(Date.now() - lastTouchAt < 800) return; // эмулированные мышиные события после касания
-      var pt = (e.touches && e.touches[0]) || e;
-      sx = pt.clientX; sy = pt.clientY;
-      cancel();
-      timer = setTimeout(function(){
-        timer = null;
-        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
-        (onPress || askDeleteRow)(row.getAttribute("data-id"), row);
-      }, ROW_PRESS_MS);
-    }
-    function move(e){
-      if(!timer) return;
-      var pt = (e.touches && e.touches[0]) || e;
-      if(Math.abs(pt.clientX - sx) > ROW_PRESS_TOL || Math.abs(pt.clientY - sy) > ROW_PRESS_TOL) cancel();
-    }
-    row.addEventListener("touchstart", function(e){ down(e, true); });
-    row.addEventListener("touchmove", move);
-    row.addEventListener("touchend", cancel);
-    row.addEventListener("touchcancel", cancel);
-    row.addEventListener("mousedown", function(e){ down(e, false); });
-    row.addEventListener("mousemove", move);
-    row.addEventListener("mouseup", cancel);
-    row.addEventListener("mouseleave", cancel);
-    row.addEventListener("contextmenu", function(e){ e.preventDefault(); }); // системное меню при долгом нажатии не нужно
+    // долгое нажатие и правый клик — одинаково (press.js)
+    LTPress.bind(row, { ms: ROW_PRESS_MS, tol: ROW_PRESS_TOL, blockAll: true, onLong: function(){
+      try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+      (onPress || askDeleteRow)(row.getAttribute("data-id"), row);
+    } });
   }
 
   // ---------- запись ----------

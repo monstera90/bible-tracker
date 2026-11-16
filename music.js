@@ -27,7 +27,7 @@
   var items = [];        // содержимое открытой папки
   var timer = null;
   var lastState = null;
-  var longFired = false;   // долгое нажатие сработало — следующий за ним click не должен запускать трек
+  var musicPress = null;   // press.js: долгое нажатие сработало — следующий за ним click не должен запускать трек
   var pendingDel = null;   // удаление ждёт выдачи «Доступа ко всем файлам»: {folder, id}
   var ASKED_KEY = "musicAllFilesAsked_v1";
 
@@ -262,7 +262,7 @@
     var t = ev.target;
     var act = t.closest ? t.closest(".music-act") : null;
     if(act){
-      longFired = false;
+      if(musicPress) musicPress.reset();
       var itemEl = act.closest(".music-item");
       var row0 = itemEl ? itemEl.querySelector(".music-row") : null;
       var it0 = row0 ? items[parseInt(row0.getAttribute("data-i"), 10)] : null;
@@ -272,7 +272,7 @@
       }
       return;
     }
-    if(longFired){ longFired = false; return; } // click, которым закончилось долгое нажатие: кнопки остаются, трек не запускается
+    if(musicPress && musicPress.consume()) return; // click, которым закончилось долгое нажатие: кнопки остаются, трек не запускается
     var row = t.closest ? t.closest(".music-row") : null;
     hideActs();
     if(!row) return;
@@ -292,10 +292,7 @@
 
   // ---------- долгое нажатие на треке → кнопки действий справа ----------
 
-  var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
-  var pressTimer = null, pressXY = null, lastTouchAt = 0;
-
-  function clearPress(){ if(pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }
+  var LONG_PRESS_MS = 350;
 
   function hideActs(){
     var list = document.getElementById("musicList");
@@ -304,52 +301,19 @@
     for(var i = 0; i < on.length; i++) on[i].classList.remove("acts-on");
   }
 
-  function startPress(itemEl, x, y){
-    longFired = false; // новое касание: прежнее долгое нажатие больше не ждёт своего click
-    if(!itemEl) return;
-    var row = itemEl.querySelector(".music-row");
-    var it = row ? items[parseInt(row.getAttribute("data-i"), 10)] : null;
-    if(!it || it.dir) return; // только у треков (у папок кнопок нет)
-    pressXY = { x: x, y: y };
-    clearPress();
-    pressTimer = setTimeout(function(){
-      pressTimer = null;
-      longFired = true;
+  function bindLongPress(list){
+    // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js): кнопки действий справа; у папок их нет
+    musicPress = LTPress.bind(list, { sel: ".music-item", ms: LONG_PRESS_MS, onLong: function(info){
+      var itemEl = info.el;
+      var row = itemEl.querySelector(".music-row");
+      var it = row ? items[parseInt(row.getAttribute("data-i"), 10)] : null;
+      if(!it || it.dir) return;
       hideActs();
       itemEl.classList.add("acts-on");
       try{ if(navigator.vibrate) navigator.vibrate(20); }catch(e){}
-    }, LONG_PRESS_MS);
-  }
-
-  function movePress(x, y){
-    if(!pressXY || !pressTimer) return;
-    var dx = x - pressXY.x, dy = y - pressXY.y;
-    if(Math.sqrt(dx * dx + dy * dy) > MOVE_CANCEL_PX) clearPress();
-  }
-
-  function bindLongPress(list){
-    list.addEventListener("touchstart", function(e){
-      lastTouchAt = Date.now();
-      var t = e.touches[0];
-      startPress(e.target.closest ? e.target.closest(".music-item") : null, t.clientX, t.clientY);
-    }, { passive: true });
-    list.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
-    list.addEventListener("touchend", clearPress);
-    list.addEventListener("touchcancel", clearPress);
-    // мышь (браузер); эмулированные после касания события мыши пропускаем
-    list.addEventListener("mousedown", function(e){
-      if(Date.now() - lastTouchAt < 800) return;
-      startPress(e.target.closest ? e.target.closest(".music-item") : null, e.clientX, e.clientY);
-    });
-    list.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-    list.addEventListener("mouseup", clearPress);
-    list.addEventListener("mouseleave", clearPress);
-    // системное меню долгого нажатия на треке не нужно
-    list.addEventListener("contextmenu", function(e){
-      if(e.target.closest && e.target.closest(".music-item")) e.preventDefault();
-    });
+    } });
     // прокрутка списка прячет раскрытые кнопки
-    list.addEventListener("scroll", function(){ clearPress(); hideActs(); }, { passive: true });
+    list.addEventListener("scroll", function(){ musicPress.cancel(); hideActs(); }, { passive: true });
   }
 
   // ---------- удаление трека ----------

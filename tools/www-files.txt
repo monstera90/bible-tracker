@@ -65,6 +65,7 @@ mdeditor.js
 codemirror.bundle.js
 search.js
 ctxmenu.js
+press.js
 notifications.js
 eventlog.js
 screentime.js

@@ -686,7 +686,22 @@
       }
     }
 
-    function onContextMenu(e){ if(o.onSelect && root.contains(e.target)) e.preventDefault(); }
+    // правый клик мышью / клавиша «Меню» — то же, что удержание пальцем (выделяется слово под указателем), но сразу;
+    // contextmenu от касания только гасим — касание обрабатывает свой таймер
+    function onContextMenu(e){
+      if(!o.onSelect || !root.contains(e.target)) return;
+      e.preventDefault();
+      if(!window.LTPress || !window.LTPress.fromMouse(e)) return;
+      var x = e.clientX, y = e.clientY, p = pageIndexAtClientY(y);
+      if(p < 0) return;
+      function go(words){
+        if(dead) return;
+        selStart(p, words, x, y);
+        selCommit();
+      }
+      if(wordsSync[p]) go(wordsSync[p]);
+      else getWords(p).then(go);
+    }
 
     function onResize(){
       if(!isAlive()) return;

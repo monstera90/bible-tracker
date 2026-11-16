@@ -526,10 +526,22 @@
   document.addEventListener("touchcancel", touchEnd, true);
   // Событие contextmenu приходит в тот же миг, что и вибрация долгого нажатия: показываем круг сразу, не дожидаясь таймера.
   document.addEventListener("contextmenu", function(e){
-    if(!S.lpT || inOwnUi(e.target)) return;
-    clearTimeout(S.lpT); S.lpT = 0;
+    if(inOwnUi(e.target)) return;
+    if(S.lpT){
+      clearTimeout(S.lpT); S.lpT = 0;
+      S.lpGuard = Date.now() + 700;
+      setTimeout(onLongPress, 50); // даём Chromium поставить курсор / выделить слово
+      return;
+    }
+    // правый клик мышью / клавиша «Меню» в поле ввода — тот же круг, что и по долгому нажатию пальцем (press.js: единое правило)
+    if(!window.LTPress || !window.LTPress.fromMouse(e)) return;
+    var t = e.target;
+    if(!t || skipEl(t) || !editableAt(t, e.clientX, e.clientY)) return;
+    e.preventDefault();
+    S.lpX = e.clientX; S.lpY = e.clientY;
+    S.lpAt = Date.now();
     S.lpGuard = Date.now() + 700;
-    setTimeout(onLongPress, 50); // даём Chromium поставить курсор / выделить слово
+    setTimeout(onLongPress, 50);
   }, true);
   document.addEventListener("mouseup", function(e){
     if(inOwnUi(e.target)) return;

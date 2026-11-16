@@ -1101,13 +1101,14 @@ window.initMdEditorModule = function(deps){
   // координатах CodeMirror. Работает ТОЛЬКО пока включён режим чтения/полноэкранный (см. getReadingModeActive,
   // getFullscreenModeActive); в обычном редактировании долгое нажатие остаётся системным (каретка, выделение).
   function bindNoteHoldMarker(view){
-    view.dom.addEventListener("touchstart", function(e){
-      if(!window.LTHold || !e.touches || e.touches.length !== 1) return;
-      if(!(getReadingModeActive() || getFullscreenModeActive())) return;
+    // Общая подготовка для удержания (касание) и правого клика (мышь / «Меню»): {session, commit} или null, если здесь маркер не нужен.
+    function prepare(e){
+      if(!window.LTHold) return null;
+      if(!(getReadingModeActive() || getFullscreenModeActive())) return null;
       // В режиме кода («Переключить режим кода») удержание ничего не подчёркивает: маркер «==» только при закрытом режиме кода.
-      if(codeMode) return;
+      if(codeMode) return null;
       var tg = e.target;
-      if(tg && tg.closest && tg.closest("a, button, input, select, textarea")) return;
+      if(tg && tg.closest && tg.closest("a, button, input, select, textarea")) return null;
       var a = null, lx = 0, ly = 0;
       function wordAt(pos){ return view.state.wordAt(pos); }
       function render(from, to){
@@ -1152,7 +1153,7 @@ window.initMdEditorModule = function(deps){
         end: function(){ var c = a && a.cur; a = null; window.LTHold.hlClear(); return c; },
         cancel: function(){ a = null; window.LTHold.hlClear(); }
       };
-      window.LTHold.run(e, view.contentDOM, session, function(c){
+      function commit(c){
         if(!c) return;
         var from = c.from, to = c.to, txt = view.state.sliceDoc(from, to);
         var lead = txt.length - txt.replace(/^\s+/, "").length;
@@ -1161,8 +1162,24 @@ window.initMdEditorModule = function(deps){
         if(from >= to) return;
         if(view.state.sliceDoc(from, to).indexOf("==") !== -1) return;
         view.dispatch({ changes: [{ from: from, insert: "==" }, { from: to, insert: "==" }] });
-      }, view.scrollDOM);
+      }
+      return { session: session, commit: commit };
+    }
+    view.dom.addEventListener("touchstart", function(e){
+      if(!e.touches || e.touches.length !== 1) return;
+      var h = prepare(e);
+      if(!h) return;
+      window.LTHold.run(e, view.contentDOM, h.session, h.commit, view.scrollDOM);
     }, { passive: true });
+    // правый клик мышью / клавиша «Меню» — то же, что удержание (отмечается слово под указателем), но сразу
+    view.dom.addEventListener("contextmenu", function(e){
+      if(!window.LTPress || !window.LTPress.fromMouse(e)) return;
+      var h = prepare(e);
+      if(!h) return;
+      e.preventDefault();
+      if(!h.session.begin(e.clientX, e.clientY)) return;
+      h.commit(h.session.end());
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -3644,50 +3661,24 @@ window.initMdEditorModule = function(deps){
         listEl.appendChild(row);
       });
 
-      var LONG_PRESS_MS = 350, MOVE_CANCEL_PX = 10;
-      var pressTimer = null, pressStartXY = null, longPressFired = false;
-      function clearPressTimer(){ clearTimeout(pressTimer); pressTimer = null; }
-      function startPress(rowEl, x, y){
-        if(!rowEl) return;
+      // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js)
+      var press = LTPress.bind(listEl, { sel: ".mdeditor-row", ms: 350, blockAll: true, onLong: function(info){
+        var rowEl = info.el;
         var it = items[Number(rowEl.dataset.index)];
         if(!it || (it.type !== "file" && it.type !== "folder")) return;
-        longPressFired = false;
-        pressStartXY = { x: x, y: y };
-        clearPressTimer();
-        pressTimer = setTimeout(function(){
-          longPressFired = true;
-          if(it.type === "file"){
-            var key = it.name.toLowerCase();
-            revealedBookmarkRows.add(key);
-            var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
-            if(bmBtn) bmBtn.classList.add("visible");
-            var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
-            if(delBtn) delBtn.classList.add("visible");
-          } else {
-            revealedFolderDeleteRows.add(it.node.path);
-            var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
-            if(folderDelBtn) folderDelBtn.classList.add("visible");
-          }
-        }, LONG_PRESS_MS);
-      }
-      function movePress(x, y){
-        if(!pressStartXY) return;
-        var dx = x - pressStartXY.x, dy = y - pressStartXY.y;
-        if(Math.sqrt(dx*dx + dy*dy) > MOVE_CANCEL_PX) clearPressTimer();
-      }
-      listEl.addEventListener("touchstart", function(e){
-        var t = e.touches[0];
-        startPress(e.target.closest(".mdeditor-row"), t.clientX, t.clientY);
-      }, {passive:true});
-      listEl.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, {passive:true});
-      listEl.addEventListener("touchend", clearPressTimer);
-      listEl.addEventListener("touchcancel", clearPressTimer);
-      listEl.addEventListener("mousedown", function(e){
-        startPress(e.target.closest(".mdeditor-row"), e.clientX, e.clientY);
-      });
-      listEl.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-      listEl.addEventListener("mouseup", clearPressTimer);
-      listEl.addEventListener("mouseleave", clearPressTimer);
+        if(it.type === "file"){
+          var key = it.name.toLowerCase();
+          revealedBookmarkRows.add(key);
+          var bmBtn = rowEl.querySelector(".mdeditor-bookmark-btn");
+          if(bmBtn) bmBtn.classList.add("visible");
+          var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
+          if(delBtn) delBtn.classList.add("visible");
+        } else {
+          revealedFolderDeleteRows.add(it.node.path);
+          var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
+          if(folderDelBtn) folderDelBtn.classList.add("visible");
+        }
+      } });
 
       function hideRevealedBookmarkRows(){
         if(!revealedBookmarkRows.size && !revealedFolderDeleteRows.size) return;
@@ -3716,7 +3707,7 @@ window.initMdEditorModule = function(deps){
         var it = items[Number(rowEl.dataset.index)];
         if(!it) return;
         if(e.target.closest(".mdeditor-delete-btn")){
-          longPressFired = false;
+          press.reset();
           if(it.type === "folder") confirmDeleteFolder(it, node);
           else confirmDeleteNote(it, node);
           return;
@@ -3726,7 +3717,7 @@ window.initMdEditorModule = function(deps){
           return;
         }
         hideRevealedBookmarkRows();
-        if(longPressFired){ longPressFired = false; return; }
+        if(press.consume()) return;
         if(it.type === "folder"){
           var prevDirNode = currentDirNode;
           pushMdNav(function(){ currentDirNode = prevDirNode; render(); });

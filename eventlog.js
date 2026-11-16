@@ -500,45 +500,14 @@
   }
   // долгое нажатие на строке события (кроме серых «предстоящих»): без сдвига пальца — прокрутка не считается
   function bindLongPress(box){
-    var timer = null, sx = 0, sy = 0, lastTouchAt = 0;
-    function cancel(){ if(timer){ clearTimeout(timer); timer = null; } }
-    function rowOf(el){
-      while(el && el !== box){
-        if(el.className && typeof el.className === "string" && /(^|\s)event-row(\s|$)/.test(el.className)) return el;
-        el = el.parentNode;
-      }
-      return null;
-    }
-    function down(e, isTouch){
-      if(isTouch) lastTouchAt = Date.now();
-      else if(Date.now() - lastTouchAt < 800) return; // эмулированные мышиные события после касания
-      var row = rowOf(e.target);
-      if(!row) return;
+    // долгое нажатие и правый клик — одинаково (press.js): запрос на удаление записи
+    LTPress.bind(box, { sel: ".event-row", ms: LONG_PRESS_MS, tol: PRESS_MOVE_TOL, blockAll: true, onLong: function(info){
+      var row = info.el;
       var ref = shownRows[parseInt(row.getAttribute("data-n"), 10)];
       if(!ref) return; // предстоящее: в журнале его нет
-      var pt = (e.touches && e.touches[0]) || e;
-      sx = pt.clientX; sy = pt.clientY;
-      cancel();
-      timer = setTimeout(function(){
-        timer = null;
-        try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
-        askDelete(ref, row);
-      }, LONG_PRESS_MS);
-    }
-    function move(e){
-      if(!timer) return;
-      var pt = (e.touches && e.touches[0]) || e;
-      if(Math.abs(pt.clientX - sx) > PRESS_MOVE_TOL || Math.abs(pt.clientY - sy) > PRESS_MOVE_TOL) cancel();
-    }
-    box.addEventListener("touchstart", function(e){ down(e, true); });
-    box.addEventListener("touchmove", move);
-    box.addEventListener("touchend", cancel);
-    box.addEventListener("touchcancel", cancel);
-    box.addEventListener("mousedown", function(e){ down(e, false); });
-    box.addEventListener("mousemove", move);
-    box.addEventListener("mouseup", cancel);
-    box.addEventListener("mouseleave", cancel);
-    box.addEventListener("contextmenu", function(e){ e.preventDefault(); }); // системное меню при долгом нажатии не нужно
+      try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+      askDelete(ref, row);
+    } });
   }
 
   var refreshTimer = null;

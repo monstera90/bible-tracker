@@ -1456,50 +1456,33 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
 
   function bindGrid(grid){
-    var LONG_MS = 350, MOVE_PX = 10;
-    var pressTimer = null, startXY = null, longFired = false;
-    function clearPress(){ clearTimeout(pressTimer); pressTimer = null; }
-    function startPress(cardNode, x, y, target){
-      if(!cardNode) return;
-      longFired = false; startXY = { x: x, y: y };
-      clearPress();
+    var LONG_MS = 350;
+    // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js); перетягивание — ниже, своими слушателями
+    var press = LTPress.bind(grid, { sel: ".item-card", ms: LONG_MS, blockAll: true, onLong: function(info){
+      var cardNode = info.el, target = info.target;
       // удержание часов напоминания — снять напоминание (как у задач); кнопки правки/удаления при этом не раскрываются
-      if(!dragMode && target && target.closest && target.closest(".item-card-remind-btn")){
-        pressTimer = setTimeout(function(){ longFired = true; clearCardReminder(cardNode.dataset.id); }, LONG_MS);
-        return;
-      }
+      if(!dragMode && target && target.closest && target.closest(".item-card-remind-btn")){ clearCardReminder(cardNode.dataset.id); return; }
       if(dragMode){
-        pressTimer = setTimeout(function(){ longFired = true; beginDrag(grid, cardNode, x, y); }, LONG_MS);
+        if(info.via === "context") return; // перетягивание начинается только с удержания, у правого клика переноса нет
+        beginDrag(grid, cardNode, info.x, info.y);
         return;
       }
-      pressTimer = setTimeout(function(){
-        longFired = true;
-        clearAttention(cardNode.dataset.id);
-        revealedIds[cardNode.dataset.id] = true;
-        var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn, .item-card-qr-btn, .item-card-chart-btn");
-        for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
-      }, LONG_MS);
-    }
-    function movePress(x, y){
-      if(dragState){ moveDrag(x, y); return; }
-      if(!startXY) return;
-      var dx = x - startXY.x, dy = y - startXY.y;
-      if(Math.sqrt(dx * dx + dy * dy) > MOVE_PX) clearPress();
-    }
-    grid.addEventListener("touchstart", function(e){ var t = e.touches[0]; startPress(e.target.closest(".item-card"), t.clientX, t.clientY, e.target); }, { passive: true });
+      clearAttention(cardNode.dataset.id);
+      revealedIds[cardNode.dataset.id] = true;
+      var btns = cardNode.querySelectorAll(".mdeditor-delete-btn, .item-card-eye-btn, .item-card-fav-btn, .item-card-edit-btn, .item-card-qr-btn, .item-card-chart-btn");
+      for(var i = 0; i < btns.length; i++) btns[i].classList.add("visible");
+    } });
     if(dragMode){
       // в режиме перетягивания прокрутку на время переноса гасим (слушатель не пассивный, и только в этом режиме)
-      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; if(dragState){ e.preventDefault(); } movePress(t.clientX, t.clientY); }, { passive: false });
+      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; if(dragState){ e.preventDefault(); moveDrag(t.clientX, t.clientY); } }, { passive: false });
     } else {
-      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; movePress(t.clientX, t.clientY); }, { passive: true });
+      grid.addEventListener("touchmove", function(e){ var t = e.touches[0]; if(dragState) moveDrag(t.clientX, t.clientY); }, { passive: true });
     }
-    grid.addEventListener("touchend", function(){ clearPress(); if(dragState) endDrag(true); });
-    grid.addEventListener("touchcancel", function(){ clearPress(); if(dragState) endDrag(false); });
-    grid.addEventListener("mousedown", function(e){ startPress(e.target.closest(".item-card"), e.clientX, e.clientY, e.target); });
-    grid.addEventListener("mousemove", function(e){ movePress(e.clientX, e.clientY); });
-    grid.addEventListener("mouseup", function(){ clearPress(); if(dragState) endDrag(true); });
-    grid.addEventListener("mouseleave", function(){ clearPress(); if(dragState) endDrag(false); });
-    grid.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    grid.addEventListener("touchend", function(){ if(dragState) endDrag(true); });
+    grid.addEventListener("touchcancel", function(){ if(dragState) endDrag(false); });
+    grid.addEventListener("mousemove", function(e){ if(dragState) moveDrag(e.clientX, e.clientY); });
+    grid.addEventListener("mouseup", function(){ if(dragState) endDrag(true); });
+    grid.addEventListener("mouseleave", function(){ if(dragState) endDrag(false); });
 
     grid.addEventListener("click", function(e){
       var cardNode = e.target.closest(".item-card");
@@ -1507,7 +1490,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       var id = cardNode.dataset.id;
       var c = findCard(id);
       if(!c) return;
-      if(longFired){ longFired = false; return; }
+      if(press.consume()) return;
       e.stopPropagation();
       if(dragMode) return; // режим перетягивания: нажатия по карточкам ничего не запускают
       clearAttention(id); // любое взаимодействие с карточкой снимает жирную обводку

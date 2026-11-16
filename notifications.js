@@ -908,19 +908,11 @@ window.initNotificationsModule = function(deps){
     }
     if(repeatBtn){
       // нажатие — следующий период по кругу (1,2,3,5,10,14,21,30,60,90,180, затем выключено); удержание — выключить
-      var holdTimer = null, holdFired = false;
       var setRepeat = function(d){ repeatDays = d; refresh(); try{ opts.onRepeat(d); }catch(e){} schedule(); };
-      var startHold = function(){ holdFired = false; clearTimeout(holdTimer); holdTimer = setTimeout(function(){ holdFired = true; if(repeatDays > 0) setRepeat(0); }, 450); };
-      var endHold = function(){ clearTimeout(holdTimer); holdTimer = null; };
-      repeatBtn.addEventListener("touchstart", startHold, {passive: true});
-      repeatBtn.addEventListener("mousedown", startHold);
-      repeatBtn.addEventListener("touchend", endHold);
-      repeatBtn.addEventListener("touchmove", endHold, {passive: true});
-      repeatBtn.addEventListener("mouseup", endHold);
-      repeatBtn.addEventListener("mouseleave", endHold);
-      repeatBtn.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+      // удержание и правый клик — одинаково (press.js): выключить повтор
+      var holdPress = LTPress.bind(repeatBtn, { ms: 450, blockAll: true, onLong: function(){ if(repeatDays > 0) setRepeat(0); } });
       repeatBtn.addEventListener("click", function(){
-        if(holdFired){ holdFired = false; return; }
+        if(holdPress.consume()) return;
         var i = REPEAT_STEPS.indexOf(repeatDays);
         setRepeat(i < 0 ? REPEAT_STEPS[0] : (i + 1 < REPEAT_STEPS.length ? REPEAT_STEPS[i + 1] : 0));
       });
