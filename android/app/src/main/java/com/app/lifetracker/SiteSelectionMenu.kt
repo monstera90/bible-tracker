@@ -1,11 +1,14 @@
 package com.app.lifetracker
+// Версия: 1.1 (16.11) — «Переслать в задачи» открывает табличку выбора списка задач (как в заметках), а не окно быстрой задачи; без `window.LTSiteTask` страницы (старая веб-часть) — прежнее окно быстрой задачи.
 // Версия: 1.0 (11.11)
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.annotation.SuppressLint
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -19,6 +22,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -54,7 +58,10 @@ private const val ACT_ERASE = 5
  * выделение 380 мс не менялось. Что выделено и можно ли это менять, спрашивается у страницы скриптом [SEL_JS]; действия
  * над страницей — скриптами ([DEL_JS], [PASTE_JS]). Моста LifeTrackerNative в чужих страницах по-прежнему нет: буфер
  * обмена и история — на стороне приложения. История — `window.LTClip` главной страницы (её же пополняет «Копировать»
- * круга). «Переслать» кладёт текст в черновик окна быстрой задачи ([QuickTaskActivity]) и открывает его: задача уйдёт в Inbox.
+ * круга). «Переслать» открывает табличку со списками задач (те же вкладки, названия и пиктограммы, что в окне «Переслать в
+ * список задач» заметок): список и создание задачи берутся у страницы приложения (`window.LTSiteTask`), саму табличку рисует
+ * этот класс (DOM страницы под сайтами не виден). Если страница `LTSiteTask` не знает (старая веб-часть) или недоступна, текст
+ * кладётся в черновик окна быстрой задачи ([QuickTaskActivity]) и открывается оно: задача уйдёт в Inbox.
  * Цвета — из палитры темы, которую страница присылает для окна быстрой задачи ([QuickTaskStore.palette]).
  */
 class SiteSelectionMenu(
@@ -126,6 +133,7 @@ return ok?1:0;
     private var sel: Sel? = null
     private var circle: CircleView? = null
     private var listBox: View? = null
+    private var pickerBox: View? = null
     private var cx = 0f
     private var cy = 0f
     private var pending: Runnable? = null
@@ -199,8 +207,13 @@ return ok?1:0;
     private fun removeViews() {
         circle?.let { if (it.parent === host) host.removeView(it) }
         listBox?.let { if (it.parent === host) host.removeView(it) }
+        pickerBox?.let {
+            if (it.parent === host) host.removeView(it)
+            (it as? ViewGroup)?.let { g -> destroyPickerWebView(g) }
+        }
         circle = null
         listBox = null
+        pickerBox = null
     }
 
     private fun query() {
@@ -294,7 +307,7 @@ return ok?1:0;
             ACT_COPY -> copyText(s.text)
             ACT_PASTE -> pasteInto(v, clipboardText())
             ACT_CUT -> if (copyText(s.text)) deleteSelection(v)
-            ACT_FWD -> forward(s.text)
+            ACT_FWD -> forward(v, s.text)
             ACT_ERASE -> deleteSelection(v)
         }
     }
@@ -337,14 +350,175 @@ return ok?1:0;
         }
     }
 
-    private fun forward(text: String) {
+    /** «Переслать»: табличка со списками задач; без поддержки страницы — прежнее окно быстрой задачи. */
+    private fun forward(v: WebView, text: String) {
         val t = text.trim()
         if (t.isEmpty()) return
+        activity.evalInPage("window.LTSiteTask?window.LTSiteTask.tabs():null") { raw ->
+            val tabs = parseTabs(raw)
+            if (tabs == null) {
+                forwardViaQuickTask(t)
+                return@evalInPage
+            }
+            if (target !== v) return@evalInPage
+            showTaskPicker(t, tabs)
+        }
+    }
+
+    private fun forwardViaQuickTask(t: String) {
         try {
             QuickTaskStore.saveDraft(activity.applicationContext, t, null, null, 0L)
             activity.startActivity(Intent(activity, QuickTaskActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) {
             activity.toast("Не удалось открыть окно задачи")
+        }
+    }
+
+    private class TaskTab(val key: String, val title: String, val svg: String)
+
+    private fun parseTabs(raw: String?): List<TaskTab>? {
+        if (raw == null || raw == "null") return null
+        return try {
+            val str = JSONTokener(raw).nextValue() as? String ?: return null
+            val arr = JSONObject(str).optJSONArray("tabs") ?: return null
+            val out = ArrayList<TaskTab>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val key = o.optString("key", "")
+                if (key.isEmpty()) continue
+                out.add(TaskTab(key, o.optString("title", key), o.optString("svg", "")))
+            }
+            if (out.isEmpty()) null else out
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // ---------------------------------------------------------------- табличка «Переслать в список задач»
+
+    private fun cssColor(c: Int): String = String.format("#%06X", 0xFFFFFF and c)
+
+    private fun htmlEscape(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+    /** Мост таблички: вызывается из её собственной страницы (в чужие страницы не подставляется). */
+    private inner class PickBridge(private val text: String) {
+        @JavascriptInterface
+        fun pick(key: String) {
+            handler.post { onTabPicked(key, text) }
+        }
+
+        @JavascriptInterface
+        fun cancel() {
+            handler.post { removeViews() }
+        }
+    }
+
+    private fun destroyPickerWebView(group: ViewGroup) {
+        for (i in 0 until group.childCount) {
+            val c = group.getChildAt(i)
+            if (c is WebView) {
+                try {
+                    c.removeJavascriptInterface("LTPick")
+                    c.stopLoading()
+                    c.destroy()
+                } catch (e: Exception) {
+                }
+            } else if (c is ViewGroup) {
+                destroyPickerWebView(c)
+            }
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun showTaskPicker(text: String, tabs: List<TaskTab>) {
+        removeViews()
+        if (host.width <= 0 || host.height <= 0) return
+        val pal = QuickTaskStore.palette(activity.applicationContext)
+        val w = min((336f * d).roundToInt(), host.width - (16f * d).roundToInt())
+        val padDp = 14
+        val cols = max(1, ((w / d - 2 * padDp + 8f) / 78f).toInt())
+        val rows = (tabs.size + cols - 1) / cols
+        val contentDp = 34f + rows * 70f + (rows - 1) * 8f + 2 * padDp
+        val botLimit = visibleBottom()
+        val maxH = max((140f * d).roundToInt(), min((host.height * 0.85f).roundToInt(), (botLimit - 8f * d).roundToInt()))
+        val h = min((contentDp * d).roundToInt(), maxH)
+
+        val buttons = StringBuilder()
+        for (t in tabs) {
+            buttons.append("<button type=\"button\" onclick=\"LTPick.pick(this.getAttribute('data-k'))\" data-k=\"")
+                .append(htmlEscape(t.key)).append("\">").append(t.svg).append("<span>")
+                .append(htmlEscape(t.title)).append("</span></button>")
+        }
+        val html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,user-scalable=no\"><style>" +
+            "html,body{margin:0;background:transparent;font-family:sans-serif;color:${cssColor(pal.ink)};" +
+            "-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}" +
+            "body{padding:${padDp}px}" +
+            "h1{font-size:15px;font-weight:600;margin:0 0 12px;text-align:center;line-height:1.2}" +
+            ".g{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}" +
+            "button{width:70px;height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
+            "gap:4px;background:${cssColor(ColorUtils.blendARGB(pal.card, 0xFFFFFFFF.toInt(), 0.5f))};" +
+            "border:1px solid ${cssColor(pal.groove)};border-radius:8px;color:${cssColor(pal.accent)};" +
+            "font-family:sans-serif;font-size:10.5px;text-align:center;padding:0}" +
+            "button:active{background:${cssColor(pal.accent)};color:${cssColor(pal.card)}}" +
+            "button svg{width:22px;height:22px}" +
+            "</style></head><body><h1>Переслать в список задач</h1><div class=\"g\">" +
+            buttons + "</div></body></html>"
+
+        val web = WebView(activity)
+        web.settings.javaScriptEnabled = true
+        web.settings.allowFileAccess = false
+        web.settings.allowContentAccess = false
+        web.setBackgroundColor(Color.TRANSPARENT)
+        web.isVerticalScrollBarEnabled = false
+        web.isHorizontalScrollBarEnabled = false
+        web.isLongClickable = false
+        web.setOnLongClickListener { true }
+        web.addJavascriptInterface(PickBridge(text), "LTPick")
+        web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+
+        val card = FrameLayout(activity)
+        val bg = GradientDrawable()
+        bg.setColor(pal.card)
+        bg.cornerRadius = 12f * d
+        bg.setStroke(max(1, d.roundToInt()), pal.groove)
+        card.background = bg
+        card.clipToOutline = true
+        card.elevation = 8f * d
+        card.isClickable = true // нажатие по самой табличке не закрывает её
+        card.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        // подложка на весь host: перехватывает нажатия (сайт под ней не реагирует), нажатие мимо таблички закрывает её
+        val scrim = FrameLayout(activity)
+        scrim.setBackgroundColor(0x55000000)
+        scrim.isClickable = true
+        scrim.setOnClickListener { removeViews() }
+        val lp = FrameLayout.LayoutParams(w, h)
+        lp.leftMargin = ((host.width - w) / 2f).roundToInt()
+        lp.topMargin = (cy - h / 2f).coerceIn(8f * d, max(8f * d, botLimit - h)).roundToInt()
+        scrim.addView(card, lp)
+        host.addView(scrim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        pickerBox = scrim
+    }
+
+    private fun onTabPicked(key: String, text: String) {
+        dismissedKey = sel?.key
+        removeViews()
+        activity.evalInPage(
+            "window.LTSiteTask?window.LTSiteTask.create(" + JSONObject.quote(key) + "," + JSONObject.quote(text) + "):null"
+        ) { raw ->
+            val msg = try {
+                if (raw == null || raw == "null") {
+                    null
+                } else {
+                    val str = JSONTokener(raw).nextValue() as? String
+                    if (str == null) null else JSONObject(str).optString("msg", "")
+                }
+            } catch (e: Exception) {
+                null
+            }
+            activity.toast(if (msg.isNullOrEmpty()) "Не удалось создать задачу" else msg)
         }
     }
 

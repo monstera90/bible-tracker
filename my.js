@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 149.7 (16.11) — «Переслать в задачи» из кругового меню на сайтах: `window.LTSiteTask` (`tabs`, `create`) для таблички выбора списка, которую рисует оболочка (SiteSelectionMenu.kt); общая часть создания задачи вынесена в `createForwardedTask`. Откат: my.js 149.6.
    Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
    Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
    Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
@@ -24855,9 +24856,36 @@
   // opts.remove — убрать текст из источника (правка в заметке/задаче; у книги и другого «только для чтения» текста его нет).
   // Порядок: сначала remove (источник ещё на месте), потом создание задачи и перерисовка вкладки; общая задача в режиме
   // «только чтение» — отказ ДО удаления. Нажатия в окне не отнимают фокус у редактируемой строки (mousedown).
+  // Общая часть «Переслать в задачи»: создаёт задачу с текстом в выбранном списке (в общих задачах — запись в группу) и
+  // перерисовывает открытую вкладку задач. Зовётся из окна выбора списка (sendTextToTaskList) и из таблички на сайтах
+  // (window.LTSiteTask.create, см. ниже). Возвращает сообщение для пользователя.
+  function createForwardedTask(key, text){
+    var groupOn = key === "jointtasks" && isGroupTasksActive();
+    if(groupOn){
+      var gid = genGroupTaskId();
+      saveGroupTaskData(gid, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
+        completionKey: null, nextForProjectId: null, flag: null, inWork: false,
+        createdBy: getDeviceId(), completedBy: null, tag: null});
+      if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
+    }else{
+      createTaskWithText(key, text);
+    }
+    // открытая вкладка задач сразу показывает новую задачу (кроме момента, когда в ней идёт редактирование строки)
+    try{
+      var ae = document.activeElement;
+      var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
+      if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
+    }catch(eR){}
+    return "Задача создана: " + TASK_TAB_TITLES[key];
+  }
+
+  function normalizeForwardText(text){
+    return String(text == null ? "" : text).replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
   function sendTextToTaskList(text, opts){
     opts = opts || {};
-    text = String(text == null ? "" : text).replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    text = normalizeForwardText(text);
     if(!text) return;
     function say(msg){ try{ if(window.LTCtx) window.LTCtx.toast(msg); }catch(e){} }
     var buttons = TASK_MOVE_TARGET_TABS.map(function(key){
@@ -24884,25 +24912,37 @@
           try{ opts.remove(); }catch(eRm){}
           flushPendingTaskEdits(); // правка исходной задачи (вырезанный кусок) сразу попадает в хранилище
         }
-        if(groupOn){
-          var gid = genGroupTaskId();
-          saveGroupTaskData(gid, {text: text, tab: "jointtasks", checked: false, checkedAt: null,
-            completionKey: null, nextForProjectId: null, flag: null, inWork: false,
-            createdBy: getDeviceId(), completedBy: null, tag: null});
-          if(MdEditor && MdEditor.markMediaReferencesDirty) MdEditor.markMediaReferencesDirty();
-        }else{
-          createTaskWithText(key, text);
-        }
-        // открытая вкладка задач сразу показывает новую задачу (кроме момента, когда в ней идёт редактирование строки)
-        try{
-          var ae = document.activeElement;
-          var editing = !!(ae && ae.classList && ae.classList.contains("task-editable"));
-          if(!editing && !activeProjectPickerRerender && settingsModalOverlay && settingsModalOverlay.classList.contains("open") && TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
-        }catch(eR){}
-        say("Задача создана: " + TASK_TAB_TITLES[key]);
+        say(createForwardedTask(key, text));
       });
     });
   }
+
+  // Табличка «Переслать в задачи» для вкладок-сайтов (SiteSelectionMenu.kt): сайты лежат отдельными WebView поверх этой
+  // страницы, и её окно выбора под ними не видно, поэтому табличку рисует оболочка, а список вкладок (названия и
+  // пиктограммы — те же, что в окне выше) и создание задачи берёт отсюда. tabs() → JSON-строка {tabs:[{key,title,svg}],
+  // jointReadOnly}; create(key, text) → JSON-строка {ok, msg}.
+  window.LTSiteTask = {
+    tabs: function(){
+      return JSON.stringify({
+        tabs: TASK_MOVE_TARGET_TABS.map(function(key){
+          return {key: key, title: TASK_TAB_TITLES[key], svg: TASK_MOVE_ICON_SVG(key)};
+        }),
+        jointReadOnly: !!(isGroupTasksActive() && isGroupTasksReadOnly())
+      });
+    },
+    create: function(key, text){
+      try{
+        text = normalizeForwardText(text);
+        if(!text || TASK_MOVE_TARGET_TABS.indexOf(key) === -1) return JSON.stringify({ok: false, msg: "Не удалось создать задачу"});
+        if(key === "jointtasks" && isGroupTasksActive() && isGroupTasksReadOnly()){
+          return JSON.stringify({ok: false, msg: "Общие задачи сейчас только для чтения"});
+        }
+        return JSON.stringify({ok: true, msg: createForwardedTask(key, text)});
+      }catch(e){
+        return JSON.stringify({ok: false, msg: "Не удалось создать задачу"});
+      }
+    }
+  };
 
   // выбор next-действия для задачи-проекта: список текущих незакрытых задач вкладки "next", ещё не
   // привязанных к другому проекту, плюс возможность сразу создать новую next-задачу, привязанную к
