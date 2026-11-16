@@ -972,10 +972,10 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   // ---------- лицо таймера (как в виджете, QrTimerFace.kt: числа — доли ширины карточки ×100) ----------
   var TF_R = 25.75; // радиус кольца по центру штриха: внешний 27,65 минус половина толщины 3,8
-  // Число в кольце — как QrTimerFace.numberText: от часа «Ч:ММ» (минуты вверх), от минуты — минуты вверх, короче минуты у не запущенного — «0:СС»; у идущего ниже «1» не опускается
+  // Число в кольце — как QrTimerFace.numberText: до 99 минут включительно — целые минуты вверх («99»), дольше «Ч:ММ» (минуты вверх), короче минуты у не запущенного — «0:СС»; у идущего ниже «1» не опускается
   function timerNumText(sec, running){
     sec = Math.max(0, sec | 0);
-    if(sec >= 3600){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + pad2(tm % 60); }
+    if(sec > 99 * 60){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + pad2(tm % 60); }
     if(sec >= 60 || running) return String(Math.max(1, Math.ceil(sec / 60)));
     return "0:" + pad2(sec);
   }

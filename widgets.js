@@ -772,10 +772,10 @@ var DAY_MS = 86400000;
       var hex = cardsOf().paletteColor("");
       return faceHtml({ type: "habit", title: "Бег", color: hex, shade: cardsOf().cardShade(hex), svg: "", big: "", sub: "" }, "");
     }
-    // Число в кольце карточки «Таймеры» — как в оболочке (QrTimerFace.numberText для не запущенного таймера): от часа «Ч:ММ», от минуты — минуты вверх, короче — «0:СС»
+    // Число в кольце карточки «Таймеры» — как в оболочке (QrTimerFace.numberText для не запущенного таймера): до 99 минут включительно — целые минуты вверх («99»), дольше «Ч:ММ», короче минуты — «0:СС»
     function timerNumText(sec){
       sec = Math.max(0, sec | 0);
-      if(sec >= 3600){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + (tm % 60 < 10 ? "0" : "") + (tm % 60); }
+      if(sec > 99 * 60){ var tm = Math.ceil(sec / 60); return Math.floor(tm / 60) + ":" + (tm % 60 < 10 ? "0" : "") + (tm % 60); }
       if(sec >= 60) return String(Math.ceil(sec / 60));
       return "0:" + (sec < 10 ? "0" : "") + sec;
     }
