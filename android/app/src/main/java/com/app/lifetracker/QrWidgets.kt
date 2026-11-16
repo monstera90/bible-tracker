@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 15.1 (16.11) — число минут в кольце таймера («Таймеры») меняется ровно в момент, когда остаток доходит до круглой минуты (23 → 22 в 22:00), а не по границе календарной минуты: `nextTimerFlip` в `armCycle`. Откат: QrWidgets.kt 15.0.
 // Версия: 15.0 (16.11) — принцип «после действия на карточке не бросать стопку в начало»: двойное нажатие на привычку, отметка задачи и заведение/выключение будильника оставляют виджет на той же карточке (привычки, задачи, будильники), если она в стопке осталась — на ней ещё есть что делать ([pinSlot], [slotOf], [slotPosition]; [update] при пересоздании стопки ставит её на закреплённую карточку, а не на первую); карточка пропала совсем (отмечена последняя привычка) — как раньше, первая. Сброс наверх после такого действия ([refreshAll] с `rebuildCfgs`) касается только затронутого виджета: стопки остальных не двигаются. Галочка «Показывать мероприятия на N дней вперёд» (`eventsSoon` + число `eventsDays`, 1…15; раньше — «только на сегодня и на завтра»): окно карточки события — N суток от начала сегодняшнего дня; картинка карточки на дату через семь суток и дальше — `<ключ>_d.png` («25 ноября, Среда»), [dynBitmap]. Откат: QrWidgets.kt 14.14.
 // Версия: 14.16 (16.11) — `startTimer`: нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу в оболочке, без окна с карточкой на весь экран; запуск ставится в очередь `timerEv` для журнала событий (`takeTimerEvents` / `ackTimerEvents`, мост ≥ 39). Откат: QrWidgets.kt 14.15.
 // Версия: 14.15 (16.11) — `stopTimer`: повторное нажатие на идущий (или приостановленный) таймер в карточке «Таймеры» виджета останавливает его (раньше ничего не делало). Откат: QrWidgets.kt 14.14.
@@ -174,6 +175,7 @@ object QrWidgets {
     private const val GUARD_MS = 60_000L
     /** Шаг проверки страховки: стопка, не поставленная нами наверх дольше [GUARD_MS], возвращается не позже чем через этот шаг после срока. */
     private const val GUARD_TICK_MS = 15_000L
+    private const val FLIP_MARGIN_MS = 60L // запас, чтобы будильник, сработавший чуть раньше, не нарисовал прежнее число
     private const val SWIPE_QUIET_MS = 4_000L
     /** Сколько после касания карточек слайд-шоу их не листает. */
     private const val TOUCH_PAUSE_MS = 30_000L
@@ -1643,6 +1645,25 @@ object QrWidgets {
     }
 
     /**
+     * Когда у идущего таймера карточки «Таймеры» в кольце меняется число ([QrTimerFace.numberText]): число — остаток в минутах, округлённый вверх, поэтому оно становится
+     * `m - 1` в момент, когда остаток доходит до `(m - 1)` минут (таймер на 23 минуты: «22» ровно в 22:00, а не в ближайшую календарную минуту). Последняя минута («1») больше
+     * не меняется. [Long.MAX_VALUE] — идущих таймеров нет.
+     */
+    private fun nextTimerFlip(app: Context, cfg: Cfg): Long {
+        var at = Long.MAX_VALUE
+        for (c in QrPriority.timerList(cfg)) for (l in c.live) {
+            if (l.k != "timer" || l.id.isEmpty()) continue
+            val f = CardTimers.faceOf(app, l.id) ?: continue
+            if (!f.running || f.leftMs <= 0L) continue
+            val now = System.currentTimeMillis()
+            val m = Math.max(1L, ((f.leftMs + 999L) / 1000L + 59L) / 60L)
+            if (m < 2L) continue
+            at = Math.min(at, now + f.leftMs - (m - 1L) * 60_000L + FLIP_MARGIN_MS)
+        }
+        return at
+    }
+
+    /**
      * Круг равных ([QrPriority.build]): раз в минуту наверху другая карточка (или другой элемент карточки-группы), поэтому, пока у какого-нибудь виджета «по релевантности» в верхнем ярусе две очереди
      * и больше ([QrPriority.Result.cycleAt]), ставим обработчик на начало следующей минуты: экран включён — перерисовка ([refreshAll] перестроит стопку и снова
      * взведёт обработчик), выключен — ничего не рисуем и ждём следующей минуты (будильник ради круга не нужен: см. [QrPriority.Result.cycleAt]).
@@ -1655,10 +1676,11 @@ object QrWidgets {
             val res = plan(app, cfg)
             if (cfg.relevance) at = Math.min(at, res.cycleAt)
             at = Math.min(at, res.minuteAt) // пока идёт таймер, раз в минуту перерисовываем кольцо (при любом режиме)
+            if (cfg.timers) at = Math.min(at, nextTimerFlip(app, cfg)) // и точно в момент, когда у идущего таймера меняется число минут
         }
         main.removeCallbacksAndMessages(cycleToken)
         if (at == Long.MAX_VALUE) return
-        val delay = Math.max(1_000L, at - System.currentTimeMillis())
+        val delay = Math.max(250L, at - System.currentTimeMillis())
         main.postAtTime({
             try {
                 val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
