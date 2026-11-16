@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.5 (16.11) — время суток «Целый день» (`a`): привычка и карточка «Сегодня» «в своё время» в любой час суток, только в выбранные дни недели, пока не отмечены (habits_allDay_*, allDay_*).
 // Версия: 4.4 (15.11) — карточка «Таймеры» (timers_*): идущий таймер выше всего, в том числе выше «Как тренировка?» и без «релевантности»; два идущих сменяют друг друга по минутам; таймер «в своё время суток» выше календаря и привычек; минутная перерисовка только пока идёт таймер.
 // Версия: 4.3 (15.11) — единая модель круга равных и карточек-групп: будильники — группа «alm_0» (элементы со своими баллами, alarmRow_*, alarmGroup_*), лицо группы в Result.faces вместо habitIdx; в круг входит любая карточка верхнего яруса (cycle_ordinaryCards_*), равные баллы гистерезис не держит (cycle_equalScoreNotHeld_*).
 // Версия: 4.2 (14.11) — карточка «Привычки» (habits_*): привычки «в своё время» встают в круг каждая своей карточкой, остальные — нет; отмеченные исчезают по одной, все отмечены — карточки нет.
@@ -11,6 +12,7 @@ import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
 import com.app.lifetracker.QrWidgets.Live
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Calendar
@@ -852,6 +854,30 @@ class QrPriorityTest {
         val s = snap(cal(13)) // обед: ни у одной привычки сейчас её времени нет
         assertEquals(listOf("hab_0"), keys(run(cf, s)))
         assertEquals(listOf("water", "run"), QrPriority.habitList(cf, s).map { it.key })
+    }
+
+    @Test fun habits_allDay_dueAtAnyHour_untilDone() {
+        val hs = listOf(hab("water", setOf("a")), hab("run", setOf("m")))
+        val cf = cfgH(hs)
+        for (h in listOf(0, 3, 13, 16, 23)) assertTrue("час $h", QrPriority.habitDue(hs[0], snap(cal(h))))
+        assertFalse(QrPriority.habitDue(hs[1], snap(cal(13)))) // обычное время суток по-прежнему только в своё окно
+        assertEquals(listOf("water", "run"), QrPriority.habitList(cf, snap(cal(3))).map { it.key })
+        val done = listOf(hab("water", setOf("a"), done = 20261116), hs[1])
+        assertEquals(listOf("run"), QrPriority.habitList(cfgH(done), snap(cal(3))).map { it.key }) // отмеченная сегодня уходит
+        assertEquals(listOf("water", "run"), QrPriority.habitList(cfgH(done), snap(cal(3, day = 17))).map { it.key }) // на следующий день снова весь день
+    }
+
+    @Test fun habits_allDay_respectsDays() {
+        val h = hab("water", setOf("a"), days = setOf(2)) // только вторник; 16 ноября 2026 — понедельник
+        assertFalse(QrPriority.habitDue(h, snap(cal(12))))
+        assertTrue(QrPriority.habitDue(h, snap(cal(12, day = 17))))
+    }
+
+    @Test fun allDay_todayCard_risesAllDay_hiddenAfterFired() {
+        val cf = cfg(listOf(card("x"), card("today", times = setOf("a"), after = "hide")), relevance = true)
+        assertEquals("today", keys(run(cf, snap(cal(3)))).first())
+        assertEquals("today", keys(run(cf, snap(cal(14, 30)))).first())
+        assertEquals(listOf("x"), keys(run(cf, snap(cal(14, 30), hidden = setOf("today"))))) // сработала — скрыта до полуночи
     }
 
     @Test fun habits_doneDisappearOneByOne_allDoneNoCard() {

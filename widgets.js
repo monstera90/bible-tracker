@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 6.14 (16.11) — у привычек (экран «Привычки») и карточки «Сегодня» в времени суток появился чип «Целый день» (`a`): карточка весь день стоит выше, пока не отмечена (привычка — отметкой, «Сегодня» — нажатием/сканом; у «Сегодня» с «Целым днём» после срабатывания карточка скрывается до полуночи). «Целый день» и утро/обед/вечер взаимоисключающи. Откат: widgets.js 6.13.
    Версия: 6.13 (16.11) — в `tmr` у каждого таймера поле `hidden` (скрытый таймер без острова, `noIsland` в itemcards.js): скрытые таймеры входят в карточку «Таймеры», оболочка запускает их скрытыми; подсказка галочки «Отображать таймеры» обновлена. Откат: widgets.js 6.12.
    Версия: 6.12 (16.11) — в `tmr` у каждого таймера поле `color` (цвет таймера на вкладке QR-кодов): лицо в виджете и образец в форме рисуются этим цветом, а не зелёным. Откат: widgets.js 6.11.
    Версия: 7.0 (16.11) — вместо галочки «Показывать только мероприятия на сегодня и на завтра» — «Показывать мероприятия на [N] день/дня/дней вперёд» (`eventsSoon` — галочка, `eventsDays` — число 1…15 из выпадающей сетки 5×3, 1 — только сегодня; уходит в оболочку полем `eventsDays`; прежняя включённая галочка переносится как «на 2 дня»). Лента событий для карточек берётся на нужное число суток (`eventsFeedDays`), для события на семь суток вперёд и дальше шлётся картинка `<ключ>_d` с датой («25 ноября, Среда»; день недели один уже неоднозначен). Откат: widgets.js 6.11.
@@ -74,6 +75,7 @@ var DAY_MS = 86400000;
     { k: "d", label: "Обед", hint: "11–15" },
     { k: "e", label: "Вечер", hint: "17–23" }
   ];
+  var WINDOW_ALL = { k: "a", label: "Целый день", hint: "0–24" }; // «Целый день»: только у привычек и карточки «Сегодня»; в оболочке — QrPriority.WINDOWS[\"a\"]
   var AFTERS = [
     { k: "none", label: "Ничего не делать" },
     { k: "hide", label: "Скрывать карточку в стопке" },
@@ -131,7 +133,8 @@ var DAY_MS = 86400000;
       var out = {};
       if(o && typeof o === "object") Object.keys(o).forEach(function(cid){
         var v = o[cid]; if(!v || typeof v !== "object") return;
-        var t = (Array.isArray(v.times) ? v.times : []).filter(function(k){ return k === "m" || k === "d" || k === "e"; });
+        var t = (Array.isArray(v.times) ? v.times : []).filter(function(k){ return k === "m" || k === "d" || k === "e" || k === "a"; });
+        if(t.indexOf("a") >= 0) t = ["a"];
         var d = (Array.isArray(v.days) ? v.days : []).filter(function(n){ return n >= 1 && n <= 7; });
         if(t.length || d.length) out[cid] = { times: t, days: d };
       });
@@ -504,7 +507,7 @@ var DAY_MS = 86400000;
             tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, eventsDays: normDays(w.eventsDays, 1), alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], timers: !!w.timers, tmr: w.timers ? timerRows.map(function(f){ var tc = (w.timerCfg && w.timerCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, sec: f.seconds, live: f.live, times: tc.times || [], color: f.color, hidden: !!f.noIsland }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
-              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
+              return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: (f.type === "datenote" && c.times.indexOf("a") >= 0 && normAfter(c.after) === "none") ? "hide" : normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
             })
           };
         });
@@ -980,13 +983,13 @@ var DAY_MS = 86400000;
       var w = a.w, list = [];
       try{ list = cardsOf().widgetHabits().slice(0, MAX_HABITS); }catch(e){ list = []; }
       var html = '<h3 class="common-tab-title">Привычки</h3>';
-      html += '<div class="wg-hint">Время суток и дни недели — необязательно. Если сейчас время привычки (её время суток и день), она встаёт в круг карточек наравне с календарём и другими такими привычками. Привычка без времени в круг не попадает: её можно найти, листая карточку привычек нажатием у левого и правого края.</div>';
+      html += '<div class="wg-hint">Время суток и дни недели — необязательно. Если сейчас время привычки (её время суток и день), она встаёт в круг карточек наравне с календарём и другими такими привычками. «Целый день» — время привычки весь день (в выбранные дни недели): она стоит выше, пока не отмечена, а отмеченная убирается до полуночи. Привычка без времени в круг не попадает: её можно найти, листая карточку привычек нажатием у левого и правого края.</div>';
       if(!list.length) html += '<div class="wg-empty">Привычек пока нет.<br>Создайте их на вкладке QR-кодов: «+» → «Привычка».</div>';
       list.forEach(function(f){
         var hc = (w.habitCfg && w.habitCfg[f.id]) || { times: [], days: [] };
         html += '<div class="wg-habit" data-cid="' + esc(f.id) + '"><div class="wg-sec"><span class="wg-habit-dot" style="background:' + f.color + ';"></span>' + esc(f.title || "Привычка") + '</div>';
         html += '<div class="wg-chips wg-habit-times">';
-        WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (hc.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
+        WINDOWS.concat([WINDOW_ALL]).forEach(function(t){ html += '<div class="wg-chip' + (hc.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
         html += '</div><div class="wg-chips wg-habit-days">';
         DAYS.forEach(function(d, i){ html += '<div class="wg-chip' + (hc.days.indexOf(i + 1) >= 0 ? ' on' : '') + '" data-d="' + (i + 1) + '">' + d + '</div>'; });
         html += '</div></div>';
@@ -1018,11 +1021,12 @@ var DAY_MS = 86400000;
       if(!c) return '';
       var html = '<h3 class="common-tab-title">Карточка ' + (a.i + 1) + ' из ' + w.cards.length + '</h3>';
       if(f) html += '<div class="wg-preview">' + faceHtml(f, "") + '</div>';
+      var isToday = !!(f && f.type === "datenote");
       html += '<div class="wg-sec">Время суток</div><div class="wg-chips" id="wgTimes">';
-      WINDOWS.forEach(function(t){ html += '<div class="wg-chip' + (c.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
+      (isToday ? WINDOWS.concat([WINDOW_ALL]) : WINDOWS).forEach(function(t){ html += '<div class="wg-chip' + (c.times.indexOf(t.k) >= 0 ? ' on' : '') + '" data-k="' + t.k + '">' + t.label + '<small>' + t.hint + ' ч</small></div>'; });
       html += '</div><div class="wg-sec">Дни недели</div><div class="wg-chips" id="wgDays">';
       DAYS.forEach(function(d, i){ html += '<div class="wg-chip' + (c.days.indexOf(i + 1) >= 0 ? ' on' : '') + '" data-d="' + (i + 1) + '">' + d + '</div>'; });
-      html += '</div><div class="wg-hint">Необязательно. Если выбрать, карточка поднимается наверх в эти часы и дни — при включённом «Переключении по релевантности». Если не выбрано ничего, она ничем не выделяется.</div>';
+      html += '</div><div class="wg-hint">Необязательно. Если выбрать, карточка поднимается наверх в эти часы и дни — при включённом «Переключении по релевантности». Если не выбрано ничего, она ничем не выделяется.' + (isToday ? ' «Целый день» — карточка весь день стоит выше, пока не нажата: после нажатия (или скана) она скрывается до полуночи.' : '') + '</div>';
       html += '<div class="wg-sec">После срабатывания</div><select class="mdeditor-cleanup-input" id="wgAfter" aria-label="После срабатывания карточки">' +
         AFTERS.map(function(o){ return '<option value="' + o.k + '"' + (normAfter(c.after) === o.k ? ' selected' : '') + '>' + o.label + '</option>'; }).join('') + '</select>' +
         '<div class="wg-hint">Что делать с карточкой в стопке, когда её действие сработало — по нажатию в виджете, в приложении или по скану кода. Скрытая карточка возвращается на следующий день; если скрыты все, виджет пишет «На сегодня больше ничего».</div>';
@@ -1243,11 +1247,24 @@ var DAY_MS = 86400000;
         a.draft = false; changed(); homeUi();
       });
     }
+    // чип времени суток: «Целый день» (a) исключает утро/обед/вечер и наоборот; подсветку чипов контейнера пересчитываем по массиву
+    function toggleTime(arr, k, box){
+      var i = arr.indexOf(k);
+      if(i >= 0) arr.splice(i, 1);
+      else {
+        if(k === "a") arr.length = 0;
+        else { var j = arr.indexOf("a"); if(j >= 0) arr.splice(j, 1); }
+        arr.push(k); arr.sort();
+      }
+      Array.prototype.forEach.call(box.children, function(ch){
+        if(arr.indexOf(ch.getAttribute("data-k")) >= 0) ch.classList.add("on"); else ch.classList.remove("on");
+      });
+    }
     function bindCard(a){
       var c = a.w.cards[a.i]; if(!c) return;
       function toggle(arr, v){ var i = arr.indexOf(v); if(i >= 0) arr.splice(i, 1); else arr.push(v); arr.sort(); }
       Array.prototype.forEach.call($("wgTimes").children, function(ch){
-        ch.addEventListener("click", function(){ toggle(c.times, ch.getAttribute("data-k")); ch.classList.toggle("on"); changed(); });
+        ch.addEventListener("click", function(){ toggleTime(c.times, ch.getAttribute("data-k"), $("wgTimes")); changed(); });
       });
       Array.prototype.forEach.call($("wgDays").children, function(ch){
         ch.addEventListener("click", function(){ toggle(c.days, parseInt(ch.getAttribute("data-d"), 10)); ch.classList.toggle("on"); changed(); });
@@ -1265,7 +1282,7 @@ var DAY_MS = 86400000;
       Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-habit"), function(blk){
         var cid = blk.getAttribute("data-cid");
         Array.prototype.forEach.call(blk.querySelectorAll(".wg-habit-times .wg-chip"), function(ch){
-          ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggle(hc.times, ch.getAttribute("data-k")); ch.classList.toggle("on"); trimHabitCfg(w, cid); changed(); });
+          ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggleTime(hc.times, ch.getAttribute("data-k"), blk.querySelector(".wg-habit-times")); trimHabitCfg(w, cid); changed(); });
         });
         Array.prototype.forEach.call(blk.querySelectorAll(".wg-habit-days .wg-chip"), function(ch){
           ch.addEventListener("click", function(){ var hc = habitCfgOf(w, cid); toggle(hc.days, parseInt(ch.getAttribute("data-d"), 10)); ch.classList.toggle("on"); trimHabitCfg(w, cid); changed(); });
