@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 15.2 (16.11) — скрытые таймеры в карточке «Таймеры» виджета: `Card.hid` (поле `hidden` в `tmr`), нажатие на не запущенный скрытый таймер запускает его скрытым (`CardTimers.start(..., hidden)`). Откат: QrWidgets.kt 15.1.
 // Версия: 15.1 (16.11) — число минут в кольце таймера («Таймеры») меняется ровно в момент, когда остаток доходит до круглой минуты (23 → 22 в 22:00), а не по границе календарной минуты: `nextTimerFlip` в `armCycle`. Откат: QrWidgets.kt 15.0.
 // Версия: 15.0 (16.11) — принцип «после действия на карточке не бросать стопку в начало»: двойное нажатие на привычку, отметка задачи и заведение/выключение будильника оставляют виджет на той же карточке (привычки, задачи, будильники), если она в стопке осталась — на ней ещё есть что делать ([pinSlot], [slotOf], [slotPosition]; [update] при пересоздании стопки ставит её на закреплённую карточку, а не на первую); карточка пропала совсем (отмечена последняя привычка) — как раньше, первая. Сброс наверх после такого действия ([refreshAll] с `rebuildCfgs`) касается только затронутого виджета: стопки остальных не двигаются. Галочка «Показывать мероприятия на N дней вперёд» (`eventsSoon` + число `eventsDays`, 1…15; раньше — «только на сегодня и на завтра»): окно карточки события — N суток от начала сегодняшнего дня; картинка карточки на дату через семь суток и дальше — `<ключ>_d.png` («25 ноября, Среда»), [dynBitmap]. Откат: QrWidgets.kt 14.14.
 // Версия: 14.16 (16.11) — `startTimer`: нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу в оболочке, без окна с карточкой на весь экран; запуск ставится в очередь `timerEv` для журнала событий (`takeTimerEvents` / `ackTimerEvents`, мост ≥ 39). Откат: QrWidgets.kt 14.15.
@@ -232,7 +233,7 @@ object QrWidgets {
     /** Настройки будильника карточки (от страницы): нажатие в виджете заводит/выключает его без окна и страницы. */
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
-    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "", val sec: Int = 0)
+    class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "", val sec: Int = 0, val hid: Boolean = false)
     class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
@@ -386,7 +387,7 @@ object QrWidgets {
                         val times = HashSet<String>()
                         val ta = d.optJSONArray("times")
                         if (ta != null) for (x in 0 until ta.length()) ta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) times.add(it) }
-                        timerList.add(Card(key, d.optString("code", ""), d.optString("title", ""), live, times, emptySet(), "none", parseColor(d.optString("color", ""), QrTimerFace.COLOR), "timer", 0L, sec = sec)) // цвет лица — цвет таймера на вкладке QR-кодов
+                        timerList.add(Card(key, d.optString("code", ""), d.optString("title", ""), live, times, emptySet(), "none", parseColor(d.optString("color", ""), QrTimerFace.COLOR), "timer", 0L, sec = sec, hid = d.optBoolean("hidden", false))) // цвет лица — цвет таймера на вкладке QR-кодов
                         if (timerList.size >= QrPriority.TIMER_NAV_MAX) break
                     }
                 }
@@ -1060,7 +1061,7 @@ object QrWidgets {
             .firstOrNull { it.key == cardKey && it.dyn == "timer" && it.sec > 0 } ?: return false
         val id = card.live.firstOrNull { it.k == "timer" && it.id.isNotEmpty() }?.id ?: return false
         holdTimerRow(app, cardKey)
-        if (!CardTimers.start(app, id, card.title, card.sec.toLong())) return false
+        if (!CardTimers.start(app, id, card.title, card.sec.toLong(), card.hid)) return false // скрытый таймер идёт без острова и уведомления, как скрытый таймер вкладки QR-кодов
         queueTimerEvent(app, JSONObject().put("id", id).put("title", card.title).put("sec", card.sec).put("ts", System.currentTimeMillis()))
         return true
     }
