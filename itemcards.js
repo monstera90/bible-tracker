@@ -655,7 +655,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // от неё считается всё внутри карточки (шрифты, пиктограмма, кнопки: переменная --item-card-w).
   var BOOKS_BASE_PX = 110;
   var CARD_ASPECT = 1.02; // высота тела карточки = ширина × CARD_ASPECT (как `height` у .item-card в components.css; вместе с выступом 0,04 — пропорция виджета, см. FACE_BODY в widgets.js)
-  var GRID_GAP_PX = 10; // столбцовый зазор сетки (как gap в .item-cards-grid, components.css)
+  var GRID_GAP_PX = 2; // столбцовый зазор сетки (как gap в .item-cards-grid, components.css)
   // Подгонка текста карточки под её ширину: слово названия не рвётся («Напоминал/ка»), а ужимает шрифт (до 0,075 ширины карточки);
   // цифры времени ужимаются так же, чтобы не вылезать за карточку. Нет места даже в наименьшем шрифте — название рвётся по буквам.
   function fitCardText(scope){
