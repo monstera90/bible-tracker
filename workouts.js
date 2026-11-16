@@ -575,6 +575,12 @@
       ".wk-tip-ico svg{display:block;width:18px;height:18px;}" +
       ".wk-tip-text{margin-top:6px;line-height:1.35;}" +
       ".wk-tip-meta{font-size:.8em;}" +
+      ".wk-card.wk-wg{background:#8000ff;color:#fff;border:none;border-radius:22px;padding:16px 12px 14px;margin:6px 0 16px;text-align:center;box-shadow:0 5px 0 #6a00d6;}" +
+      ".wk-wg-ico{width:56px;height:56px;margin:0 auto;color:#fff;}" +
+      ".wk-wg-ico svg{display:block;width:56px;height:56px;}" +
+      ".wk-wg-top{margin-top:6px;font-size:1.2em;line-height:1.2;}" +
+      ".wk-wg-title{margin-top:4px;font-family:\"Palatino Linotype\",Georgia,serif;font-weight:bold;font-size:1.4em;line-height:1.15;}" +
+      ".wk-wg-big{margin-top:8px;font-size:2em;line-height:1.1;font-variant-numeric:tabular-nums;}" +
       ".wk-tip-cat{margin:14px 0 2px;font-weight:bold;color:var(--wood-dark);}" +
       ".wk-tip-row{padding:8px 2px;border-top:1px solid var(--groove-shadow);cursor:pointer;line-height:1.35;}" +
       ".wk-tip-cat + .wk-tip-row{border-top:none;}" +
@@ -711,13 +717,20 @@
   function achCardHtml(n){
     var tab = n.tab === "awards" ? "awards" : (n.tab === "records" ? "records" : "goals");
     var isAward = n.kind === "award", isLoad = n.kind === "load", isDone = String(n.k).indexOf("gd:") === 0;
-    var ico = (isAward || isDone) ? KINDS[kindKey(n.tk)].svg : CUP_ICON_SVG;
-    var head = isLoad ? "Рекорд" : achHead(n);
-    var body = isAward ? awardTitleOf(n) : (isLoad ? loadValueOf(n) : (isDone ? goalTitleOf(n) : n.text));
-    var meta = (isAward || isLoad || isDone) ? achDateText(n.ts) : (achDayLabel(n.ts) + ' · Нажмите, чтобы открыть');
-    return '<div class="wk-card wk-tip wk-ach" data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"><div class="wk-live-head"><span class="wk-tip-ico">' + ico + '</span><span>' + esc(head) + '</span></div>' +
-      '<div class="wk-tip-text">' + esc(body) + '</div>' +
-      '<div class="wk-note wk-tip-meta">' + esc(meta) + '</div></div>';
+    var attrs = ' data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"';
+    if(isAward || isLoad || isDone){
+      // стиль виджета: большой значок, подпись, название (serif, жирное), дата крупно
+      var ico = isLoad ? CUP_ICON_SVG : KINDS[kindKey(n.tk)].svg;
+      var head = isLoad ? "Рекорд" : achHead(n);
+      var title = isAward ? awardTitleOf(n) : (isLoad ? loadValueOf(n) : goalTitleOf(n));
+      return '<div class="wk-card wk-tip wk-ach wk-wg"' + attrs + '><div class="wk-wg-ico">' + ico + '</div>' +
+        '<div class="wk-wg-top">' + esc(head) + '</div>' +
+        '<div class="wk-wg-title">' + esc(title) + '</div>' +
+        '<div class="wk-wg-big">' + esc(achDateText(n.ts)) + '</div></div>';
+    }
+    return '<div class="wk-card wk-tip wk-ach"' + attrs + '><div class="wk-live-head"><span class="wk-tip-ico">' + CUP_ICON_SVG + '</span><span>' + esc(achHead(n)) + '</span></div>' +
+      '<div class="wk-tip-text">' + esc(n.text) + '</div>' +
+      '<div class="wk-note wk-tip-meta">' + esc(achDayLabel(n.ts)) + ' · Нажмите, чтобы открыть</div></div>';
   }
 
   // нагрузка, совет дня и достижения недели — всё под карточкой месяца, перерисовывается отдельно от неё
