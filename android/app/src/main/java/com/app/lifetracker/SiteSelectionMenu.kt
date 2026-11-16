@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (16.11) — табличка «Переслать в задачи» больше не закрывается сама при касании: пока она на экране, снятие выделения сайта (сайт теряет фокус от нажатия на табличку), сдвиг и прокрутка круг/табличку не убирают; сама табличка не берёт фокус. Раньше табличка пропадала до клика и текст в задачу не уходил.
 // Версия: 1.1 (16.11) — «Переслать в задачи» открывает табличку выбора списка задач (как в заметках), а не окно быстрой задачи; без `window.LTSiteTask` страницы (старая веб-часть) — прежнее окно быстрой задачи.
 // Версия: 1.0 (11.11)
 
@@ -147,6 +148,7 @@ return ok?1:0;
     // ---------------------------------------------------------------- события WebView
 
     override fun onSelectionRect(view: WebView, rect: Rect) {
+        if (pickerBox != null) return // табличка выбора списка открыта: выделение уже взято в неё
         removeViews()
         target = view
         anchor = Rect(rect)
@@ -154,6 +156,8 @@ return ok?1:0;
     }
 
     override fun onSelectionEnd(view: WebView) {
+        // нажатие на табличку забирает фокус у сайта, и тот снимает выделение: табличку из-за этого не закрываем
+        if (pickerBox != null) return
         if (view !== target) return
         blankShown = false
         hide()
@@ -172,6 +176,7 @@ return ok?1:0;
     }
 
     override fun onScroll(view: WebView) {
+        if (pickerBox != null) return
         if (view !== target) return
         if (circle != null || listBox != null) {
             removeViews()
@@ -475,6 +480,9 @@ return ok?1:0;
         web.isHorizontalScrollBarEnabled = false
         web.isLongClickable = false
         web.setOnLongClickListener { true }
+        // табличка не берёт фокус: иначе сайт под ней теряет выделение
+        web.isFocusable = false
+        web.isFocusableInTouchMode = false
         web.addJavascriptInterface(PickBridge(text), "LTPick")
         web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
 
