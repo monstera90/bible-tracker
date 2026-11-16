@@ -175,6 +175,8 @@
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4h8v5a4 4 0 0 1-8 0z"></path><path d="M8 6H5v1.5A3 3 0 0 0 8 10.5"></path><path d="M16 6h3v1.5a3 3 0 0 1-3 3"></path><path d="M12 13v5"></path><path d="M8.5 19.5h7"></path></svg>';
   var MEDAL_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.5"></circle><path d="M8.7 13.6L7 21l5-2.6 5 2.6-1.7-7.4"></path></svg>';
+  var ROUTE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="19" r="2"></circle><circle cx="18" cy="5" r="2"></circle><path d="M8 19h8.5a3.5 3.5 0 0 0 0-7h-5a3.5 3.5 0 0 1 0-7H16"></path></svg>'; // карточка месяца
+  var PULSE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>'; // карточка нагрузки
   var PLUS_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var LIST_ICON_SVG =
@@ -348,11 +350,14 @@
     return s;
   }
   function loadValText(){ var n = Math.round(weekLoad()); return n + " " + pointsWord(n); }
+  function loadNum(){ return String(Math.round(weekLoad())); }
+  function loadWord(){ return pointsWord(Math.round(weekLoad())); }
   function updateLoadBtn(){
     var b = document.getElementById("wkLoadVal");
     if(!b) return;
-    var t = loadValText();
+    var t = loadNum(), w = document.getElementById("wkLoadSub");
     if(b.textContent !== t) b.textContent = t;
+    if(w && w.textContent !== loadWord()) w.textContent = loadWord();
     lastLoadCheck = Date.now();
   }
 
@@ -584,6 +589,17 @@
       ".wk-wg-top{position:absolute;left:5%;right:5%;top:calc(var(--s) * 0.358);font-size:calc(var(--s) * 0.1);line-height:1.2;white-space:nowrap;}" +
       ".wk-wg-title{position:absolute;left:7%;right:7%;top:calc(var(--s) * 0.4825);font-family:\"Palatino Linotype\",Georgia,serif;font-weight:bold;font-size:calc(var(--s) * 0.108);line-height:1.1;overflow:hidden;}" +
       ".wk-wg-big{position:absolute;left:4%;right:4%;top:calc(var(--s) * 0.73);font-size:calc(var(--s) * 0.145);line-height:1;font-weight:bold;white-space:nowrap;font-variant-numeric:tabular-nums;}" +
+      ".wk-wg-val{position:absolute;left:4%;right:4%;top:calc(var(--s) * 0.52);font-size:calc(var(--s) * 0.2);line-height:1;font-weight:bold;white-space:nowrap;font-variant-numeric:tabular-nums;}" +
+      ".wk-wg-sub{position:absolute;left:5%;right:5%;top:calc(var(--s) * 0.77);font-family:\"Palatino Linotype\",Georgia,serif;font-weight:bold;font-size:calc(var(--s) * 0.108);line-height:1.1;white-space:nowrap;}" +
+      ".wk-wg-sub svg{width:.9em;height:.9em;vertical-align:-.1em;}" +
+      ".wk-card.wk-load-info{grid-column:1 / -1;margin:0 0 12px;}" +
+      ".wk-load-info .wk-note{color:var(--ink);}" +
+      ".wk-card.wk-tipw{background:#8000ff;color:#fff;border:none;text-align:center;box-shadow:0 4px 0 #6a00d6;margin-bottom:16px;}" +
+      ".wk-tipw .wk-live-head{justify-content:center;font-family:\"Palatino Linotype\",Georgia,serif;font-size:1.15em;}" +
+      ".wk-tipw .wk-tip-ico{color:#fff;width:24px;height:24px;flex:0 0 24px;}" +
+      ".wk-tipw .wk-tip-ico svg{width:24px;height:24px;}" +
+      ".wk-tipw .wk-note{color:rgba(255,255,255,.8);}" +
+      ".wk-flow > .wk-card.wk-tipw:last-child{margin-bottom:16px;}" +
       ".wk-wg.wk-wg2 .wk-wg-ico{top:calc(var(--s) * 0.107);}" +
       ".wk-wg.wk-wg2 .wk-wg-top{top:calc(var(--s) * 0.342);}" +
       ".wk-wg.wk-wg2 .wk-wg-title{top:calc(var(--s) * 0.4485);}" +
@@ -669,17 +685,22 @@
   function redraw(){ if(listScreen) renderList(); else render(); }
 
   // ---------- карточки главного экрана ----------
+  // карточки месяца и нагрузки — в стиле виджета (две рядом): значок, подпись, крупное значение, строка под ним
   function monthCardHtml(){
     var cm = curMonth(), a = cm.getTime(), b = addMonths(cm, 1).getTime();
     var recs = allRecords().filter(function(r){ return r.start >= a && r.start < b; });
-    return '<div class="wk-card wk-total wk-month" id="wkMonthCard"><div class="wk-month-name">' + esc(MONTHS[cm.getMonth()]) + '</div>' +
-      '<div class="wk-km">' + esc(fmtKm(sumM(recs))) + '<span class="wk-up">• ' + fmtUpHtml(sumUp(recs)) + '</span></div></div>';
+    return '<div class="wk-card wk-wg wk-month" id="wkMonthCard"><div class="wk-wg-ico">' + ROUTE_ICON_SVG + '</div>' +
+      '<div class="wk-wg-top">' + esc(MONTHS[cm.getMonth()]) + '</div>' +
+      '<div class="wk-wg-val">' + esc(fmtKm(sumM(recs))) + '</div>' +
+      '<div class="wk-wg-sub">' + fmtUpHtml(sumUp(recs)) + '</div></div>';
   }
 
   function loadCardHtml(){
-    return '<div class="wk-card wk-load-card" id="wkLoadCard"><div class="wk-load-row"><span class="wk-live-head">Нагрузка за 7 дней</span>' +
-      '<span class="wk-load-val" id="wkLoadVal">' + esc(loadValText()) + '</span></div>' +
-      (infoOpen ? '<div class="wk-load-info">' + loadInfoHtml() + '</div>' : "") + '</div>';
+    return '<div class="wk-card wk-wg wk-load-card" id="wkLoadCard"><div class="wk-wg-ico">' + PULSE_ICON_SVG + '</div>' +
+      '<div class="wk-wg-top">Нагрузка</div>' +
+      '<div class="wk-wg-val" id="wkLoadVal">' + esc(loadNum()) + '</div>' +
+      '<div class="wk-wg-sub" id="wkLoadSub">' + esc(loadWord()) + '</div></div>' +
+      (infoOpen ? '<div class="wk-card wk-load-info">' + loadInfoHtml() + '</div>' : "");
   }
 
   // «Сегодня» / «Вчера» / «12.11 · чт»
@@ -742,7 +763,7 @@
 
   // нагрузка, совет дня и достижения недели — всё под карточкой месяца, перерисовывается отдельно от неё
   function flowHtml(){
-    var html = loadCardHtml();
+    var html = monthCardHtml() + loadCardHtml();
     var tip = tipHidden ? null : dayTip();
     if(tip) html += tipCardHtml(tip);
     recentNotices().forEach(function(n){ html += achCardHtml(n); });
@@ -773,6 +794,9 @@
       card.classList.remove("wk-wg2");
       if(top) shrink(top, S * 0.075, wide);
       if(big) shrink(big, S * 0.08, wide);
+      var val = card.querySelector(".wk-wg-val"), sub = card.querySelector(".wk-wg-sub");
+      if(val) shrink(val, S * 0.1, wide);
+      if(sub) shrink(sub, S * 0.075, wide);
       if(title){
         title.style.fontSize = "";
         var fs = parseFloat(window.getComputedStyle(title).fontSize) || 0;
@@ -788,6 +812,8 @@
 
   function bindFlow(){
     sizeWg();
+    var mc = document.getElementById("wkMonthCard");
+    if(mc) mc.addEventListener("click", openList);
     var lc = document.getElementById("wkLoadCard");
     if(lc) lc.addEventListener("click", function(){ infoOpen = !infoOpen; repaintFlow(); });
     var tc = document.getElementById("wkTipCard");
@@ -807,7 +833,7 @@
     ensureStyle();
     evalProgress();
     var html = '<div class="wk-root" id="' + rootId + '">' +
-      '<div class="wk-scroll">' + monthCardHtml() + '<div class="wk-flow" id="wkFlow">' + flowHtml() + '</div></div>' +
+      '<div class="wk-scroll"><div class="wk-flow" id="wkFlow">' + flowHtml() + '</div></div>' +
       '<div id="wkLive"></div>' +
       '</div>' + fabRowHtml();
     c.innerHTML = html;
@@ -916,8 +942,6 @@
   function bind(c){
     var rec = document.getElementById("wkRecBtn");
     if(rec) rec.addEventListener("click", onRecordTap);
-    var mc = document.getElementById("wkMonthCard");
-    if(mc) mc.addEventListener("click", openList);
     var lsb = document.getElementById("wkListBtn");
     if(lsb) lsb.addEventListener("click", openList);
     var ib = document.getElementById("wkInfoBtn");
@@ -2298,7 +2322,7 @@
   }
 
   function tipCardHtml(x){
-    return '<div class="wk-card wk-tip" id="wkTipCard"><div class="wk-live-head"><span class="wk-tip-ico">' + TIP_ICON_SVG + '</span><span>Совет дня</span></div>' +
+    return '<div class="wk-card wk-tip wk-tipw" id="wkTipCard"><div class="wk-live-head"><span class="wk-tip-ico">' + TIP_ICON_SVG + '</span><span>Совет дня</span></div>' +
       '<div class="wk-tip-text">' + esc(x.text).replace(/\n/g, "<br>") + '</div>' +
       '<div class="wk-note wk-tip-meta">' + esc(x.cat || "Другое") + '</div></div>';
   }
