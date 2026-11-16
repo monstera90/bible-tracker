@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.14 (16.11) — таймер в карточке «Таймеры»: нажатие на идущий или приостановленный таймер останавливает его (`timerstop`), а не «ничего не меняет». Откат: QrWidgetService.kt 2.13.
 // Версия: 2.13 (15.11) — карточка «Таймеры» (dyn = "timer", слот «tmr_0») — ещё одна карточка-группа: края листают таймеры (`habnav` + ключ карточки), нажатие в центре запускает показанный таймер (код его карточки, как скан), у идущего — ничего не делает.
 // Версия: 2.12 (15.11) — карточки-группы («Привычки» «hab_0», «Будильники» «alm_0») обслуживаются одним кодом: лицо и нажатие в центре берутся из показанного элемента ([QrWidgets.GroupView]), края листают элементы группы (`habnav` + ключ карточки), внизу точки по всем элементам.
 // Версия: 2.11 (14.11) — карточка «Привычки» (dyn = "habit", слоты «hab_N»): края листают привычки (`habnav`), нажатие в центре — как у обычной привычки (одно открывает карту дней, двойное отмечает), внизу точки.
@@ -112,8 +113,8 @@ class QrWidgetService : RemoteViewsService() {
                         // привычка: ScanActivity ждёт второго нажатия (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
                         Intent().putExtra("key", item.key).putExtra("habit", true).putExtra("code", item.code)
                     } else if (c.dyn == "timer") {
-                        // таймер: не запущен — запуск кодом его карточки (то же, что скан); идёт или на паузе — нажатие ничего не меняет (пустое «листание» evnav = 0), чтобы не перезапустить отсчёт случайно
-                        if (QrWidgets.timerStateOf(ctx, item) != null) Intent().putExtra("evnav", 0).putExtra("wid", widgetId) else Intent().putExtra("code", item.code)
+                        // таймер: не запущен — запуск кодом его карточки (то же, что скан); идёт или на паузе — повторное нажатие останавливает его (ScanActivity, `timerstop`)
+                        if (QrWidgets.timerStateOf(ctx, item) != null) Intent().putExtra("timerstop", item.key).putExtra("wid", widgetId) else Intent().putExtra("code", item.code)
                     } else {
                         // будильник: завести/выключить показанный будильник (ScanActivity)
                         if (item.alarmSpec != null) Intent().putExtra("alarm", item.key) else Intent().putExtra("code", "alarmmark:" + item.key)

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 51.0 (16.11) — у карточки-таймера (сетка вкладки 9 и показ по скану) нет кнопки «Стоп»: повторное нажатие на идущий или приостановленный таймер останавливает его (`toggleTimerForCard`), как в виджете; не запущен — нажатие запускает. Откат: itemcards.js 50.0.
    Версия: 50.0 (16.11) — лицо таймера (сетка вкладки 9 и показ по скану) как у карточки «Таймеры» в виджете: название, кольцо и минуты (`timerFaceHtml`, `timerFaceState`, `timerNumText`); цифры и дуга меняются раз в минуту (и при пуске/паузе/стопе), посекундно таймер идёт в острове; цвет лица — цвет таймера (из карточки или из кода). Откат: itemcards.js 49.1.
    Версия: 49.1 (15.11) — «Конструктор виджетов»: для галочки «Отображать таймеры» все обычные таймеры пользователя отдаёт `widgetTimers` (скрытые таймеры не входят), у лица таймера появилось поле `seconds` (заданное время, с). Откат: itemcards.js 49.0.
    Версия: 49.0 (15.11) — структурная правка: показ QR-кода (оборот карточки) убран с двойного тапа и отдан новой кнопке `.item-card-qr-btn` среди кнопок при удержании (кроме «Напоминания», у него кода нет); тап по карточке теперь срабатывает сразу, без ожидания второго тапа. Откат: itemcards.js 47.4.
@@ -1006,10 +1007,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   function cardFrontHtml(c){
     var icon = iconSvg(c.icon);
     if(c.type === "timer"){ // лицо как у карточки «Таймеры» в виджете (QrTimerFace.kt): название, кольцо и минуты; цифры и дуга обновляются раз в минуту
-      return '<div class="item-card-title" style="display:none;"></div>' + timerFaceHtml(c) +
-        '<div class="item-card-timer-btns">' +
-          '<button type="button" class="item-card-stop-btn" title="Остановить таймер">Стоп</button>' +
-        '</div>';
+      return '<div class="item-card-title" style="display:none;"></div>' + timerFaceHtml(c);
     }
     if(c.type === "alarm"){ // лицо как у карточки «Будильники» в виджете; тап заводит и выключает (onCardTap); название в svg, скрытый .item-card-title нужен коду, что подставляет название
       return '<div class="item-card-title" style="display:none;"></div>' + alarmFaceHtml(c);
@@ -1531,7 +1529,6 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       }
       if(flippedId === id){ flipCard(id, false); return; } // тап по QR/обороту — назад
       if(flippedId) unflipAny();
-      if(e.target.closest(".item-card-stop-btn")){ stopTimerForCard(c); return; } // «Стоп»: отмена таймера
       if(revealedIds[id]){ hideRevealed(); return; }
       if(c.type === "remind"){ onCardTap(c); return; } // у «Напоминания» нет QR-кода: оборота нет, тап сразу открывает форму
       onCardTap(c); // двойного тапа больше нет: тап сразу запускает действие, QR — кнопкой при удержании
@@ -1563,7 +1560,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     notifyWidgetFired(c);
     if(isSingletonCard(c)){ runSingletonCard(c); return; }
-    if(c.type === "timer" || c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
+    if(c.type === "timer"){ toggleTimerForCard(c); return; } // идёт или на паузе — повторное нажатие останавливает, иначе запускает (как в виджете)
+    if(c.type === "alarm" || c.type === "combo"){ startTimerForCard(c); return; }
     if(c.type === "remind"){ showCardOverlay(c); return; } // «Напоминание» без QR-кода: просто крупный показ карточки, в журнал не пишется
     showScanned(c);
   }
@@ -2318,6 +2316,13 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     try{ getTimerApi().start(runId(c), c.title || "", c.seconds, !!c.noIsland); }catch(e){}
     try{ if(window.EventLog) window.EventLog.timerStarted(runId(c), c.title || "", c.seconds); }catch(e){}
     syncTimersView();
+  }
+  // нажатие на карточку-таймер: идёт или на паузе — отмена, иначе пуск
+  function toggleTimerForCard(c){
+    if(!c || c.type !== "timer") return;
+    refreshTimers();
+    if(timerInfo(runId(c))) stopTimerForCard(c);
+    else startTimerForCard(c);
   }
   // «Стоп»: таймер отменяется целиком (пауза не нужна), цифры возвращаются к заданному времени; закончившийся таймер — гасит вибрацию
   function stopTimerForCard(c){
@@ -3210,7 +3215,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     card.querySelector(".item-card-title").textContent = cardTitle(c);
     card.addEventListener("click", function(e){
       e.stopPropagation();
-      if((c.type === "timer" || c.type === "alarm") && e.target.closest(".item-card-stop-btn")) stopTimerForCard(c); // «Стоп» на показе («Выкл.» у будильника)
+      if(c.type === "timer") toggleTimerForCard(c); // нажатие на показе: идёт — останавливает, не идёт — запускает
     });
     o.appendChild(card);
     fitCardText(card);

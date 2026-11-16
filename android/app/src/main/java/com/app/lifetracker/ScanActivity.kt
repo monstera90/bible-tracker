@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.5 (16.11) — `timerstop` (ключ карточки): повторное нажатие на идущий таймер в карточке «Таймеры» виджета останавливает его ([QrWidgets.stopTimer]), окно не нужно. Откат: ScanActivity.kt 13.4.
 // Версия: 13.4 (15.11) — любое нажатие на карточку виджета (`ACTION_SCAN_CODE` с верным `tok`) запоминается ([QrWidgets.noteTouch]): слайд-шоу виджета не листает стопку 30 с после него. Откат: ScanActivity.kt 13.3.
 // Версия: 13.3 (14.11) — `habnav` (-1 / 1, `wid`, `slot`): края карточки «Привычки» в виджете листают привычки ([QrWidgets.habitNav]); одно и двойное нажатие в центре — как у обычной привычки.
 // Версия: 13.2 (14.11) — `alnav` (-1 / 1, `wid`): края карточки «Будильники» в виджете листают будильники ([QrWidgets.alarmNav]).
@@ -123,6 +124,22 @@ class ScanActivity : ComponentActivity() {
                 if (QrWidgets.toggleAlarm(applicationContext, key)) QrWidgets.onCardFired(applicationContext, key) // нажатие = действие сработало («после срабатывания»)
             } catch (e: Exception) {
                 // не получилось — карточка останется как была, можно нажать ещё раз
+            }
+        }
+        return true
+    }
+
+    /**
+     * Повторное нажатие на карточку-таймер в виджете (extra `timerstop` = ключ карточки, тот же `tok`): идущий или приостановленный таймер останавливается сразу
+     * ([QrWidgets.stopTimer]), окно и страница не нужны. true — это был такой запрос.
+     */
+    private fun handleTimerStop(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("timerstop")) return false
+        if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
+            try {
+                QrWidgets.stopTimer(applicationContext, i.getStringExtra("timerstop") ?: "")
+            } catch (e: Exception) {
+                // не получилось — таймер остался как был, можно нажать ещё раз
             }
         }
         return true
@@ -314,7 +331,7 @@ class ScanActivity : ComponentActivity() {
         noteWidgetTouch(intent)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
-        if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleEvent(intent)) {
+        if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleTimerStop(intent) || handleEvent(intent)) {
             finishAndRemoveTask()
             overridePendingTransition(0, 0)
             return
@@ -388,7 +405,7 @@ class ScanActivity : ComponentActivity() {
         super.onNewIntent(intent)
         noteWidgetTouch(intent)
         if (handleRpe(intent) || handleMood(intent)) return // окно сканера уже открыто и остаётся как было
-        if (handleAlarm(intent)) {
+        if (handleAlarm(intent) || handleTimerStop(intent)) {
             if (!::webView.isInitialized) { // окна со страницей нет (ждали второго нажатия) — просто закрываемся
                 finishAndRemoveTask()
                 overridePendingTransition(0, 0)

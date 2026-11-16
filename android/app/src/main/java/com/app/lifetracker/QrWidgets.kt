@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 15.0 (16.11) — принцип «после действия на карточке не бросать стопку в начало»: двойное нажатие на привычку, отметка задачи и заведение/выключение будильника оставляют виджет на той же карточке (привычки, задачи, будильники), если она в стопке осталась — на ней ещё есть что делать ([pinSlot], [slotOf], [slotPosition]; [update] при пересоздании стопки ставит её на закреплённую карточку, а не на первую); карточка пропала совсем (отмечена последняя привычка) — как раньше, первая. Сброс наверх после такого действия ([refreshAll] с `rebuildCfgs`) касается только затронутого виджета: стопки остальных не двигаются. Галочка «Показывать мероприятия на N дней вперёд» (`eventsSoon` + число `eventsDays`, 1…15; раньше — «только на сегодня и на завтра»): окно карточки события — N суток от начала сегодняшнего дня; картинка карточки на дату через семь суток и дальше — `<ключ>_d.png` («25 ноября, Среда»), [dynBitmap]. Откат: QrWidgets.kt 14.14.
+// Версия: 14.15 (16.11) — `stopTimer`: повторное нажатие на идущий (или приостановленный) таймер в карточке «Таймеры» виджета останавливает его (раньше ничего не делало). Откат: QrWidgets.kt 14.14.
 // Версия: 14.14 (15.11) — галочка «Отображать таймеры» (`timers`, список `tmr`): карточка-группа «Таймеры» ([QrPriority.TIMER_SLOT_KEY]) со всеми таймерами карточек QR-кодов, лицо рисует [QrTimerFace] (зелёная карточка, кольцо и минуты), кольцо перерисовывается раз в минуту, пока идёт таймер ([QrPriority.Result.minuteAt], [armCycle]). Идущий таймер — выше всего, в том числе выше «Как тренировка?» и календаря, при любом режиме ([QrPriority.SCORE_TIMER_ACTIVE]); у таймера может быть своё время суток (`times` в `tmr`) — тогда в это время он поднимается выше календаря и привычек ([QrPriority.SCORE_TIMER_DUE]). Края листают таймеры, нажатие в центре запускает показанный (идущий — не трогает). Откат: QrWidgets.kt 14.13.
 // Версия: 14.13 (15.11) — слайд-шоу не листает стопку, пока пользователь её трогал меньше [TOUCH_PAUSE_MS] (30 с) назад: смахивание ([onPossibleSwipe]) и любое нажатие на карточку виджета (ScanActivity → [noteTouch]) запоминаются; пришёл срок [rotate] — переносится на 30 с после последнего касания. Откат: QrWidgets.kt 14.12.
 // Версия: 14.12 (15.11) — единая модель круга равных и карточек-групп (QrPriority 4.9): «Привычки» и «Будильники» — одна карточка-группа каждая (ключи «hab_0» / «alm_0»), элемент на ней выбирает круг равных ([QrPriority.Result.faces]) или нажатие у края (на [EVENT_RESET_MS], одинаково для всех групп — [GroupView], [groupViews], [groupNav]; хранится в [K_HABIDX]). Минутная смена элемента меняет только лицо карточки, адаптер стопки не пересоздаётся. Объяснение «Сейчас сверху» называет показанный элемент группы ([whyOf]).
@@ -1020,6 +1021,39 @@ object QrWidgets {
             }
         }
         return true
+    }
+
+    /**
+     * Повторное нажатие на карточку-таймер в виджете (ScanActivity, extra `timerstop` = ключ карточки): таймер идёт или стоит на паузе — отменяется целиком
+     * (как «Стоп» в острове); лицо возвращается к заданному времени само (`CardTimers` → [onActivityChanged]). Показанный таймер при этом не меняется — [holdTimerRow].
+     * false — карточки нет или у неё нет запущенного таймера.
+     */
+    fun stopTimer(ctx: Context, cardKey: String): Boolean {
+        if (!KEY_RE.matches(cardKey)) return false
+        val app = ctx.applicationContext
+        val card = configs(app).asSequence().flatMap { (it.cards.asSequence() + it.timerCards.asSequence()) }
+            .firstOrNull { it.key == cardKey } ?: return false
+        holdTimerRow(app, cardKey)
+        var stopped = false
+        for (l in card.live) {
+            if (l.k != "timer" || l.id.isEmpty()) continue
+            if (CardTimers.faceOf(app, l.id) == null) continue
+            CardTimers.cancel(app, l.id)
+            stopped = true
+        }
+        return stopped
+    }
+
+    /** Как [holdAlarmRow], для карточки «Таймеры»: остановленный таймер остаётся на лице, а не уступает место соседу. */
+    private fun holdTimerRow(app: Context, cardKey: String) {
+        for (cfg in configs(app)) {
+            if (!cfg.timers) continue
+            val list = QrPriority.timerList(cfg)
+            if (list.any { it.key == cardKey }) {
+                saveGroupPick(app, cfg.id, QrPriority.TIMER_SLOT_KEY, cardKey)
+                pinSlot(cfg.id, QrPriority.TIMER_SLOT_KEY)
+            }
+        }
     }
 
     /**
