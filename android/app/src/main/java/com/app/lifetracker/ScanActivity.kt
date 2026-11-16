@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.6 (16.11) — `timerstart` (ключ карточки): нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу ([QrWidgets.startTimer]) без окна с карточкой; не вышло — прежний путь по `code`. Откат: ScanActivity.kt 13.5.
 // Версия: 13.5 (16.11) — `timerstop` (ключ карточки): повторное нажатие на идущий таймер в карточке «Таймеры» виджета останавливает его ([QrWidgets.stopTimer]), окно не нужно. Откат: ScanActivity.kt 13.4.
 // Версия: 13.4 (15.11) — любое нажатие на карточку виджета (`ACTION_SCAN_CODE` с верным `tok`) запоминается ([QrWidgets.noteTouch]): слайд-шоу виджета не листает стопку 30 с после него. Откат: ScanActivity.kt 13.3.
 // Версия: 13.3 (14.11) — `habnav` (-1 / 1, `wid`, `slot`): края карточки «Привычки» в виджете листают привычки ([QrWidgets.habitNav]); одно и двойное нажатие в центре — как у обычной привычки.
@@ -130,11 +131,21 @@ class ScanActivity : ComponentActivity() {
     }
 
     /**
-     * Повторное нажатие на карточку-таймер в виджете (extra `timerstop` = ключ карточки, тот же `tok`): идущий или приостановленный таймер останавливается сразу
+     * Нажатие на карточку-таймер в виджете (тот же `tok`): `timerstart` = ключ карточки не запущенного таймера — запуск сразу ([QrWidgets.startTimer]); `timerstop` = ключ карточки: идущий или приостановленный таймер останавливается сразу
      * ([QrWidgets.stopTimer]), окно и страница не нужны. true — это был такой запрос.
      */
     private fun handleTimerStop(i: Intent?): Boolean {
-        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("timerstop")) return false
+        if (i == null || i.action != ACTION_SCAN_CODE) return false
+        if (i.hasExtra("timerstart")) {
+            // запуск без окна; false — не получилось, дальше пойдёт прежний путь по коду карточки (окно, как скан)
+            if (!QrWidgets.tokenOk(this, i.getStringExtra("tok"))) return true
+            return try {
+                QrWidgets.startTimer(applicationContext, i.getStringExtra("timerstart") ?: "")
+            } catch (e: Exception) {
+                false
+            }
+        }
+        if (!i.hasExtra("timerstop")) return false
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             try {
                 QrWidgets.stopTimer(applicationContext, i.getStringExtra("timerstop") ?: "")

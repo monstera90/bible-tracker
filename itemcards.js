@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 51.1 (16.11) — запуск таймера нажатием в виджете без окна попадает в журнал событий: `drainWidgetTimers` (мост ≥ 39: `widgetTimerTake` / `widgetTimerAck`). Откат: itemcards.js 51.0.
    Версия: 51.0 (16.11) — у карточки-таймера (сетка вкладки 9 и показ по скану) нет кнопки «Стоп»: повторное нажатие на идущий или приостановленный таймер останавливает его (`toggleTimerForCard`), как в виджете; не запущен — нажатие запускает. Откат: itemcards.js 50.0.
    Версия: 50.0 (16.11) — лицо таймера (сетка вкладки 9 и показ по скану) как у карточки «Таймеры» в виджете: название, кольцо и минуты (`timerFaceHtml`, `timerFaceState`, `timerNumText`); цифры и дуга меняются раз в минуту (и при пуске/паузе/стопе), посекундно таймер идёт в острове; цвет лица — цвет таймера (из карточки или из кода). Откат: itemcards.js 49.1.
    Версия: 49.1 (15.11) — «Конструктор виджетов»: для галочки «Отображать таймеры» все обычные таймеры пользователя отдаёт `widgetTimers` (скрытые таймеры не входят), у лица таймера появилось поле `seconds` (заданное время, с). Откат: itemcards.js 49.0.
@@ -2898,9 +2899,26 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(ack.length){ try{ n.widgetAlarmAck(JSON.stringify(ack)); }catch(e){} }
     try{ cardsCache = null; if(gridVisible()) renderGrid(); }catch(e){}
   }
+  // запуски таймеров нажатием в виджете без окна (мост ≥ 39): в журнал событий — как запуск из карточки; очередь забирается и подтверждается
+  function drainWidgetTimers(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetTimerTake !== "function" || typeof n.widgetTimerAck !== "function") return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetTimerTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var ack = [];
+    arr.forEach(function(ev){
+      if(!ev || typeof ev.n !== "number" || typeof ev.id !== "string") return;
+      try{ if(window.EventLog) window.EventLog.timerStarted(ev.id, String(ev.title || ""), Number(ev.sec) || 0); }catch(e){}
+      ack.push(ev.n);
+    });
+    if(ack.length){ try{ n.widgetTimerAck(JSON.stringify(ack)); }catch(e){} }
+    try{ syncTimersView(); }catch(e){}
+  }
   function drainPendingTasks(silent){
     cacheTaskTabs();
-    drainWidgetAlarms(); // будильники из виджета — в журнал событий
+    drainWidgetAlarms();
+    drainWidgetTimers(); // будильники из виджета — в журнал событий
     drainPendingClimbs(); // «+ к высоте», отсканированный в окне ярлыка
     drainPendingCombos(false); // задачи из «Комбинированного», отсканированного в окне ярлыка («открыть» ждёт своего входа)
     var q = [];

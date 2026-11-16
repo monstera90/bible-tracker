@@ -64,13 +64,14 @@ class NativeBridge(private val activity: MainActivity) {
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
+         * 39: `widgetTimerTake()` / `widgetTimerAck(ns)` — таймеры, запущенные нажатием в виджете без окна: страница записывает их в журнал событий.
          * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
          * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
          * 15: `musicHeadphones()` — подключены ли наушники; `volumePct` в `musicPlayTrack`/`musicPlayFolder` теперь громкость самого телефона.
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 38
+        const val BRIDGE_VERSION = 39
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1258,6 +1259,28 @@ class NativeBridge(private val activity: MainActivity) {
             QrWidgets.ackTaskDone(activity.applicationContext, idsJson)
         } catch (e: Exception) {
             // повторится
+        }
+    }
+
+    /** JSON-массив запусков таймеров {n,id,title,sec,ts} нажатием в виджете без окна, ещё не записанных страницей в журнал событий. */
+    @JavascriptInterface
+    fun widgetTimerTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrWidgets.takeTimerEvents(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница записала запуски с номерами `n` (JSON-массив) — убираем их из очереди. */
+    @JavascriptInterface
+    fun widgetTimerAck(nsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrWidgets.ackTimerEvents(activity.applicationContext, nsJson)
+        } catch (e: Exception) {
+            // повторим
         }
     }
 

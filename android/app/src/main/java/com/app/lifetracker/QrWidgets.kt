@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 15.0 (16.11) — принцип «после действия на карточке не бросать стопку в начало»: двойное нажатие на привычку, отметка задачи и заведение/выключение будильника оставляют виджет на той же карточке (привычки, задачи, будильники), если она в стопке осталась — на ней ещё есть что делать ([pinSlot], [slotOf], [slotPosition]; [update] при пересоздании стопки ставит её на закреплённую карточку, а не на первую); карточка пропала совсем (отмечена последняя привычка) — как раньше, первая. Сброс наверх после такого действия ([refreshAll] с `rebuildCfgs`) касается только затронутого виджета: стопки остальных не двигаются. Галочка «Показывать мероприятия на N дней вперёд» (`eventsSoon` + число `eventsDays`, 1…15; раньше — «только на сегодня и на завтра»): окно карточки события — N суток от начала сегодняшнего дня; картинка карточки на дату через семь суток и дальше — `<ключ>_d.png` («25 ноября, Среда»), [dynBitmap]. Откат: QrWidgets.kt 14.14.
+// Версия: 14.16 (16.11) — `startTimer`: нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу в оболочке, без окна с карточкой на весь экран; запуск ставится в очередь `timerEv` для журнала событий (`takeTimerEvents` / `ackTimerEvents`, мост ≥ 39). Откат: QrWidgets.kt 14.15.
 // Версия: 14.15 (16.11) — `stopTimer`: повторное нажатие на идущий (или приостановленный) таймер в карточке «Таймеры» виджета останавливает его (раньше ничего не делало). Откат: QrWidgets.kt 14.14.
 // Версия: 14.14 (15.11) — галочка «Отображать таймеры» (`timers`, список `tmr`): карточка-группа «Таймеры» ([QrPriority.TIMER_SLOT_KEY]) со всеми таймерами карточек QR-кодов, лицо рисует [QrTimerFace] (зелёная карточка, кольцо и минуты), кольцо перерисовывается раз в минуту, пока идёт таймер ([QrPriority.Result.minuteAt], [armCycle]). Идущий таймер — выше всего, в том числе выше «Как тренировка?» и календаря, при любом режиме ([QrPriority.SCORE_TIMER_ACTIVE]); у таймера может быть своё время суток (`times` в `tmr`) — тогда в это время он поднимается выше календаря и привычек ([QrPriority.SCORE_TIMER_DUE]). Края листают таймеры, нажатие в центре запускает показанный (идущий — не трогает). Откат: QrWidgets.kt 14.13.
 // Версия: 14.13 (15.11) — слайд-шоу не листает стопку, пока пользователь её трогал меньше [TOUCH_PAUSE_MS] (30 с) назад: смахивание ([onPossibleSwipe]) и любое нажатие на карточку виджета (ScanActivity → [noteTouch]) запоминаются; пришёл срок [rotate] — переносится на 30 с после последнего касания. Откат: QrWidgets.kt 14.12.
@@ -151,6 +152,8 @@ object QrWidgets {
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ карточки-группы («hab_0», «alm_0»): {h: ключ выбранного элемента, t: время последнего нажатия, мс}}
     private const val AEV_MAX = 50
+    private const val K_TEV = "timerEv"       // очередь: таймеры, запущенные нажатием в виджете без окна — страница запишет их в журнал событий
+    private const val K_TEVSEQ = "timerEvSeq"
 
     const val ACTION_ROTATE = "com.app.lifetracker.QRW_ROTATE"
     const val ACTION_TICK = "com.app.lifetracker.QRW_TICK"
@@ -1042,6 +1045,59 @@ object QrWidgets {
             stopped = true
         }
         return stopped
+    }
+
+    /**
+     * Нажатие на не запущенный таймер в карточке «Таймеры» виджета (ScanActivity, extra `timerstart` = ключ карточки): таймер запускается сразу в оболочке (тот же id, что у скана кода его карточки),
+     * окно с карточкой на весь экран не открывается (оно — только у скана QR-кода). Запуск встаёт в очередь для журнала событий. false — карточки или id таймера нет: окно откроет прежний путь по коду.
+     */
+    fun startTimer(ctx: Context, cardKey: String): Boolean {
+        if (!KEY_RE.matches(cardKey)) return false
+        val app = ctx.applicationContext
+        val card = configs(app).asSequence().flatMap { (it.cards.asSequence() + it.timerCards.asSequence()) }
+            .firstOrNull { it.key == cardKey && it.dyn == "timer" && it.sec > 0 } ?: return false
+        val id = card.live.firstOrNull { it.k == "timer" && it.id.isNotEmpty() }?.id ?: return false
+        holdTimerRow(app, cardKey)
+        if (!CardTimers.start(app, id, card.title, card.sec.toLong())) return false
+        queueTimerEvent(app, JSONObject().put("id", id).put("title", card.title).put("sec", card.sec).put("ts", System.currentTimeMillis()))
+        return true
+    }
+
+    private fun queueTimerEvent(app: Context, ev: JSONObject) {
+        synchronized(LOCK) {
+            val p = prefs(app)
+            val seq = p.getLong(K_TEVSEQ, 0L) + 1L
+            val arr = try { JSONArray(p.getString(K_TEV, "[]")) } catch (e: Exception) { JSONArray() }
+            arr.put(ev.put("n", seq))
+            val out = JSONArray()
+            for (i in maxOf(0, arr.length() - AEV_MAX) until arr.length()) out.put(arr.get(i))
+            p.edit().putString(K_TEV, out.toString()).putLong(K_TEVSEQ, seq).apply()
+        }
+    }
+
+    /** JSON-массив запусков таймеров в виджете {n,id,title,sec,ts}, ещё не записанных страницей в журнал событий. */
+    fun takeTimerEvents(ctx: Context): String = synchronized(LOCK) { prefs(ctx).getString(K_TEV, "[]") ?: "[]" }
+
+    /** Страница записала запуски с номерами `n` (JSON-массив) — убираем их из очереди. */
+    fun ackTimerEvents(ctx: Context, nsJson: String?) {
+        val ns = HashSet<Long>()
+        try {
+            val a = JSONArray(nsJson ?: "[]")
+            for (i in 0 until a.length()) ns.add(a.optLong(i))
+        } catch (e: Exception) {
+            return
+        }
+        if (ns.isEmpty()) return
+        synchronized(LOCK) {
+            val p = prefs(ctx)
+            val arr = try { JSONArray(p.getString(K_TEV, "[]")) } catch (e: Exception) { JSONArray() }
+            val out = JSONArray()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (o.optLong("n") !in ns) out.put(o)
+            }
+            p.edit().putString(K_TEV, out.toString()).apply()
+        }
     }
 
     /** Как [holdAlarmRow], для карточки «Таймеры»: остановленный таймер остаётся на лице, а не уступает место соседу. */
