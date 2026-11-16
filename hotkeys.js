@@ -1,4 +1,5 @@
 /* hotkeys.js
+   Версия: 1.2 (16.11) — Ctrl+1…Ctrl+9: прямой переход на N-й язычок нижнего ряда (по порядку на экране; нет такого номера — ничего не делает). Стрелки Ctrl+←/→/↑/↓ остались как были. Откат: hotkeys.js 1.1.
    Версия: 1.1 (16.11) — Ctrl+←/→/↑/↓ работают и в полноэкранном режиме / режиме чтения (язычки там спрятаны: измерение идёт с временно снятым `.reading-mode-active`, `measureWithTabsRevealed`); новая клавиша Ctrl+F — включить/выключить полноэкранный режим (`window.DisplayMode.toggleFullscreen` из my.js; работает и если режим включён кнопкой на экране). Откат: hotkeys.js 1.0.
    Версия: 1.0 (15.11) — горячие клавиши физической (bluetooth) клавиатуры. Первые четыре: Ctrl+←/→ — по язычкам нижнего ряда, Ctrl+↑/↓ — по язычкам бокового ряда.
 
@@ -124,6 +125,19 @@
   register("ctrl+arrowleft",  function(){ return stepRow(BOTTOM_ROWS, "x", -1); });
   register("ctrl+arrowdown",  function(){ return stepRow(SIDE_ROWS, "y", +1); });
   register("ctrl+arrowup",    function(){ return stepRow(SIDE_ROWS, "y", -1); });
+
+  // Ctrl+1…Ctrl+9 — перейти сразу на N-й язычок нижнего ряда (порядок — как на экране слева направо). Если язычков меньше N, клавиша ничего не делает, но и странице не уходит.
+  function jumpRow(ids, axis, n){
+    var btn = measureWithTabsRevealed(function(){
+      var list = usableTabs(visibleRow(ids), axis);
+      return list[n - 1] || null;
+    });
+    if(btn && !btn.classList.contains("active")){ try{ btn.click(); }catch(e){} }
+    return true;
+  }
+  [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach(function(n){
+    register("ctrl+" + n, function(){ return jumpRow(BOTTOM_ROWS, "x", n); });
+  });
 
   // Ctrl+F — полноэкранный режим: первое нажатие включает, повторное выключает. Работает и тогда, когда режим включён кнопкой на экране (общий флаг, одна и та же
   // функция, что у кнопки в нижней панели: my.js → window.DisplayMode). Не требует открытого окна настроек и работает в полях ввода (браузерный поиск по Ctrl+F здесь отдан приложению).
