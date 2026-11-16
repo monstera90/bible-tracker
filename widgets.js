@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.0 (16.11) — вместо галочки «Показывать только мероприятия на сегодня и на завтра» — «Показывать мероприятия на [N] день/дня/дней вперёд» (`eventsSoon` — галочка, `eventsDays` — число 1…15 из выпадающей сетки 5×3, 1 — только сегодня; уходит в оболочку полем `eventsDays`; прежняя включённая галочка переносится как «на 2 дня»). Лента событий для карточек берётся на нужное число суток (`eventsFeedDays`), для события на семь суток вперёд и дальше шлётся картинка `<ключ>_d` с датой («25 ноября, Среда»; день недели один уже неоднозначен). Откат: widgets.js 6.11.
    Версия: 6.11 (15.11) — галочка «Отображать таймеры» (`timers`, время суток каждого таймера в этом виджете — `timerCfg`, экран «Таймеры» по нажатию на карточку в форме): в стопку добавляется одна карточка со ВСЕМИ таймерами пользователя (обычные карточки-таймеры вкладки QR-кодов; `widgetTimers` в itemcards.js; в оболочку уходят до `MAX_TIMERS` штук в поле `tmr`: ключ, название, `sec`, `live`, `times`). Лицо рисует оболочка (QrTimerFace.kt: зелёная карточка, кольцо и минуты, кольцо перерисовывается раз в минуту). Идущий таймер — выше всего (выше «Как тренировка?» и календаря), несколько идущих сменяют друг друга по минуте; таймер «в своё время суток» — выше календаря и привычек; края карточки листают таймеры, центр запускает показанный. Откат: widgets.js 6.10.
    Версия: 6.10 (15.11) — тексты в форме описывают общее правило круга равных: любые карточки с одинаковым верхним баллом сменяют друг друга по минуте, а карточка-группа («Привычки», «Будильники») всегда одна, и по минутам меняется её элемент (оболочка: QrPriority 4.9).
    Версия: 6.9 (15.11) — в описании «Переключение по релевантности» добавлен круг равных (привычки «в своё время» и календарь по очереди по минуте).
@@ -48,7 +49,8 @@
   var MAX_ALARMS = 16; // будильников, между которыми листает карточка будильников (то же число — QrPriority.ALARM_NAV_MAX)
   var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
-  var DAY_MS = 86400000;
+  var EVENTS_DAYS_MAX = 15; // «Показывать мероприятия на N дней вперёд»: N от 1 до 15 (1 — только сегодня; то же число — QrPriority.EVENTS_DAYS_MAX)
+var DAY_MS = 86400000;
   // Лицо динамической карточки (доли ширины карточки; сняты с макета 660 px): значок Tabler — «circle-check» / «calendar-event» (сетка 24, линия 2),
   // надпись «Сегодня»…, название (serif, жирное), время (крупно). Базовые линии букв, верх значка — от верха карточки. Верхние ≈7 % лица в виджете скрыты обрезкой стопки (qr_widget.xml: передняя карточка выходит за слот сверху), поэтому значок не поднимается выше `iconTop2`, а лишняя строка названия (`DYN2`) уходит вниз.
   var DYN = { unit: 0.00955, iconTop: 0.138, labelBase: 0.448, titleBase: 0.577, timeBase: 0.858, labelFs: 0.076, labelFsMax: 0.1, titleFs: 0.108, timeFs: 0.27 };
@@ -112,12 +114,16 @@
         else if(w.batColor && !/^#[0-9a-fA-F]{6}$/.test(w.batColor)) w.batColor = "";
         w.batteryMulti = !!w.batteryMulti;
         if(typeof w.bat2Color !== "string" || (w.bat2Color && !/^#[0-9a-fA-F]{6}$/.test(w.bat2Color))) w.bat2Color = "";
-        w.tasks = !!w.tasks; w.events = !!w.events; w.eventsSoon = !!w.events && !!w.eventsSoon; w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.timers = !!w.timers; w.timerCfg = normTimerCfg(w.timerCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
+        w.tasks = !!w.tasks; w.events = !!w.events; w.eventsSoon = !!w.events && !!w.eventsSoon; w.eventsDays = normDays(w.eventsDays, w.eventsSoon ? 2 : 1); w.alarms = !!w.alarms; w.habits = !!w.habits; w.habitCfg = normHabitCfg(w.habitCfg); w.timers = !!w.timers; w.timerCfg = normTimerCfg(w.timerCfg); w.rpeAsk = !!w.rpeAsk; w.moodAsk = !!w.moodAsk;
         w.tasksColor = normHex(w.tasksColor); w.eventsColor = normHex(w.eventsColor);
         w.rpeColor = normHex(w.rpeColor) || RPE_COLOR; w.moodColor = normHex(w.moodColor) || RPE_COLOR; // служебные карточки: пусто — фиолетовый макета, как было до палитры
       });
       return o;
     }
+    // число дней вперёд для событий: целое 1…EVENTS_DAYS_MAX, иначе `def` (раньше была только галочка «сегодня и завтра» — она переносится как 2)
+    function normDays(v, def){ v = parseInt(v, 10); return isFinite(v) ? Math.max(1, Math.min(EVENTS_DAYS_MAX, v)) : def; }
+    // «день» (1), «дня» (2–4), «дней» (5–20; 11–14 — тоже «дней»)
+    function dayWord(n){ var m = n % 100, r = n % 10; return (m >= 11 && m <= 14) ? "дней" : (r === 1 ? "день" : ((r >= 2 && r <= 4) ? "дня" : "дней")); }
     // время суток и дни недели привычек этого виджета: {<id привычки>: {times:["m"|"d"|"e"], days:[1..7]}}; пустые записи не хранятся
     function normHabitCfg(o){
       var out = {};
@@ -383,12 +389,18 @@
     function usesTimers(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].timers) return true; return false; }
     function usesDyn(){ for(var i = 0; i < data.list.length; i++) if(data.list[i].tasks || data.list[i].events) return true; return false; }
     // что нужно карточкам: {tasks:[{at,title}], events:[{at,title}]}; задачи — открытые на сегодня и просроченные, события — ещё не начавшиеся
+    // на сколько суток вперёд нужны события: неделя, а если у какого-то виджета «на N дней вперёд» и N больше — столько
+    function eventsFeedDays(){
+      var d = FEED_DAYS;
+      data.list.forEach(function(w){ if(w.events && w.eventsSoon) d = Math.max(d, normDays(w.eventsDays, 1)); });
+      return d;
+    }
     function buildFeed(){
-      var now = Date.now(), list = [], feed = { tasks: [], events: [] };
-      try{ list = (deps.getCalendarFeed && deps.getCalendarFeed(now, addDays(startOfDay(now), FEED_DAYS))) || []; }catch(e){ list = []; }
+      var now = Date.now(), list = [], feed = { tasks: [], events: [] }, tasksTo = addDays(startOfDay(now), FEED_DAYS);
+      try{ list = (deps.getCalendarFeed && deps.getCalendarFeed(now, addDays(startOfDay(now), eventsFeedDays()))) || []; }catch(e){ list = []; }
       list.forEach(function(it){
         var o = { at: it.at, title: it.title };
-        if(it.k === "task"){ o.tid = it.tid || ""; if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
+        if(it.k === "task"){ if(it.at >= tasksTo) return; o.tid = it.tid || ""; if(feed.tasks.length < MAX_TASKS) feed.tasks.push(o); }
         else if(it.at >= now && feed.events.length < MAX_EVENTS){ o.eid = String(it.id || ""); feed.events.push(o); }
       });
       return feed;
@@ -411,6 +423,7 @@
             function face(id, label){ return { id: "dyn:" + id, color: hex, shade: shade, kind: kind, label: label, title: it.title, time: hhmm(it.at) }; }
             function put(suffix, label){ jobs.push({ key: key + suffix, face: face(key + suffix, label) }); }
             var wd = WEEKDAYS_FULL[new Date(it.at).getDay()];
+            if(d0 >= 7){ var fd = new Date(it.at); put("_d", fd.getDate() + " " + MONTHS_GEN[fd.getMonth()] + ", " + wd); } // через неделю и дальше день недели один неоднозначен — с датой
             if(d0 >= 2) put("_w", wd);
             if(d0 >= 1) put("_t", DYN_LABELS.tom + ", " + wd);
             if(d0 >= 0) put("", DYN_LABELS.today + ", " + wd);
@@ -486,7 +499,7 @@
         var widgets = data.list.map(function(w){
           return {
             id: w.id, name: wname(w), rotate: w.rotate, rotateMin: w.rotateMin, relevance: w.relevance, battery: !!w.battery, batColor: w.battery ? batHex(w) : "", batteryMulti: !!w.batteryMulti, bat2Color: w.batteryMulti ? bat2Hex(w) : "",
-            tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], timers: !!w.timers, tmr: w.timers ? timerRows.map(function(f){ var tc = (w.timerCfg && w.timerCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, sec: f.seconds, live: f.live, times: tc.times || [] }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
+            tasks: !!w.tasks, events: !!w.events, eventsSoon: !!w.events && !!w.eventsSoon, eventsDays: normDays(w.eventsDays, 1), alarms: !!w.alarms, alm: w.alarms ? alarmRows.map(function(f){ return { key: f.id, alarm: f.alarmId || "", alarmSpec: f.alarmSpec, title: f.title }; }) : [], habits: !!w.habits, hab: w.habits ? habitRows.map(function(f){ var hc = (w.habitCfg && w.habitCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, times: hc.times || [], days: hc.days || [], last: f.last || "" }; }) : [], timers: !!w.timers, tmr: w.timers ? timerRows.map(function(f){ var tc = (w.timerCfg && w.timerCfg[f.id]) || {}; return { key: f.id, code: f.code, title: f.title, sec: f.seconds, live: f.live, times: tc.times || [] }; }) : [], rpeAsk: !!w.rpeAsk, rpeColor: w.rpeAsk ? rpeHex(w) : "", moodAsk: !!w.moodAsk, moodColor: w.moodAsk ? moodHex(w) : "", dyn: dyn.perWidget[w.id] || [],
             cards: w.cards.filter(function(c){ return faces[c.cid]; }).map(function(c){
               var f = faces[c.cid];
               return { key: c.cid, code: f.code, title: f.title, live: f.live, times: c.times, days: c.days, after: normAfter(c.after), prio: normPrio(c.prio), habit: f.type === "habit", alarm: f.type === "alarm" ? (f.alarmId || "") : "", alarmSpec: f.type === "alarm" ? (f.alarmSpec || null) : null };
@@ -579,6 +592,13 @@
         ".wg-swatch{flex:0 0 auto;width:30px;height:30px;margin:0 2px 0 10px;padding:0;border-radius:8px;border:1px solid rgba(0,0,0,.25);box-shadow:inset 0 0 0 2px rgba(255,255,255,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
         ".wg-swatch.open{box-shadow:0 0 0 2px var(--parchment,#fff),0 0 0 4px var(--ink,#000);}" +
         ".wg-check input[type=checkbox]{width:22px;height:22px;margin:0 10px 0 0;flex:0 0 auto;}" +
+        ".wg-evtxt{flex:1 1 auto;min-width:0;line-height:1.9;}" +
+        ".wg-daybtn{display:inline-block;min-width:54px;margin:0 2px;padding:3px 10px;border-radius:10px;border:1px solid var(--groove-shadow,rgba(0,0,0,.3));background:var(--gold-light);color:var(--ink);font-size:15px;font-weight:700;text-align:center;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+        ".wg-daybtn.open{background:var(--wood);color:#fff;}" +
+        ".wg-caret{margin-left:6px;font-size:11px;}" +
+        ".wg-daygrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:0 2px 10px 32px;max-width:300px;}" +
+        ".wg-daycell{padding:10px 0;border-radius:10px;border:0;background:var(--gold-light);color:var(--ink);font-size:16px;font-weight:700;text-align:center;cursor:pointer;-webkit-tap-highlight-color:transparent;}" +
+        ".wg-daycell.on{background:var(--wood);color:#fff;}" +
         ".wg-min{margin:0 2px 8px 32px;font-size:14px;color:var(--ink);}" +
         ".wg-min input{width:64px;font-size:16px;padding:4px 6px;margin:0 6px;text-align:center;}" +
         ".wg-chips{display:flex;flex-wrap:wrap;margin:6px 0 4px;}" +
@@ -857,6 +877,17 @@
         (pal && on ? '<button type="button" class="wg-swatch" id="wgSw_' + pal[0] + '" data-pal="' + pal[0] + '" style="background:' + hex + ';" title="Цвет карточки" aria-label="Цвет карточки"></button>' : '') + '</div>';
     }
     function palBlock(pal){ return '<div class="wg-pal" id="wgPal_' + pal[0] + '" style="display:none">' + cardsOf().colorPalette(pal[1], pal[0]) + '</div>'; }
+    // «Показывать мероприятия на [N ▾] день/дня/дней вперёд»: галочка, число с выпадающей сеткой 5×3 (1…15) и склоняемое слово
+    function eventsDaysRow(w){
+      var n = normDays(w.eventsDays, 1);
+      var h = '<div class="wg-check wg-evsoon"><input type="checkbox" id="wgEventsSoon"' + (w.eventsSoon ? ' checked' : '') + '><span class="wg-evtxt">' +
+        '<label for="wgEventsSoon">Показывать мероприятия на</label> ' +
+        '<button type="button" class="wg-daybtn" id="wgEvDaysBtn" aria-haspopup="true" aria-expanded="false" title="Сколько дней вперёд">' + n + '<span class="wg-caret">▾</span></button> ' +
+        '<label for="wgEventsSoon">' + dayWord(n) + ' вперёд</label></span></div>';
+      h += '<div class="wg-daygrid" id="wgEvDaysGrid" style="display:none">';
+      for(var i = 1; i <= EVENTS_DAYS_MAX; i++) h += '<button type="button" class="wg-daycell' + (i === n ? ' on' : '') + '" data-n="' + i + '">' + i + '</button>';
+      return h + '</div>';
+    }
     function formHtml(a){
       var w = a.w, html = '<h3 class="common-tab-title">' + esc(wname(w)) + '</h3><div class="wg-slots">';
       for(var i = 0; i < w.cards.length; i++){
@@ -899,7 +930,7 @@
       if(w.tasks) html += palBlock(["icfColors3", "wgtasks"]);
       html += checkRow("wgEvents", w.events, "Показывать события календаря", ["icfColors4", "wgevents"], dynHex(w, "event"));
       if(w.events) html += palBlock(["icfColors4", "wgevents"]);
-      if(w.events) html += '<label class="wg-check"><input type="checkbox" id="wgEventsSoon"' + (w.eventsSoon ? ' checked' : '') + '>Показывать только мероприятия на сегодня и на завтра</label>';
+      if(w.events) html += eventsDaysRow(w);
       html += '<label class="wg-check"><input type="checkbox" id="wgAlarms"' + (w.alarms ? ' checked' : '') + '>Показывать будильники</label>';
       html += '<label class="wg-check"><input type="checkbox" id="wgHabits"' + (w.habits ? ' checked' : '') + '>Отображать карточки привычек</label>';
       if(w.habits) html += '<div class="wg-hint">Нажмите на карточку привычек выше, чтобы задать время суток и дни недели каждой привычки: привычка в своё время встаёт в круг наравне с календарём.</div>';
@@ -924,8 +955,8 @@
       ["Отображать заряд аккумулятора (наушники и телефон)", "В стопке появится карточка с зарядом телефона и, если подключены Bluetooth-наушники, их заряда. Нет галочки — карточки в стопке нет."],
       ["Отображать заряд аккумулятора (несколько устройств)", "Ещё одна карточка в стопке — без надписей, только значки и кольца заряда: телефон и до трёх подключённых Bluetooth-устройств (наушники, часы, колонка и т. п.)."],
       ["Показывать задачи", "Одна карточка с ближайшими невыполненными задачами из календаря: просроченные первыми, затем сегодняшние и на неделю вперёд. Нажатие у левого или правого края карточки листает задачи, двойное нажатие в центре отмечает показанную задачу выполненной, и на её место встаёт следующая. Если не отметить, вместо «Сегодня» будет «Просрочено». Через минуту без нажатий снова показывается первая задача. Нет галочки — карточки задач в стопке нет."],
-      ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг» или «Завтра, Суббота» (день недели — когда состоится событие). Если ни сегодня, ни завтра событий нет, карточки в стопке нет. Нет галочки — карточки события в стопке нет."],
-      ["Показывать только мероприятия на сегодня и на завтра", "Появляется под «Показывать события календаря», по умолчанию выключена. Если включена, карточка события показывает только события на сегодня и на завтра; когда на эти два дня событий нет, карточки календаря в стопке нет. Если выключена — события ближайшей недели."],
+      ["Показывать события календаря", "Одна карточка — следующее запланированное событие, с надписью «Сегодня, Четверг», «Завтра, Суббота» или, если до него неделя и больше, «25 ноября, Среда». Нажатие у левого или правого края листает ближайшие события (до десяти). Если событий в нужном окне нет, карточки в стопке нет; по умолчанию окно — ближайшая неделя, его можно изменить галочкой ниже. Нет галочки — карточки события в стопке нет."],
+      ["Показывать мероприятия на [число] день/дня/дней вперёд", "Появляется под «Показывать события календаря», по умолчанию выключена. Нажмите на число и выберите его в сетке от 1 до 15: 1 — только сегодняшние мероприятия, 2 — сегодня и завтра, 3 — на три дня и так далее (выбор числа сам включает галочку). Карточка события показывает только мероприятия в этом окне, а если в нём событий нет, карточки календаря в стопке нет. Если галочка выключена — мероприятия ближайшей недели."],
       ["Показывать будильники", "Одна карточка со всеми вашими будильниками (карточки «Будильник» вкладки QR-кодов): время, название и надпись «Заведён» / «Не заведён». Нажатие у левого или правого края карточки листает все будильники, нажатие в центре заводит показанный будильник или выключает его. Пока будильник звонит, показан он (если звонят несколько — по очереди, по минуте); перед звонком (за 30 минут) — тот, что скоро зазвонит; иначе — ближайший из заведённых (нет заведённых — первый по времени). Через минуту без нажатий карточка снова возвращается к этому правилу. Нет галочки — карточки будильников в стопке нет."],
       ["Отображать карточки привычек", "Карточки ваших привычек (карточки «Привычка» вкладки QR-кодов). Нажмите на карточку привычек в форме и задайте каждой привычке время суток и дни недели. Карточка привычек в стопке всегда одна. Привычка, у которой сейчас её время, участвует в круге равных (при «Переключении по релевантности»): по минутам на карточке показывается очередная такая привычка. Привычки не в своё время в круг не попадают. Нажатие у левого или правого края карточки листает все привычки (выбор держится минуту после последнего нажатия), одно нажатие в центре открывает карту дней привычки, двойное — отмечает её выполненной: исчезает только эта привычка, до конца дня. Когда отмечены все привычки, карточки привычек в стопке нет совсем. Нет галочки — привычек в стопке нет."],
       ["Отображать таймеры", "Одна карточка со всеми вашими таймерами (карточки «Таймер» вкладки QR-кодов; скрытые таймеры не входят): зелёная, с названием, кольцом и числом минут. Не запущенный таймер показывает заданное время, идущий — остаток; кольцо и минуты перерисовываются раз в минуту. Нажатие у левого или правого края листает таймеры, нажатие в центре запускает показанный таймер (идущий не трогает). Идущий таймер — самая важная карточка: она встаёт наверх выше «Как тренировка?», календаря и всего остального, даже без «Переключения по релевантности». Если идут два таймера и больше, они сменяют друг друга по очереди, каждый на минуту. Нажмите на карточку таймеров в форме и выберите таймеру время суток — необязательно: в своё время (если таймер не запущен) он встаёт выше календаря и привычек и сменяет такие же по минутам; без времени суток таймер наверх не поднимается, его можно найти, листая карточку у краёв. Нет галочки — карточки таймеров в стопке нет."],
@@ -1110,6 +1141,23 @@
         w.eventsSoon = evs.checked;
         commitDraft(a); changed(); render();
       });
+      // число дней: нажатие на число открывает сетку 5×3, выбор числа включает галочку и сворачивает сетку (форма перерисовывается)
+      var evBtn = $("wgEvDaysBtn"), evGrid = $("wgEvDaysGrid");
+      if(evBtn && evGrid){
+        evBtn.addEventListener("click", function(){
+          var open = evGrid.style.display === "none";
+          evGrid.style.display = open ? "" : "none";
+          evBtn.className = "wg-daybtn" + (open ? " open" : "");
+          evBtn.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+        Array.prototype.forEach.call(evGrid.querySelectorAll(".wg-daycell"), function(cell){
+          cell.addEventListener("click", function(){
+            w.eventsDays = normDays(cell.getAttribute("data-n"), 1);
+            w.eventsSoon = true;
+            commitDraft(a); changed(); render();
+          });
+        });
+      }
       var alm = $("wgAlarms");
       alm.addEventListener("change", function(){
         w.alarms = alm.checked;

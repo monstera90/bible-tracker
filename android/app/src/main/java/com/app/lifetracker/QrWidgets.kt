@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 15.0 (16.11) — принцип «после действия на карточке не бросать стопку в начало»: двойное нажатие на привычку, отметка задачи и заведение/выключение будильника оставляют виджет на той же карточке (привычки, задачи, будильники), если она в стопке осталась — на ней ещё есть что делать ([pinSlot], [slotOf], [slotPosition]; [update] при пересоздании стопки ставит её на закреплённую карточку, а не на первую); карточка пропала совсем (отмечена последняя привычка) — как раньше, первая. Сброс наверх после такого действия ([refreshAll] с `rebuildCfgs`) касается только затронутого виджета: стопки остальных не двигаются. Галочка «Показывать мероприятия на N дней вперёд» (`eventsSoon` + число `eventsDays`, 1…15; раньше — «только на сегодня и на завтра»): окно карточки события — N суток от начала сегодняшнего дня; картинка карточки на дату через семь суток и дальше — `<ключ>_d.png` («25 ноября, Среда»), [dynBitmap]. Откат: QrWidgets.kt 14.14.
 // Версия: 14.14 (15.11) — галочка «Отображать таймеры» (`timers`, список `tmr`): карточка-группа «Таймеры» ([QrPriority.TIMER_SLOT_KEY]) со всеми таймерами карточек QR-кодов, лицо рисует [QrTimerFace] (зелёная карточка, кольцо и минуты), кольцо перерисовывается раз в минуту, пока идёт таймер ([QrPriority.Result.minuteAt], [armCycle]). Идущий таймер — выше всего, в том числе выше «Как тренировка?» и календаря, при любом режиме ([QrPriority.SCORE_TIMER_ACTIVE]); у таймера может быть своё время суток (`times` в `tmr`) — тогда в это время он поднимается выше календаря и привычек ([QrPriority.SCORE_TIMER_DUE]). Края листают таймеры, нажатие в центре запускает показанный (идущий — не трогает). Откат: QrWidgets.kt 14.13.
 // Версия: 14.13 (15.11) — слайд-шоу не листает стопку, пока пользователь её трогал меньше [TOUCH_PAUSE_MS] (30 с) назад: смахивание ([onPossibleSwipe]) и любое нажатие на карточку виджета (ScanActivity → [noteTouch]) запоминаются; пришёл срок [rotate] — переносится на 30 с после последнего касания. Откат: QrWidgets.kt 14.12.
 // Версия: 14.12 (15.11) — единая модель круга равных и карточек-групп (QrPriority 4.9): «Привычки» и «Будильники» — одна карточка-группа каждая (ключи «hab_0» / «alm_0»), элемент на ней выбирает круг равных ([QrPriority.Result.faces]) или нажатие у края (на [EVENT_RESET_MS], одинаково для всех групп — [GroupView], [groupViews], [groupNav]; хранится в [K_HABIDX]). Минутная смена элемента меняет только лицо карточки, адаптер стопки не пересоздаётся. Объяснение «Сейчас сверху» называет показанный элемент группы ([whyOf]).
@@ -70,8 +71,8 @@ import java.util.UUID
  *
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
  * задачи, мс) и ближайшие события (`k`="event") — и до четырёх картинок на каждого: `<ключ>.png` («Сегодня»), `<ключ>_t.png` («Завтра»), `<ключ>_w.png` (день недели — до даты два дня
- * и больше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([QrPriority.build], [dynBitmap]), поэтому надпись и состав меняются без приложения:
- * задачи — одна карточка на все: показана одна невыполненная задача из ближайших (время в пределах [QrPriority.DYN_DAYS] суток, просроченные первыми; время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]); нет такого —
+ * и больше, но не дальше шести суток) и `<ключ>_d.png` (дата с днём недели, у события на семь суток вперёд и дальше) и у задачи `<ключ>_s.png` («Просрочено, сегодня»), `<ключ>_y.png` («Просрочено, вчера»), `<ключ>_o.png` («Просрочено, 1 января»). Что показать, решает оболочка по часам ([QrPriority.build], [dynBitmap]), поэтому надпись и состав меняются без приложения:
+ * задачи — одна карточка на все: показана одна невыполненная задача из ближайших (время в пределах [QrPriority.DYN_DAYS] суток, просроченные первыми; время прошло — «Просрочено, сегодня» / «вчера» / дата); событие — одно, ближайшее из ещё не начавшихся в этих пределах ([QrPriority.nextEventKey]; галочка «Показывать мероприятия на N дней вперёд» — `eventsSoon` и число `eventsDays` — сужает или расширяет окно события до N суток, 1…15, считая сегодняшние); нет такого —
  * карточки нет. Будильник `ACTION_TICK` ставится на полночь и на начало ближайшего события ([nextDynChange]). Карточки стоят после QR-карточек и перед карточками заряда;
  * Карточка события: нажатие у левого края — предыдущее событие, у правого — следующее (до [QrPriority.EVENT_NAV_MAX] ближайших, ряд не зациклен; номер хранит [eventNav], через [EVENT_RESET_MS]
  * без нажатий ряд сам возвращается к первому событию — [eventIndexOf], [nextDynChange]); внизу карточки точки показывают место в ряду ([withEventDots]); нажатие в центре открывает в приложении форму
@@ -84,6 +85,9 @@ import java.util.UUID
  * у левого и правого края ([groupNav]: ВСЕ элементы группы, без зацикливания; точки внизу — [withEventDots]). У каждого элемента свой балл, балл карточки — балл лучшего; очередей в круге равных у неё столько,
  * сколько элементов с верхним баллом. Что показать на карточке: (а) выбранный нажатием у края элемент, пока с последнего нажатия не прошло [EVENT_RESET_MS] (хранит [K_HABIDX]); (б) элемент по очереди круга
  * ([QrPriority.Result.faces]), если карточка в верхнем ярусе; (в) элемент по умолчанию. Смена элемента — только перерисовка лица ([groupViews]), стопка не сбрасывается.
+ *
+ * Принцип «остаться на карточке»: действие на карточке (двойное нажатие на привычку, отметка задачи, заведение/выключение будильника) не бросает стопку к первой карточке — пока на этой карточке остаётся что делать
+ * (ещё не отмеченная привычка, ещё одна задача, будильник), стопка пересоздаётся и встаёт на неё же ([pinSlot] запоминает «слот» карточки на [PIN_MS], [slotOf], [slotPosition], [update]). Исчезла карточка совсем — стопка возвращается к первой, как раньше.
  *
  * Галочка «Показывать будильники» (`alarms` у виджета, `alm` — все будильники пользователя: ключ карточки, id и настройки будильника): группа «Будильники» ([QrPriority.ALARM_SLOT_KEY]), элемент — один будильник
  * (серия: первый звонок и до четырёх повторов). Балл элемента: звонит сейчас — выше всего, ближайший звонок серии в ближайшие [QrPriority.ALARM_SOON_MS] — «скоро», иначе 0. Звонящие (а если таких нет — «скоро»)
@@ -223,7 +227,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "", val sec: Int = 0)
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList()) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -389,7 +393,8 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList,
+                        eventsDays = o.optInt("eventsDays", 2).coerceIn(1, QrPriority.EVENTS_DAYS_MAX) // нет числа (страница старой версии) — как было: сегодня и завтра
                     )
                 )
             }
@@ -602,7 +607,7 @@ object QrWidgets {
         return best
     }
 
-    /** Картинка карточки задачи/события для нынешнего момента: «Просрочено» — `<ключ>_s.png` (сегодня) / `<ключ>_y.png` (вчера) / `<ключ>_o.png` (раньше), «Сегодня» — `<ключ>.png`, «Завтра» — `<ключ>_t.png`, день недели — `<ключ>_w.png`; нет нужной — берутся соседние. */
+    /** Картинка карточки задачи/события для нынешнего момента: «Просрочено» — `<ключ>_s.png` (сегодня) / `<ключ>_y.png` (вчера) / `<ключ>_o.png` (раньше), «Сегодня» — `<ключ>.png`, «Завтра» — `<ключ>_t.png`, день недели (до шести суток вперёд) — `<ключ>_w.png`, дата («25 ноября, Среда», от семи суток) — `<ключ>_d.png`; нет нужной — берутся соседние. */
     private fun dynBitmap(ctx: Context, c: Card): Bitmap? {
         val now = System.currentTimeMillis()
         val names = when {
@@ -614,7 +619,8 @@ object QrWidgets {
             c.at < dayStart(now, 0) -> listOf(c.key + "_o", c.key)
             c.at < dayStart(now, 1) -> listOf(c.key, c.key + "_o")
             c.at < dayStart(now, 2) -> listOf(c.key + "_t", c.key + "_w", c.key)
-            else -> listOf(c.key + "_w", c.key + "_t", c.key)
+            c.at < dayStart(now, 7) -> listOf(c.key + "_w", c.key + "_t", c.key)
+            else -> listOf(c.key + "_d", c.key + "_w", c.key + "_t", c.key) // семь суток и дальше: день недели уже не однозначен — «25 ноября, Среда»
         }
         for (name in names) {
             val f = File(imgDir(ctx), "$name.png")
@@ -649,6 +655,49 @@ object QrWidgets {
     }
 
     // ---------- порядок карточек ----------
+
+    // ---------- «остаться на карточке» после действия ----------
+
+    /** Сколько после действия на карточке пересоздание стопки (перерисовка, смена порядка) ставит её на эту карточку, а не на первую. */
+    private const val PIN_MS = 10_000L
+    private val pins = HashMap<String, Pair<String, Long>>() // id виджета конструктора → (слот карточки, до какого SystemClock.uptimeMillis())
+
+    /**
+     * Слот карточки: то, что остаётся «той же карточкой», когда меняется её содержимое. Карточка-группа (привычки, будильники, таймеры) — её ключ; карточка задач и карточка
+     * события — `dyn:task` / `dyn:event` (их ключ меняется вместе с показанной задачей или событием); остальные — собственный ключ.
+     */
+    internal fun slotOf(c: Card): String = when {
+        QrPriority.isGroupKey(c.key) -> c.key
+        c.dyn == "task" || c.dyn == "event" -> "dyn:" + c.dyn
+        else -> c.key
+    }
+
+    /** Действие только что было на карточке слота [slot] виджета [cfgId]: ближайшие [PIN_MS] пересоздание стопки ставит её на эту карточку, если она осталась. */
+    private fun pinSlot(cfgId: String, slot: String) {
+        synchronized(pins) { pins[cfgId] = Pair(slot, SystemClock.uptimeMillis() + PIN_MS) }
+    }
+
+    /** Слот, на котором недавно было действие, или пусто — закрепления нет (или оно истекло). */
+    private fun pinnedSlot(cfgId: String): String {
+        val p = synchronized(pins) { pins[cfgId] } ?: return ""
+        if (SystemClock.uptimeMillis() > p.second) {
+            synchronized(pins) { pins.remove(cfgId) }
+            return ""
+        }
+        return p.first
+    }
+
+    /**
+     * Позиция стопки (для setDisplayedChild), на которой в нынешнем порядке показана карточка слота [slot]. Позиция p показывает карточку (−p) по модулю числа карточек
+     * ([QrWidgetService.getViewAt]), поэтому карточке с номером k соответствует позиция n − k. Карточки в стопке нет (или она первая) — 0.
+     */
+    private fun slotPosition(ctx: Context, cfg: Cfg, slot: String): Int {
+        val cards = plan(ctx, cfg).cards
+        val n = cards.size
+        if (n < 2) return 0
+        val k = cards.indexOfFirst { slotOf(it.card) == slot }
+        return if (k <= 0) 0 else n - k
+    }
 
     // ---------- «после срабатывания»: скрытые и перенесённые в конец ----------
 
@@ -894,7 +943,7 @@ object QrWidgets {
 
     /**
      * Двойное нажатие на карточку задачи в виджете: id задачи встаёт в очередь (страница отметит её выполненной — `widgetTaskTake`/`widgetTaskAck`, мост ≥34),
-     * карточка сразу уходит из стопки, стопка возвращается к первой карточке.
+     * показанная задача сразу уходит, на её место встаёт следующая; стопка остаётся на карточке задач (если задач больше нет — возвращается к первой карточке).
      */
     fun completeTask(ctx: Context, taskId: String) {
         if (taskId.isEmpty() || taskId.length > 80) return
@@ -906,6 +955,7 @@ object QrWidgets {
             putIdSet(app, K_TDONE, q)
             for (cfg in configs(app)) if (cfg.cards.any { it.dyn == "task" && it.tid == taskId }) cfgIds.add(cfg.id)
         }
+        for (id in cfgIds) pinSlot(id, "dyn:task") // остались ещё задачи — стопка остаётся на карточке задач, а не уходит к первой
         if (cfgIds.isNotEmpty()) refreshAll(app, true, false, cfgIds)
     }
 
@@ -980,7 +1030,10 @@ object QrWidgets {
         for (cfg in configs(app)) {
             if (!cfg.alarms) continue
             val list = QrPriority.alarmCards(cfg, snapshot(app, cfg))
-            if (list.any { it.key == cardKey }) saveGroupPick(app, cfg.id, QrPriority.ALARM_SLOT_KEY, cardKey)
+            if (list.any { it.key == cardKey }) {
+                saveGroupPick(app, cfg.id, QrPriority.ALARM_SLOT_KEY, cardKey)
+                pinSlot(cfg.id, QrPriority.ALARM_SLOT_KEY) // и сама карточка «Будильники» остаётся на месте, что бы ни пересчитал порядок
+            }
         }
     }
 
@@ -1183,11 +1236,14 @@ object QrWidgets {
                 }
                 all.put(cfg.id, st)
                 touchedCfgs.add(cfg.id)
+                // привычка группы «Привычки» или будильник группы «Будильники»: остаться на этой карточке, пока в группе есть что делать (в update — на неё же, а не на первую)
+                if (cfg.habitCards.any { it.key == cardKey }) pinSlot(cfg.id, QrPriority.HABIT_SLOT_KEY)
+                else if (card.dyn == "alarm" && card.alarmId.isNotEmpty()) pinSlot(cfg.id, QrPriority.ALARM_SLOT_KEY)
             }
             if (touchedCfgs.isNotEmpty()) prefs(app).edit().putString(K_FIRED, all.toString()).apply()
         }
         if (touchedCfgs.isEmpty()) return
-        // Стопка возвращается к первой из оставшихся карточек ОДНИМ полным обновлением (сброс — в том же RemoteViews, до перезагрузки данных,
+        // Стопка пересоздаётся ОДНИМ полным обновлением: встаёт на ту же карточку-группу, если в ней остались элементы, иначе на первую из оставшихся (положение — в том же RemoteViews, до перезагрузки данных,
         // адаптер создаётся заново): отдельное partiallyUpdateAppWidget(setDisplayedChild) после notifyAppWidgetViewDataChanged гонялось с
         // перезагрузкой карточек (после двойного нажатия по привычке стопка переставала листаться).
         refreshAll(app, true, false, touchedCfgs)
@@ -1226,6 +1282,9 @@ object QrWidgets {
         val trackTop = cfg != null && tracksTop(cfg)
         val moveTop = fresh || (trackTop && (resetTop || topNew != topOld))
         val doRebuild = rebuild || moveTop
+        // Принцип «остаться на карточке»: недавнее действие на карточке-группе / карточке задач ([pinSlot]) — стопка пересоздаётся, но встаёт на неё же, а не на первую
+        val pinned = if (doRebuild && !fresh && cfg != null) pinnedSlot(cfg.id) else ""
+        val showAt = if (pinned.isNotEmpty() && cfg != null) slotPosition(app, cfg, pinned) else 0
         val svc = Intent(app, QrWidgetService::class.java)
         svc.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         // rebuild: новая версия адаптера (другой intent — система создаёт RemoteViewsAdapter и фабрику заново); иначе версия прежняя и адаптер живёт
@@ -1257,7 +1316,7 @@ object QrWidgets {
         rv.setPendingIntentTemplate(R.id.qr_stack, PendingIntent.getActivity(app, id, tpl, flags))
 
         if (doRebuild) {
-            rv.setDisplayedChild(R.id.qr_stack, 0) // тем же обновлением, что и данные: стопка показывает первую карточку
+            rv.setDisplayedChild(R.id.qr_stack, showAt) // тем же обновлением, что и данные: стопка показывает первую карточку (или ту, на которой только что было действие)
             clearReturn(app, id)
         }
         if (trackTop && (moveTop || topNew != topOld)) {
@@ -1347,7 +1406,8 @@ object QrWidgets {
         for (id in ids) {
             try {
                 val rebuild = rebuildCfgs.isNotEmpty() && cfgFor(app, id)?.id in rebuildCfgs
-                update(app, mgr, id, resetTop, rebuild)
+                // сброс наверх после действия касается только затронутого виджета (`rebuildCfgs`): стопки остальных не двигаются
+                update(app, mgr, id, resetTop && (rebuildCfgs.isEmpty() || rebuild), rebuild)
             } catch (e: Exception) {
                 // один сбойный виджет не мешает остальным
             }
