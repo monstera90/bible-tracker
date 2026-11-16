@@ -10,6 +10,7 @@ package com.app.lifetracker
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
+// Версия: 1.2 (16.11) — вход ACTION_OPEN_WIDGET_TASK (виджет → форма задачи: window.__ltOpenTaskForm / ?taskform=<id>); forwardHotkey — горячие клавиши из WebView сайтов уходят странице (HotkeysMod.press).
 // Версия: 1.1 (14.11) — вход ACTION_OPEN_EVENT (виджет → форма мероприятия: window.__ltOpenCalendarEvent / ?calev=<id>&calat=<мс>).
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
 
@@ -83,6 +84,11 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_CARD_ID = "cardId"
         const val EXTRA_CARD_MODE = "cardMode"
         private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
+
+        /** Одно нажатие на карточку задачи в виджете (ScanActivity): страница открывает форму этой задачи — window.__ltOpenTaskForm(id) / ?taskform=<id>. */
+        const val ACTION_OPEN_WIDGET_TASK = "com.app.lifetracker.OPEN_WIDGET_TASK"
+        const val EXTRA_WIDGET_TASK_ID = "widgetTaskId"
+        private val WIDGET_TASK_ID_RE = Regex("^[A-Za-z0-9_-]{1,80}$")
 
         // Шаг 5: клик по уведомлению (NotifyHelper.openIntent) открывает приложение с этими данными.
         const val ACTION_OPEN_TASK = "com.app.lifetracker.OPEN_TASK"
@@ -402,9 +408,11 @@ class MainActivity : ComponentActivity() {
         handleShareIntent(intent)
         val cardLaunch = cardLaunchOf(intent)
         val eventLaunch = eventLaunchOf(intent)
+        val taskLaunch = widgetTaskLaunchOf(intent)
         webView.loadUrl(
             when {
                 intent?.action == ACTION_DIAG -> WebAssetServer.DIAG_URL
+                taskLaunch != null -> WebAssetServer.START_URL + "?taskform=" + taskLaunch
                 eventLaunch != null -> WebAssetServer.START_URL + "?calev=" + eventLaunch.first + "&calat=" + eventLaunch.second
                 cardLaunch != null -> WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second
                 else -> WebAssetServer.START_URL
@@ -435,6 +443,15 @@ class MainActivity : ComponentActivity() {
                 webView.loadUrl(WebAssetServer.START_URL + "?calev=" + eventLaunch.first + "&calat=" + eventLaunch.second)
             }
         }
+        val taskLaunch = widgetTaskLaunchOf(intent)
+        if (taskLaunch != null) {
+            if (pageTrusted) {
+                // id проверен (буквы, цифры, «_», «-»): в строку скрипта попадать нечему
+                webView.evaluateJavascript("window.__ltOpenTaskForm && window.__ltOpenTaskForm('$taskLaunch')", null)
+            } else {
+                webView.loadUrl(WebAssetServer.START_URL + "?taskform=" + taskLaunch)
+            }
+        }
         val cardLaunch = cardLaunchOf(intent)
         if (cardLaunch != null) {
             if (pageTrusted) {
@@ -446,6 +463,23 @@ class MainActivity : ComponentActivity() {
                 webView.loadUrl(WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second)
             }
         }
+    }
+
+    /** Id задачи из intent ACTION_OPEN_WIDGET_TASK или null. */
+    private fun widgetTaskLaunchOf(intent: Intent?): String? {
+        if (intent?.action != ACTION_OPEN_WIDGET_TASK) return null
+        val id = intent.getStringExtra(EXTRA_WIDGET_TASK_ID) ?: return null
+        return if (WIDGET_TASK_ID_RE.matches(id)) id else null
+    }
+
+    /**
+     * Горячая клавиша физической клавиатуры, нажатая в WebView вкладки-сайта или «Claude» (там страница приложения событий клавиш не видит):
+     * комбинация (`ctrl+arrowright`, `ctrl+3`, …) уходит странице — window.HotkeysMod.press. [combo] собирает SelectionMenuWebView из фиксированного набора.
+     */
+    fun forwardHotkey(combo: String) {
+        if (isDestroyed || !pageTrusted) return
+        if (!Regex("^[a-z0-9+]{1,40}$").matches(combo)) return
+        runOnUiThread { webView.evaluateJavascript("window.HotkeysMod && window.HotkeysMod.press && window.HotkeysMod.press('$combo')", null) }
     }
 
     /** (id события, начало повторения в мс) из intent ACTION_OPEN_EVENT или null. */

@@ -1,4 +1,5 @@
 /* hotkeys.js
+   Версия: 1.3 (16.11) — `HotkeysMod.press(combo)`: вход для оболочки (APK) — Ctrl+стрелки, Ctrl+1…9 и Ctrl+F работают и на вкладках-сайтах, где клавиши ловит их собственный WebView. Откат: hotkeys.js 1.2.
    Версия: 1.2 (16.11) — Ctrl+1…Ctrl+9: прямой переход на N-й язычок нижнего ряда (по порядку на экране; нет такого номера — ничего не делает). Стрелки Ctrl+←/→/↑/↓ остались как были. Откат: hotkeys.js 1.1.
    Версия: 1.1 (16.11) — Ctrl+←/→/↑/↓ работают и в полноэкранном режиме / режиме чтения (язычки там спрятаны: измерение идёт с временно снятым `.reading-mode-active`, `measureWithTabsRevealed`); новая клавиша Ctrl+F — включить/выключить полноэкранный режим (`window.DisplayMode.toggleFullscreen` из my.js; работает и если режим включён кнопкой на экране). Откат: hotkeys.js 1.0.
    Версия: 1.0 (15.11) — горячие клавиши физической (bluetooth) клавиатуры. Первые четыре: Ctrl+←/→ — по язычкам нижнего ряда, Ctrl+↑/↓ — по язычкам бокового ряда.
@@ -161,5 +162,16 @@
     if(handled){ ev.preventDefault(); ev.stopPropagation(); }
   }, true);
 
-  window.HotkeysMod = { register: register, unregister: unregister };
+  // Нажатие из оболочки: на вкладках-сайтах и «Claude» клавиши ловит их собственный WebView, страница приложения события не получает — оболочка присылает комбинацию сама
+  // (`ctrl+arrowright`, `ctrl+3`, …). Поле ввода уже проверено на стороне сайта, поэтому здесь его нет; остальные условия те же, что у обычного нажатия.
+  function press(combo){
+    var entry = registry[normalize(combo)];
+    if(!entry) return false;
+    if(!entry.always && !settingsOpen()) return false;
+    var handled = false;
+    try{ handled = entry.handler({ key: String(combo).split("+").pop(), fromNative: true, preventDefault: function(){}, stopPropagation: function(){} }) === true; }catch(e){ try{ console.error("[hotkeys]", e); }catch(_){} }
+    return handled;
+  }
+
+  window.HotkeysMod = { register: register, unregister: unregister, press: press };
 })();

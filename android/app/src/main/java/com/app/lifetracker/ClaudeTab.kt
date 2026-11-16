@@ -151,6 +151,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         view?.let { return it }
         val v = SelectionMenuWebView(activity)
         v.selectionListener = activity.siteSelectionMenu
+        v.hotkeyForwarder = { combo -> activity.forwardHotkey(combo) }
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false
         v.isHorizontalScrollBarEnabled = false

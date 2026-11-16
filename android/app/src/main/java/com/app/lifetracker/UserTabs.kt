@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 8.3 (13.11)
+// Версия: 8.4 (16.11) — горячие клавиши физической клавиатуры из WebView вкладки-сайта уходят странице (hotkeyForwarder). Откат: UserTabs.kt 8.3.
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -1431,6 +1431,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         evictIfNeeded(t)
         val v = SiteWebView(activity)
         v.selectionListener = activity.siteSelectionMenu
+        v.hotkeyForwarder = { combo -> activity.forwardHotkey(combo) }
         v.setHoles(holes, 8f * activity.resources.displayMetrics.density)
         v.setBackgroundColor(0xFFFFFFFF.toInt())
         v.isVerticalScrollBarEnabled = false

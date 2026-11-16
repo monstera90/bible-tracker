@@ -5,6 +5,7 @@
    Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
    Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
    Версия: 149.5 (15.11) — белый экран после возврата из другого приложения: `flushPendingSyncNow` (сворачивание) вместо `flushPendingMdEditorEdit` зовёт `flushMdEditorOnAppPause` (`MdEditor.flushOnAppPause`, mdeditor.js 24.1) — редактор заметки больше не разрушается при сворачивании. Откат: my.js 149.4.
+   Версия: 149.6 (16.11) — вход из оболочки `window.__ltOpenTaskForm(id)` / параметр `?taskform=<id>` (`openTaskFormFromNative`, `handleTaskFormLaunchParam`): одно нажатие на карточку задачи в виджете открывает вкладку задачи и её форму (`renderTaskRowEdit`). Откат: my.js 149.5.
    Версия: 149.5 (16.11) — «Проверка обновлений»: если веб-обновление уже скачано и ждёт перезагрузки, проверка APK всё равно идёт (тихо, при открытии вкладки): кнопка «Скачать и установить приложение» и строка про приложение появляются, как только стало известно о новой сборке; нет новой сборки — вкладка выглядит как раньше. Откат: my.js 149.4.
    Версия: 149.4 (15.11) — «Проверка обновлений» проверяет и веб-часть, и сам APK (мост ≥ 38: `apkGetState` / `apkCheckNow` / `apkInstall`): две строки результата, кнопка «Скачать и установить приложение», если найдена новая сборка, ссылка «Подробнее» (версии, время проверки, ошибки, отдельные кнопки проверки каждой части); если новой веб-части нужна оболочка новее (`needApk` от WebUpdater), показывается просьба обновить приложение. В браузере строк про APK нет.
    Версия: 149.3 (14.11) — вход из оболочки `window.__ltOpenCalendarEvent(id, at)` / параметры `?calev=<id>&calat=<мс>` при старте (`openCalendarEventFromNative`, `handleCalendarEventLaunchParam`): нажатие на карточку события в виджете открывает форму этого мероприятия.
@@ -11400,6 +11401,46 @@
     })();
   }
   window.__ltOpenCalendarEvent = openCalendarEventFromNative;
+  // Одно нажатие на карточку задачи в виджете (QrWidgets → ScanActivity → MainActivity): вкладка задачи и её форма (строка в режиме редактирования).
+  // Оболочка зовёт window.__ltOpenTaskForm(id) (приложение уже запущено); холодный старт — параметр адреса ?taskform=<id>.
+  // На холодном старте задачи могут быть ещё не загружены — повторяем попытку (до ~8 с), пока строка не найдётся.
+  function openTaskFormFromNative(id){
+    id = String(id || "");
+    if(!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return;
+    var tries = 0;
+    var opened = false;
+    (function attempt(){
+      try{
+        var task = getTaskById(id);
+        if(task && task.c){
+          var tab = taskEffectiveTab(task);
+          if(!tab || !TASK_TAB_TITLES[tab] || tab === "archive") tab = isGroupTaskId(id) ? "jointtasks" : "waiting";
+          if(!opened){
+            opened = true;
+            var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
+            if(!alreadyOpen) openSettingsModal();
+            settingsActiveTabSet = 1;
+            applySettingsTabSetVisibility();
+            switchSettingsTab(tab);
+          }
+          var row = document.querySelector('.task-body[data-id="' + id + '"]');
+          if(row){
+            if(row.scrollIntoView) row.scrollIntoView({block: "center"});
+            if(!row.querySelector(".task-editable") && row.querySelector(".task-edit-btn")) renderTaskRowEdit(id, tab);
+            return;
+          }
+        }
+      }catch(e){}
+      if(++tries < 28) setTimeout(attempt, 300);
+    })();
+  }
+  window.__ltOpenTaskForm = openTaskFormFromNative;
+  function handleTaskFormLaunchParam(){
+    var m = /[?&]taskform=([A-Za-z0-9_-]{1,80})(?:&|$)/.exec(location.search || "");
+    if(!m) return;
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+    setTimeout(function(){ openTaskFormFromNative(m[1]); }, 0);
+  }
   function handleCalendarEventLaunchParam(){
     var m = /[?&]calev=([A-Za-z0-9_-]{1,64})(?:&|$)/.exec(location.search || "");
     if(!m) return;
@@ -26365,6 +26406,7 @@
   try{ if(localStorage.getItem("qrWidgets_v1")){ ensureWidgets(); window.WidgetsTab.scheduleSync(4000); } }catch(e){} // лица карточек в виджетах рабочего стола
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   try{ handleCalendarEventLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Событие из виджета: " + (e && e.message ? e.message : e)); }
+  try{ handleTaskFormLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Задача из виджета: " + (e && e.message ? e.message : e)); }
   // Главной страницы больше нет: после перезагрузки приложение сразу открывает окно настроек на последней вкладке
   // (getResumeSettingsState внутри openSettingsModal). Остальные входы (карточка из оболочки, присланный файл) идут позже
   // и просто переключают вкладку в уже открытом окне.

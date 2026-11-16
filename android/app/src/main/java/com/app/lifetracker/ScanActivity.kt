@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.7 (16.11) — одно нажатие на карточку задачи в виджете открывает приложение на форме задачи (MainActivity.ACTION_OPEN_WIDGET_TASK), двойное по-прежнему отмечает выполненной. Откат: ScanActivity.kt 13.6.
 // Версия: 13.6 (16.11) — `timerstart` (ключ карточки): нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу ([QrWidgets.startTimer]) без окна с карточкой; не вышло — прежний путь по `code`. Откат: ScanActivity.kt 13.5.
 // Версия: 13.5 (16.11) — `timerstop` (ключ карточки): повторное нажатие на идущий таймер в карточке «Таймеры» виджета останавливает его ([QrWidgets.stopTimer]), окно не нужно. Откат: ScanActivity.kt 13.4.
 // Версия: 13.4 (15.11) — любое нажатие на карточку виджета (`ACTION_SCAN_CODE` с верным `tok`) запоминается ([QrWidgets.noteTouch]): слайд-шоу виджета не листает стопку 30 с после него. Откат: ScanActivity.kt 13.3.
@@ -223,10 +224,21 @@ class ScanActivity : ComponentActivity() {
         habitHandler.postDelayed(taskSingleRun, HABIT_DOUBLE_MS)
     }
 
-    /** Второго нажатия не было: одно нажатие на задачу ничего не делает — окно закрывается. */
+    /** Второго нажатия не было: одно нажатие на задачу открывает приложение на форме этой задачи (окно запущено нами, фоновых запретов нет). */
     private fun taskSingle() {
         if (!taskWaiting) return
         taskWaiting = false
+        val id = taskId
+        try {
+            val open = Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_OPEN_WIDGET_TASK
+                putExtra(MainActivity.EXTRA_WIDGET_TASK_ID, id)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(open)
+        } catch (e: Exception) {
+            // приложение не запустилось — просто закрываем окно
+        }
         finishAndRemoveTask()
         overridePendingTransition(0, 0)
     }

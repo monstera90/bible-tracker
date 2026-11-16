@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (11.11)
+// Версия: 2.1 (16.11) — hotkeyForwarder: Ctrl+стрелки / Ctrl+1…9 / Ctrl+F с физической клавиатуры из WebView сайта уходят странице приложения. Откат: SelectionMenuWebView.kt 2.0.
 
 import android.content.Context
 import android.graphics.Rect
@@ -7,6 +7,7 @@ import android.os.Build
 import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuInflater
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.PopupMenu
@@ -46,6 +47,41 @@ open class SelectionMenuWebView(context: Context) : WebView(context) {
     }
 
     var selectionListener: SelectionListener? = null
+
+    /**
+     * Горячие клавиши приложения (Ctrl+стрелки, Ctrl+1…9, Ctrl+F) с физической клавиатуры. Пока фокус в WebView сайта, страница приложения этих нажатий не получает —
+     * без этого язычки нижнего ряда на вкладках-сайтах клавишами не переключались. Сайт нажатие получает как раньше; комбинация уходит приложению, только если
+     * на сайте курсор не в поле ввода (там Ctrl+стрелки — переход по словам). У главного WebView слушателя нет — у него страница видит клавиши сама.
+     */
+    var hotkeyForwarder: ((String) -> Unit)? = null
+
+    private fun hotkeyComboOf(ev: KeyEvent): String? {
+        if (!ev.isCtrlPressed || ev.isAltPressed || ev.isMetaPressed) return null
+        val key = when (ev.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> "arrowleft"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "arrowright"
+            KeyEvent.KEYCODE_DPAD_UP -> "arrowup"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "arrowdown"
+            KeyEvent.KEYCODE_F -> "f"
+            in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9 -> (ev.keyCode - KeyEvent.KEYCODE_0).toString()
+            else -> return null
+        }
+        return (if (ev.isShiftPressed) "ctrl+shift+" else "ctrl+") + key
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val fwd = hotkeyForwarder
+        if (fwd != null && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            val combo = hotkeyComboOf(event)
+            if (combo != null) {
+                // сначала смотрим, не в поле ли ввода курсор на сайте; ответ приходит позже, сайт при этом нажатие уже получил
+                evaluateJavascript(
+                    "(function(){var e=document.activeElement;return !!(e&&(e.isContentEditable||/^(INPUT|TEXTAREA|SELECT)\$/.test(e.tagName)));})()"
+                ) { raw -> if (raw != "true") fwd(combo) }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
     private var lastX = 0
     private var lastY = 0
 
