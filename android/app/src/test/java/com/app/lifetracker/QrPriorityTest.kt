@@ -263,15 +263,40 @@ class QrPriorityTest {
         assertEquals(0, scoreOf(none, "a"))
     }
 
-    @Test fun eventSoon_within60min_only() {
+    @Test fun eventSoon_within12h_only() {
         val c = cal(12)
         val now = c.timeInMillis
         val cards = listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 30 * min))
         val soon = run(cfg(cards, true), snap(c))
         assertEquals(listOf("e", "s"), keys(soon))
         assertEquals(QrPriority.SCORE_EVENT_SOON, scoreOf(soon, "e"))
-        val later = run(cfg(listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 61 * min)), true), snap(c))
-        assertEquals(listOf("s", "e"), keys(later))
+        // 11 ч 59 мин — ещё «скоро» (чуть ниже заведённого будильника), 12 ч 01 мин — уже круг равных
+        val near = run(cfg(listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 719 * min)), true), snap(c))
+        assertEquals(QrPriority.SCORE_EVENT_SOON, scoreOf(near, "e"))
+        assertEquals(true, QrPriority.SCORE_EVENT_SOON < QrPriority.SCORE_ALARM_SOON)
+        val later = run(cfg(listOf(card("s", times = setOf("d")), card("e", dyn = "event", at = now + 721 * min)), true), snap(c))
+        assertEquals(QrPriority.SCORE_CYCLE, scoreOf(later, "e"))
+    }
+
+    @Test fun eventSoon_respectsDaysWindow_andNoEventsNoCard() {
+        val c = cal(20) // 16.11, 20:00
+        val now = c.timeInMillis
+        val today = card("today", dyn = "event", at = now + 1 * hour)   // 21:00 сегодня
+        val tomorrow = card("tmr", dyn = "event", at = now + 5 * hour)  // 01:00 завтра: до него меньше 12 часов, но это уже завтра
+        fun cfgDays(days: Int, cards: List<Card>) = Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = true, cards = cards, events = true, eventsSoon = true, eventsDays = days)
+        // «на 1 день»: только сегодня — завтрашнее событие карточкой не показывается и балл «скоро» не получает
+        val one = run(cfgDays(1, listOf(card("q"), tomorrow)), snap(c))
+        assertEquals(listOf("q"), keys(one))
+        // «на 2 дня»: завтрашнее событие в окне и до него меньше 12 часов — «скоро»
+        val two = run(cfgDays(2, listOf(card("q"), tomorrow)), snap(c))
+        assertEquals(QrPriority.SCORE_EVENT_SOON, scoreOf(two, "tmr"))
+        // сегодняшнее при «на 1 день» — показывается как «скоро»
+        val oneToday = run(cfgDays(1, listOf(card("q"), today, tomorrow)), snap(c))
+        assertEquals(listOf("today", "q"), keys(oneToday))
+        assertEquals(QrPriority.SCORE_EVENT_SOON, scoreOf(oneToday, "today"))
+        // событий в окне нет — карточки календаря в стопке нет совсем
+        val none = run(cfgDays(1, listOf(card("q"))), snap(c))
+        assertEquals(listOf("q"), keys(none))
     }
 
     @Test fun tasks_overdue_today_tomorrow() {
