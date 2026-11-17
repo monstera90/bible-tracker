@@ -70,6 +70,9 @@
    мероприятие на этот час, щипок по вертикали — масштаб (общий `calendarHourPx_v1`); подписи часов лежат внутри колонки. Форма открывается ПОВЕРХ заметки
    (`extForm`: `.cal-dayform` в `.settings-modal-box`, `container()` отдаёт её, `renderMain` при открытой форме её закрывает и возвращает `screen`),
    заметка и редактор не перерисовываются. Колонка сама перерисовывается при изменении данных (раз в 30 с и из `tick`), сама снимается, если host ушёл из DOM.
+   Окно колонки (`dayWindowStart`): не с 00:00, а с первого ещё не закончившегося мероприятия дня за вычетом 2 часов (не больше 2 пустых часов
+   сверху; если все мероприятия прошли — с первого за день; мероприятий нет — весь день). Смещение `winOff` (минуты) учитывают раскладка блоков,
+   подписи часов, сетка, красная линия, щипок и тап по пустому месту. Окно пересчитывается в `tick`, когда мероприятие заканчивается.
    Хранилище для неё подготавливает my.js: `window.__ltEnsureCalendarStore`.
    =========================================================================== */
 (function(){
@@ -675,7 +678,8 @@
     flush();
   }
   // колонка одного дня: блоки мероприятий/трекеров (раскладка пересечений) и красная линия «сейчас»; общая для недели и колонки в ежедневной заметке
-  function dayColHtml(ds, daySegs, dayTrk, isToday, now){
+  function dayColHtml(ds, daySegs, dayTrk, isToday, now, off){
+    off = off || 0; // колонка в заметке показывает день не с 00:00, а с минуты off (dayWindowStart)
     // трекеры — такие же блоки, как мероприятия: общая раскладка дня, в колонки они встают только при пересечении по времени
     var segs = daySegs.slice();
     if(dayTrk) dayTrk.forEach(function(tg){ segs.push(tg); });
@@ -688,7 +692,7 @@
     } else packDay(segs);
     var blocks = '';
     segs.forEach(function(sg){
-      var top = sg.top * hourPx / 60;
+      var top = (sg.top - off) * hourPx / 60;
       var h = Math.max(MIN_BLOCK_PX, (sg.bottom - sg.top) * hourPx / 60 - 1);
       var w = 100 / sg.cols, left = sg.col * w;
       var posCss = 'left:' + left.toFixed(2) + '%;width:calc(' + w.toFixed(2) + '% - 1px)';
@@ -703,7 +707,7 @@
         ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
         esc(sg.ev.title) + '</div>';
     });
-    var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + (minutesOfDay(now) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
+    var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + ((minutesOfDay(now) - off) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
     return '<div class="cal-wk-col' + (isToday ? ' cal-wk-today-col' : '') + '" data-day="' + ds + '">' + blocks + nowLine + '</div>';
   }
   function weekHtml(ws){
@@ -998,6 +1002,20 @@
     screen = f.prevScreen;
     try{ f.onClose(); }catch(e){}
   }
+  // С какой минуты дня показывать колонку в заметке: с первого ещё не закончившегося мероприятия (сегодня; если все прошли — с первого за день),
+  // но не больше чем с 2 часов пустого времени до него. Мероприятий нет — весь день с 00:00.
+  var DAYCOL_LEAD_MIN = 120;
+  function dayWindowStart(segs, isToday, now){
+    var first = -1, firstAny = -1;
+    segs.forEach(function(sg){
+      if(!sg.ev) return; // трекеры окно не двигают
+      if(firstAny < 0 || sg.top < firstAny) firstAny = sg.top;
+      var over = isToday && (sg.at + sg.dur < now); // как пометка .cal-wk-past
+      if(!over && (first < 0 || sg.top < first)) first = sg.top;
+    });
+    var m = first >= 0 ? first : firstAny;
+    return m > DAYCOL_LEAD_MIN ? Math.floor(m) - DAYCOL_LEAD_MIN : 0;
+  }
   function mountDayColumn(host, opts){
     if(!host) return null;
     opts = opts || {};
@@ -1010,7 +1028,7 @@
     el.className = "cal-daycol";
     host.insertBefore(el, host.firstChild);
     host.classList.add("daycal-on");
-    var dead = false, sig = "", wasToday = false, pinch = null, timer = null, ctl = null;
+    var dead = false, sig = "", wasToday = false, pinch = null, timer = null, ctl = null, winOff = 0;
 
     function signature(){
       return JSON.stringify(load()) + "|" + (trackersOn ? JSON.stringify(trackerItems(day, dayStartAt(day, 1))) : "") + "|" + (showHidden() ? 1 : 0) + "|" + hourPx;
@@ -1021,10 +1039,14 @@
       wasToday = isToday;
       var segs = weekSegments(day, 1)[0];
       var trk = trackersOn ? weekTrackerSegments(day, 1)[0] : null;
+      winOff = dayWindowStart(segs, isToday, now);
       var labels = "";
-      for(var h = 1; h < 24; h++) labels += '<span data-h="' + h + '" style="top:' + (h * hourPx + 1) + 'px">' + pad2(h) + ':00</span>';
-      el.innerHTML = '<div class="cal-dc-body" style="height:' + (24 * hourPx) + 'px;background-size:100% ' + hourPx + 'px">' +
-        '<div class="cal-dc-labels">' + labels + '</div>' + dayColHtml(day, segs, trk, isToday, now) + '</div>';
+      for(var h = 1; h < 24; h++){
+        if(h * 60 <= winOff) continue;
+        labels += '<span data-h="' + h + '" style="top:' + (((h * 60 - winOff) * hourPx / 60) + 1) + 'px">' + pad2(h) + ':00</span>';
+      }
+      el.innerHTML = '<div class="cal-dc-body" style="height:' + ((1440 - winOff) * hourPx / 60) + 'px;overflow:hidden;background-size:100% ' + hourPx + 'px;background-position:0 ' + (((60 - winOff % 60) % 60) * hourPx / 60) + 'px">' +
+        '<div class="cal-dc-labels">' + labels + '</div>' + dayColHtml(day, segs, trk, isToday, now, winOff) + '</div>';
       applyCalColors(el);
       sig = signature();
     }
@@ -1034,11 +1056,12 @@
       if(!document.body.contains(el)){ destroy(); return; } // заметку закрыли/перерисовали — колонка не нужна
       if(extForm) return;
       var now = Date.now();
-      if(signature() !== sig || (dateValue(day) === dateValue(now)) !== wasToday){ draw(); return; }
+      var nowToday = dateValue(day) === dateValue(now);
+      if(signature() !== sig || nowToday !== wasToday || dayWindowStart(weekSegments(day, 1)[0], nowToday, now) !== winOff){ draw(); return; }
       var i, m = minutesOfDay(now), list = el.querySelectorAll(".cal-wk-now");
       for(i = 0; i < list.length; i++){
         list[i].setAttribute("data-m", String(m));
-        list[i].style.top = (m * hourPx / 60).toFixed(1) + "px";
+        list[i].style.top = ((m - winOff) * hourPx / 60).toFixed(1) + "px";
       }
       list = el.querySelectorAll(".cal-wk-ev");
       for(i = 0; i < list.length; i++){
@@ -1091,7 +1114,7 @@
       var col = e.target.closest ? e.target.closest(".cal-wk-col") : null;
       if(!col) return;
       // пустое место: новое мероприятие на этот день, начало — начало нажатого часа
-      var hour = Math.max(0, Math.min(23, Math.floor((e.clientY - col.getBoundingClientRect().top) / hourPx)));
+      var hour = Math.max(0, Math.min(23, Math.floor((winOff + (e.clientY - col.getBoundingClientRect().top) * 60 / hourPx) / 60)));
       var d = new Date(+col.getAttribute("data-day"));
       var start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime();
       openOver(function(){ openForm(null, null, start); });
@@ -1100,17 +1123,17 @@
     function applyDayZoom(px){
       hourPx = clampHour(px);
       var body = el.querySelector(".cal-dc-body");
-      if(body){ body.style.height = (24 * hourPx) + "px"; body.style.backgroundSize = "100% " + hourPx + "px"; }
+      if(body){ body.style.height = ((1440 - winOff) * hourPx / 60) + "px"; body.style.backgroundSize = "100% " + hourPx + "px"; body.style.backgroundPosition = "0 " + (((60 - winOff % 60) % 60) * hourPx / 60) + "px"; }
       var i, list = el.querySelectorAll(".cal-dc-labels span");
-      for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-h") * hourPx + 1) + "px";
+      for(i = 0; i < list.length; i++) list[i].style.top = (((+list[i].getAttribute("data-h") * 60 - winOff) * hourPx / 60) + 1) + "px";
       list = el.querySelectorAll(".cal-wk-ev, .cal-wk-trk");
       for(i = 0; i < list.length; i++){
         var t = +list[i].getAttribute("data-t"), b = +list[i].getAttribute("data-b");
-        list[i].style.top = (t * hourPx / 60).toFixed(1) + "px";
+        list[i].style.top = ((t - winOff) * hourPx / 60).toFixed(1) + "px";
         list[i].style.height = Math.max(MIN_BLOCK_PX, (b - t) * hourPx / 60 - 1).toFixed(1) + "px";
       }
       list = el.querySelectorAll(".cal-wk-now");
-      for(i = 0; i < list.length; i++) list[i].style.top = (+list[i].getAttribute("data-m") * hourPx / 60).toFixed(1) + "px";
+      for(i = 0; i < list.length; i++) list[i].style.top = ((+list[i].getAttribute("data-m") - winOff) * hourPx / 60).toFixed(1) + "px";
     }
     function gapOf(t){ return Math.abs(t[0].clientY - t[1].clientY); }
     function midOf(t){ return (t[0].clientY + t[1].clientY) / 2; }
