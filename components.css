@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.4 (17.11) — режим «Книги-карточки» списка книг: `.books-cards-grid` (карточка книги размером и с цветным выступом снизу, как `.item-card`; ширину считает `applyBookCardsSize` в my.js → `--book-card-w`). Откат: components.css 26.3.
    Версия: 16.4 (16.11) — лицо таймера карточки: svg на всю карточку (`.item-card-timer-svg`), маленькая кнопка «Стоп» в нижней полосе.
    Версия: 26.3 (15.11) — `.item-card-qr-btn` (кнопка «Показать QR-код» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 26.1.
    Версия: 26.1 (12.11)
@@ -3801,6 +3802,31 @@
      "Обложки", ТЗ пользователя от 22.09) — прячет только подписи под
      обложками, сама сетка/карточки не меняются. */
   .books-cover-grid.hide-titles .book-cover-name{ display:none; }
+
+  .books-cards-grid.hide-titles .book-cover-name{ display:none; }
+
+  /* ---------- режим «Книги-карточки» (список книг, my.js renderBooksCoverItems с cardsMode): те же .book-cover-card, но обложка —
+     карточка как .item-card вкладки QR-кодов и карточка виджета: высота = ширина × 1,02 (CARD_ASPECT/FACE_BODY), скругление
+     ширина × 0,12, цветной выступ снизу ширина × 0,04. Цвет выступа (--cover-shade) — средний цвет нижней части видимой области
+     обложки, темнее на 20 % (applyCoverShade в my.js); обложка вписывается object-fit:cover (центр кадра). Ширину карточки и число
+     колонок считает my.js (applyBookCardsSize → --book-card-w, --book-card-cols), как applySize у «Карточек предметов». ---------- */
+  .books-cards-grid{
+    display:grid;
+    grid-template-columns:repeat(var(--book-card-cols, 3), minmax(0, 1fr));
+    gap:2px;
+    row-gap:calc(var(--book-card-w, 110px) * 0.04 + 2px); /* 2px, как у обложек, плюс место под цветной выступ */
+    padding-top:2px;
+  }
+  .books-cards-grid.mdeditor-empty{ display:block; }
+  .books-cards-grid .book-cover-thumb{
+    box-sizing:border-box;
+    aspect-ratio:auto;
+    height:calc(var(--book-card-w, 110px) * 1.02);
+    border:none;
+    border-radius:calc(var(--book-card-w, 110px) * 0.12);
+    box-shadow:0 calc(var(--book-card-w, 110px) * 0.04) 0 var(--cover-shade, #8d8576);
+  }
+  .books-cards-grid .book-cover-name{ margin-top:calc(var(--book-card-w, 110px) * 0.04 + 4px); }
 
   /* ---------- список закладок (#mdBookmarksList, renderBookmarksScreen в
      mdeditor.js) растёт СНИЗУ ВВЕРХ (settings-content-bottom прижимает

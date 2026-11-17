@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 150.0 (17.11) — структурная правка: у списка книг три режима — «Книги-карточки» (новый, по умолчанию для всех), «Обложки», «Список»; кнопка нижнего ряда листает их по кругу. Выбор пользователя хранится в `state["__booksViewMode"]` ({c:"cards"|"cover"|"list", t}) и ездит через облако/архив, переживая переустановку; старый localStorage `bibleBooksViewMode_v1` один раз переносится (t=1), без записи — «cards». Карточка книги — размер и цветной выступ снизу как у карточки QR (`renderBooksCoverItems(…, true)`, `applyBookCardsSize`). Откат: my.js 149.7.
    Версия: 149.7 (16.11) — «Переслать в задачи» из кругового меню на сайтах: `window.LTSiteTask` (`tabs`, `create`) для таблички выбора списка, которую рисует оболочка (SiteSelectionMenu.kt); общая часть создания задачи вынесена в `createForwardedTask`. Откат: my.js 149.6.
    Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
    Версия: 149.6 (15.11) — подсветка вкладки «Настроение» снимается и отметкой настроения за сегодня (в т.ч. нажатой на карточке в виджете): `updateMoodTabIcon` учитывает `Mood.hasMoodMarkToday`, `drainWidgetMood` обновляет подсветку после внесения отметок. Откат: my.js 149.5.
@@ -2102,6 +2103,8 @@
   // (тот же язык, что и у READER_TEXT_ICON_SVG/READER_CHAPTERS_ICON_SVG выше для книг/глав): сетка
   // — переход к обложкам, три линии — переход обратно к списку.
   var BOOKS_VIEW_COVER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>';
+  // «Книги-карточки»: карточка с цветным выступом снизу (как карточки QR)
+  var BOOKS_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var BOOKS_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
   // шеврон "вниз" — кнопка "показать полностью"/"свернуть" у длинных задач (.task-expand-btn, см.
   // renderTaskRowView), при развороте переворачивается на 180° через CSS-класс .is-expanded
@@ -3390,6 +3393,7 @@
     // mdeditor.js).
     if(MdEditor && MdEditor.refreshBookmarksFromState) MdEditor.refreshBookmarksFromState();
     refreshHiddenTabsFromState(); // скрытые вкладки приходят из облака вместе с state
+    refreshBooksViewModeFromState(); // режим показа списка книг — тоже из облака
     refreshTabOrderFromState(); // порядок язычков тоже приходит из облака вместе с state
     refreshTabMarksFromState(); // «заходил сегодня» на ИПКД / настроение / Red — тоже из облака
     // Если сейчас открыта одна из вкладок задач
@@ -8307,7 +8311,7 @@
         "bibleBookColumns_v1": "колонки списка книг",
         "bibleTabSize_v1": "размер язычков окна настроек на этом устройстве",
         "bibleTabOrder_v1": "порядок язычков окна настроек (по группам) — старое хранилище, читается только для переноса в state",
-        "bibleBooksViewMode_v1": "вид списка книг",
+        "bibleBooksViewMode_v1": "вид списка книг — старое хранилище, читается только для переноса в state (`__booksViewMode`)",
         "bibleBooksHideTitles_v1": "скрытие заголовков книг",
         "bibleBookCoverDisabled_v1": "отключение обложек",
         "bibleReadingMode_v1": "режим чтения",
@@ -13291,15 +13295,53 @@
       hideRevealedBookActionButtons();
     });
   }
-  // "list" | "cover" — текущий режим показа списка книг; переживает перезапуск приложения.
-  var BOOKS_VIEW_MODE_KEY = "bibleBooksViewMode_v1";
+  // "cards" | "cover" | "list" — режим показа списка книг: «Книги-карточки» (по умолчанию), «Обложки», «Список».
+  // Выбор пользователя лежит в state (`__booksViewMode` = {c: режим, t}) и ездит через облако и архив — переживает
+  // перезапуск и переустановку приложения. Пока пользователь режим сам не выбирал, записи в state нет и действует
+  // режим по умолчанию (BOOKS_VIEW_MODE_DEFAULT) — так «по умолчанию» меняется для всех, а чужой выбор не затирается.
+  // Старое хранилище — localStorage `bibleBooksViewMode_v1`: писалось только по нажатию кнопки («cover»/«list»), то есть
+  // это всегда осознанный выбор; один раз переносится в state (t=1 — любое настоящее изменение на другом устройстве новее).
+  var BOOKS_VIEW_MODE_KEY = "bibleBooksViewMode_v1"; // старое хранилище — только для переноса
+  var BOOKS_VIEW_MODE_STATE_KEY = "__booksViewMode";
+  var BOOKS_VIEW_MODES = ["cards", "cover", "list"]; // порядок переключения кнопкой
+  var BOOKS_VIEW_MODE_DEFAULT = "cards";
+  function normBooksViewMode(v){ return BOOKS_VIEW_MODES.indexOf(v) >= 0 ? v : null; }
   function getBooksViewMode(){
-    try{ return localStorage.getItem(BOOKS_VIEW_MODE_KEY) === "cover" ? "cover" : "list"; }catch(e){ return "list"; }
+    var rec = state[BOOKS_VIEW_MODE_STATE_KEY];
+    var m = rec ? normBooksViewMode(rec.c) : null;
+    if(m) return m;
+    try{
+      var legacy = normBooksViewMode(localStorage.getItem(BOOKS_VIEW_MODE_KEY));
+      if(legacy === "cover" || legacy === "list"){
+        state[BOOKS_VIEW_MODE_STATE_KEY] = {c: legacy, t: 1};
+        saveLocalStateNow();
+        scheduleCloudPush();
+        return legacy;
+      }
+    }catch(e){}
+    return BOOKS_VIEW_MODE_DEFAULT;
   }
   function setBooksViewMode(mode){
-    try{ localStorage.setItem(BOOKS_VIEW_MODE_KEY, mode === "cover" ? "cover" : "list"); }catch(e){}
+    state[BOOKS_VIEW_MODE_STATE_KEY] = {c: normBooksViewMode(mode) || BOOKS_VIEW_MODE_DEFAULT, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+    try{ localStorage.removeItem(BOOKS_VIEW_MODE_KEY); }catch(e){}
   }
-  var booksViewMode = getBooksViewMode();
+  // режим читается лениво (state к моменту загрузки этого места может быть ещё не слит с облаком) и сбрасывается после слияния
+  var booksViewMode = null;
+  function curBooksViewMode(){
+    if(!booksViewMode) booksViewMode = getBooksViewMode();
+    return booksViewMode;
+  }
+  function nextBooksViewMode(mode){
+    return BOOKS_VIEW_MODES[(BOOKS_VIEW_MODES.indexOf(mode) + 1) % BOOKS_VIEW_MODES.length];
+  }
+  // после слияния с облаком (rerenderAllFromState): режим мог прийти с другого устройства
+  function refreshBooksViewModeFromState(){
+    var before = booksViewMode;
+    booksViewMode = null;
+    if(before && curBooksViewMode() !== before && document.getElementById("booksList")) renderSettingsTabBooks();
+  }
   // Скрытие заглавий под обложками в режиме "Обложки" — своя кнопка нижнего ряда, только в этом
   // режиме; сохраняется между запусками (тот же приём try/catch, что и bibleReadingMode_v1 ниже по
   // файлу).
@@ -13495,8 +13537,16 @@
   // слева направо в разметке = справа налево на экране (см. .mdeditor-fab-row — position:absolute +
   // inset-inline-end, последний в разметке стоит ближе всего к правому краю): скрыть заглавия
   // (только режим "Обложки"), "i", загрузить книгу, переключатель список/обложки, закладки, домик-заглушка.
+  function booksViewModeBtnInfo(mode){ // кнопка показывает режим, В КОТОРЫЙ переключит клик
+    var next = nextBooksViewMode(mode);
+    return next === "cards" ? {title: "Книги-карточки", icon: BOOKS_VIEW_CARDS_ICON_SVG}
+      : next === "cover" ? {title: "Обложки", icon: BOOKS_VIEW_COVER_ICON_SVG}
+      : {title: "Список", icon: BOOKS_VIEW_LIST_ICON_SVG};
+  }
   function booksFabRowHtml(){
-    var coverMode = booksViewMode === "cover";
+    var mode = curBooksViewMode();
+    var coverMode = mode !== "list"; // «Обложки» и «Книги-карточки»: подписи под обложками можно скрыть
+    var modeBtn = booksViewModeBtnInfo(mode);
     var hideTitlesOn = getBooksHideTitles();
     return (
       '<div class="mdeditor-fab-row">' +
@@ -13506,8 +13556,8 @@
         '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         ipkdFabBtnHtml() + // ИПКД — сразу справа от «i» (число месяца, открывает сегодняшний день)
         '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub, pdf или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
-        '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + (coverMode ? "Список" : "Обложки") + '">' +
-          (coverMode ? BOOKS_VIEW_LIST_ICON_SVG : BOOKS_VIEW_COVER_ICON_SVG) +
+        '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + modeBtn.title + '">' +
+          modeBtn.icon +
         '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksBookmarksBtn" title="Закладки">' + READER_BOOKMARK_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
@@ -13522,7 +13572,7 @@
     var modeBtn = document.getElementById("booksViewModeBtn");
     if(modeBtn){
       modeBtn.addEventListener("click", function(){
-        booksViewMode = (booksViewMode === "cover") ? "list" : "cover";
+        booksViewMode = nextBooksViewMode(curBooksViewMode());
         setBooksViewMode(booksViewMode);
         renderSettingsTabBooks();
       });
@@ -13589,6 +13639,7 @@
           if(nowDisabled){
             thumb.classList.add("book-cover-placeholder");
             thumb.innerHTML = BOOK_COVER_PLACEHOLDER_HTML;
+            if(containerEl.classList.contains("books-cards-grid")) applyCoverShade(thumb); // выступ снова по цвету заглушки
           } else {
             loadBookCoverIntoThumb(idx, it.hash);
           }
@@ -13682,12 +13733,37 @@
     });
   }
 
+  // Ширина карточки в режиме «Книги-карточки»: тот же расчёт, что applySize у «Карточек предметов» (itemcards.js) — база 110px
+  // (BOOKS_BASE_PX), зазор 2px, число колонок целое, карточки занимают всю ширину. От --book-card-w в CSS считается всё:
+  // высота (×1,02 — CARD_ASPECT / FACE_BODY виджета), скругление (×0,12), выступ снизу (×0,04).
+  var BOOK_CARD_BASE_PX = 110, BOOK_CARD_GAP_PX = 2;
+  function applyBookCardsSize(gridEl){
+    if(!gridEl) return;
+    var inner = gridEl.clientWidth;
+    if(!(inner > 40)) inner = 329; // область вкладки ещё не измерима: запасное значение (экран ~390px)
+    var cols = Math.max(1, Math.floor((inner + BOOK_CARD_GAP_PX) / (BOOK_CARD_BASE_PX + BOOK_CARD_GAP_PX)));
+    var w = (inner - BOOK_CARD_GAP_PX * (cols - 1)) / cols;
+    gridEl.style.setProperty("--book-card-cols", String(cols));
+    gridEl.style.setProperty("--book-card-w", (Math.floor(w * 100) / 100) + "px");
+  }
+  var bookCardsResizeTimer = null;
+  window.addEventListener("resize", function(){ // поворот экрана: колонки пересчитываются
+    if(bookCardsResizeTimer) clearTimeout(bookCardsResizeTimer);
+    bookCardsResizeTimer = setTimeout(function(){
+      var g = document.getElementById("booksList");
+      if(g && g.classList.contains("books-cards-grid")) applyBookCardsSize(g);
+    }, 120);
+  });
+
   // Разметка одной карточки сетки обложек (режим "Обложки") — заглушка сразу, реальная обложка
   // (если уже извлечена, см. getBookCoverUrl выше) подставляется в неё асинхронно, по мере
   // готовности каждой отдельно (не блокируя показ остальных карточек) — кроме книг, у которых
   // обложка "сброшена" кнопкой mdeditor-cover-reset-btn (isBookCoverDisabled), для них заглушка так
   // и остаётся, подгрузка не запускается.
-  function renderBooksCoverItems(gridEl, items){
+  // cardsMode — режим «Книги-карточки»: те же карточки (.book-cover-card), но по размеру и с цветным выступом снизу, как карточки QR
+  // (components.css, .books-cards-grid); ширину колонки считает applyBookCardsSize.
+  function renderBooksCoverItems(gridEl, items, cardsMode){
+    if(cardsMode) applyBookCardsSize(gridEl);
     items.forEach(function(it, idx){
       var card = document.createElement("div");
       card.className = "book-cover-card";
@@ -13705,7 +13781,7 @@
         '</div>';
       card.querySelector(".book-cover-name").textContent = it.name;
       gridEl.appendChild(card);
-      applyCoverShade(card.querySelector(".book-cover-thumb")); // заглушка: выступ по её цвету
+      if(cardsMode) applyCoverShade(card.querySelector(".book-cover-thumb")); // заглушка: выступ по её цвету
       if(it.hash && !isBookCoverDisabled(it.hash)) loadBookCoverIntoThumb(idx, it.hash);
     });
     bindBooksRowActions(gridEl, items, true);
@@ -13723,13 +13799,13 @@
     }
 
     var html = '';
-    html += iconRow(BOOKS_VIEW_COVER_ICON_SVG, "Переключает список книг между показом обложками и обычным списком с именами файлов.");
+    html += iconRow(BOOKS_VIEW_CARDS_ICON_SVG, "Переключает показ книг по кругу: «Книги-карточки» (по умолчанию: обложки размером с карточки виджета и QR-кодов, с цветным выступом снизу), «Обложки» (обычные обложки) и «Список» (имена файлов). Выбранный режим запоминается и переживает перезапуск и переустановку приложения.");
     html += iconRow(ipkdDaySvg(), "ИПКД: открывает ежедневное чтение на сегодняшнем дне. На кнопке — сегодняшнее число месяца. Пока сегодня ИПКД не открывали, язычок «Мои книги» внизу залит цветом. Внутри ИПКД «домик» возвращает к списку книг.");
     html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). PDF открывается страницами, как в обычном просмотрщике (картинки и оригинальная вёрстка; масштаб — щипком или двойным касанием). Если страницами открыть не удалось, PDF читается как текст — тогда сканы без текстового слоя и зашифрованные файлы не читаются.");
-    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режиме «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
-    html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
-    html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке или на обложке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
-    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режиме «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
+    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
+    html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
+    html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
+    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
 
     container.innerHTML =
       '<h3 class="common-tab-title">Книги — кнопки</h3>' +
@@ -13755,9 +13831,12 @@
     syncFileRegistry("books");
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    var coverMode = booksViewMode === "cover";
+    var mode = curBooksViewMode();
+    var coverMode = mode !== "list"; // сетка («Обложки» или «Книги-карточки»), а не список
+    var cardsMode = mode === "cards";
     var hideTitlesOn = coverMode && getBooksHideTitles();
-    var listClass = coverMode ? "books-cover-grid" : "mdeditor-list";
+    var gridClass = cardsMode ? "books-cards-grid" : "books-cover-grid";
+    var listClass = coverMode ? gridClass : "mdeditor-list";
     if(hideTitlesOn) listClass += " hide-titles";
     var html = '<div class="mdeditor-tab books-list-tab">';
     html += '<h3 class="common-tab-title">Мои книги</h3>';
@@ -13790,12 +13869,12 @@
     listBooksEntries().then(function(items){
       if(!document.getElementById("booksList")) return; // вкладку успели покинуть
       if(!items.length){
-        listEl.className = coverMode ? "books-cover-grid mdeditor-empty" : "mdeditor-empty";
+        listEl.className = coverMode ? gridClass + " mdeditor-empty" : "mdeditor-empty";
         listEl.textContent = "Книг пока нет.";
         restoreTabScroll("set2s_7");
         return;
       }
-      if(coverMode) renderBooksCoverItems(listEl, items);
+      if(coverMode) renderBooksCoverItems(listEl, items, cardsMode);
       else renderBooksListItems(listEl, items);
       container.addEventListener("click", function(e){
         if(!e.target.closest(".mdeditor-row, .book-cover-card")) hideRevealedBookActionButtons();
