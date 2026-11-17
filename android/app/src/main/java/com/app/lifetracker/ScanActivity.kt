@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.8 (17.11) — `booktap`: нажатие по центру карточки «Книги» в виджете ничего не делает (окно не открывается). Откат: ScanActivity.kt 13.7.
 // Версия: 13.7 (16.11) — одно нажатие на карточку задачи в виджете открывает приложение на форме задачи (MainActivity.ACTION_OPEN_WIDGET_TASK), двойное по-прежнему отмечает выполненной. Откат: ScanActivity.kt 13.6.
 // Версия: 13.6 (16.11) — `timerstart` (ключ карточки): нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу ([QrWidgets.startTimer]) без окна с карточкой; не вышло — прежний путь по `code`. Откат: ScanActivity.kt 13.5.
 // Версия: 13.5 (16.11) — `timerstop` (ключ карточки): повторное нажатие на идущий таймер в карточке «Таймеры» виджета останавливает его ([QrWidgets.stopTimer]), окно не нужно. Откат: ScanActivity.kt 13.4.
@@ -162,10 +163,12 @@ class ScanActivity : ComponentActivity() {
      * повторения, мс) открывает приложение на форме этого события (MainActivity.ACTION_OPEN_EVENT). Окно и страница сканера не нужны. true — это был такой запрос.
      */
     private fun handleEvent(i: Intent?): Boolean {
-        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen") || i.hasExtra("tknav") || i.hasExtra("alnav") || i.hasExtra("habnav"))) return false
+        if (i == null || i.action != ACTION_SCAN_CODE || !(i.hasExtra("evnav") || i.hasExtra("evopen") || i.hasExtra("tknav") || i.hasExtra("alnav") || i.hasExtra("habnav") || i.hasExtra("booktap"))) return false
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             try {
-                if (i.hasExtra("tknav")) {
+                if (i.hasExtra("booktap")) {
+                    // карточка «Книги»: по центру ничего не делает
+                } else if (i.hasExtra("tknav")) {
                     QrWidgets.taskNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("tknav", 0))
                 } else if (i.hasExtra("alnav")) {
                     QrWidgets.alarmNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("alnav", 0))

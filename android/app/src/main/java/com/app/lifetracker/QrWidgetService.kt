@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.18 (17.11) — карточка «Книги»: у центра и самой карточки теперь всегда есть fill-in intent `booktap` (пустое действие). Без него переиспользованный элемент стопки сохранял нажатие прежней карточки (таймер «Кофе» запускался от нажатия на книгу). Откат: QrWidgetService.kt 2.17.
 // Версия: 2.17 (17.11) — карточка «Книги»: края листают книги (как у других групп), по центру и по самой карточке нажатие ничего не делает. Откат: QrWidgetService.kt 2.16.
 // Версия: 2.16 (17.11) — порядок карточек берётся с учётом заморозки диспетчера движения (`QrWidgets.order(ctx, cfg, widgetId)`): пока пользователь работает с карточками, стопка не перестраивается под рукой, меняются только лица; показанный порядок запоминается (`QrWidgets.noteShown`). Откат: QrWidgetService.kt 2.15.
 // Версия: 2.15 (16.11) — не запущенный таймер в карточке «Таймеры»: нажатие запускает его сразу (`timerstart`), без окна с карточкой на весь экран; код карточки лежит рядом как запасной путь. Откат: QrWidgetService.kt 2.14.
@@ -112,7 +113,13 @@ class QrWidgetService : RemoteViewsService() {
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("habnav", -1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("habnav", 1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 val item = groupViews[c.key]?.card
-                if (item != null && c.dyn != "book") { // у книг нажатия по центру нет: без fill-in intent шаблон не срабатывает
+                if (c.dyn == "book" || item?.dyn == "book") {
+                    // у книг нажатия по центру нет, но fill-in intent задаётся ВСЕГДА: элемент списка переиспользуется, и без него у книги оставалось нажатие
+                    // прежней карточки в этом же элементе (таймер «Кофе» запускался от нажатия на книгу). ScanActivity узнаёт `booktap` и ничего не делает.
+                    val noop = Intent().putExtra("booktap", true)
+                    rv.setOnClickFillInIntent(R.id.ev_center, noop)
+                    rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(noop))
+                } else if (item != null) {
                     val tap = if (c.dyn == "habit") {
                         // привычка: ScanActivity ждёт второго нажатия (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
                         Intent().putExtra("key", item.key).putExtra("habit", true).putExtra("code", item.code)
