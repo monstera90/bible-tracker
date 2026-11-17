@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 150.1 (17.11) — режим «Книги-карточки»: в меню долгого удержания книги кнопка «Положение обложки» (`.mdeditor-cover-pos-btn`, только в этом режиме) открывает экран `openBookCoverPosition`: окошко размером с карточку, обложка двигается пальцем по вертикали, рядом полоска всей обложки с рамкой видимой части. Положение (0–100 %, по умолчанию 50) хранится по книге в state `__bookCoverPos:<хэш>` ({c:"v1:NN", t}), ездит через облако и архив; применяется как `object-position` карточки и учитывается в цвете выступа (`applyCoverShade`). Откат: my.js 150.0.
    Версия: 150.0 (17.11) — структурная правка: у списка книг три режима — «Книги-карточки» (новый, по умолчанию для всех), «Обложки», «Список»; кнопка нижнего ряда листает их по кругу. Выбор пользователя хранится в `state["__booksViewMode"]` ({c:"cards"|"cover"|"list", t}) и ездит через облако/архив, переживая переустановку; старый localStorage `bibleBooksViewMode_v1` один раз переносится (t=1), без записи — «cards». Карточка книги — размер и цветной выступ снизу как у карточки QR (`renderBooksCoverItems(…, true)`, `applyBookCardsSize`). Откат: my.js 149.7.
    Версия: 149.7 (16.11) — «Переслать в задачи» из кругового меню на сайтах: `window.LTSiteTask` (`tabs`, `create`) для таблички выбора списка, которую рисует оболочка (SiteSelectionMenu.kt); общая часть создания задачи вынесена в `createForwardedTask`. Откат: my.js 149.6.
    Версия: 59.2 (16.11) — `window.DisplayMode` (`toggleFullscreen`, `isFullscreen`) для горячей клавиши Ctrl+F (hotkeys.js).
@@ -2103,6 +2104,9 @@
   // (тот же язык, что и у READER_TEXT_ICON_SVG/READER_CHAPTERS_ICON_SVG выше для книг/глав): сетка
   // — переход к обложкам, три линии — переход обратно к списку.
   var BOOKS_VIEW_COVER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>';
+  // «Положение обложки»: окошко и стрелки вверх/вниз
+  var BOOK_COVER_POS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="8" width="12" height="8" rx="2"></rect><polyline points="9,5 12,2.5 15,5"></polyline><polyline points="9,19 12,21.5 15,19"></polyline></svg>';
+  var BOOK_COVER_POS_CENTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="3" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="21"></line><line x1="3" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="21" y2="12"></line></svg>';
   // «Книги-карточки»: карточка с цветным выступом снизу (как карточки QR)
   var BOOKS_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var BOOKS_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
@@ -13605,7 +13609,7 @@
   function hideRevealedBookActionButtons(){
     if(!revealedBookDeleteRows.size) return;
     revealedBookDeleteRows.clear();
-    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-note-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
+    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-cover-pos-btn.visible, #booksList .mdeditor-note-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
       btn.classList.remove("visible");
     });
   }
@@ -13615,7 +13619,7 @@
   function bindBooksRowActions(containerEl, items, isCoverMode){
     bindBooksOutsideClickOnce();
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
-    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
+    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-cover-pos-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
     // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js)
     var press = LTPress.bind(containerEl, { sel: rowSelector, ms: 350, blockAll: true, onLong: function(info){
       var it = items[Number(info.el.dataset.index)];
@@ -13644,6 +13648,17 @@
             loadBookCoverIntoThumb(idx, it.hash);
           }
         }
+        return;
+      }
+      if(isCoverMode && e.target.closest(".mdeditor-cover-pos-btn")){
+        press.reset();
+        var posThumb = document.getElementById("bookCoverThumb_" + Number(rowEl.dataset.index));
+        if(!posThumb || posThumb.classList.contains("book-cover-placeholder") || !posThumb.querySelector("img")){
+          var st = document.getElementById("booksStatus");
+          if(st){ st.textContent = "У этой книги нет обложки — положение задавать не для чего."; st.classList.add("error"); }
+          return;
+        }
+        openBookCoverPosition(it);
         return;
       }
       if(e.target.closest(".mdeditor-note-btn")){
@@ -13697,6 +13712,24 @@
   // рендера и для повторного включения кнопкой "Сбросить обложку" — mdeditor-cover-reset-btn).
   // draggable="false" — вместе с CSS (-webkit-user-drag:none, components.css) убирает системное
   // перетаскивание/контекстное меню картинки на долгом нажатии.
+  // Положение обложки в карточке («Книги-карточки»): по вертикали, % от 0 (видна верхняя часть) до 100 (нижняя), по умолчанию 50.
+  // По записи на книгу — state `__bookCoverPos:<хэш>` = {c: "v1:NN", t}; ездит через облако и архив (слияние по последнему t).
+  var BOOK_COVER_POS_PREFIX = "__bookCoverPos:";
+  function getBookCoverPos(hash){
+    var rec = hash ? state[BOOK_COVER_POS_PREFIX + hash] : null;
+    if(rec && typeof rec.c === "string" && rec.c.indexOf("v1:") === 0){
+      var v = parseFloat(rec.c.slice(3));
+      if(v >= 0 && v <= 100) return v;
+    }
+    return 50;
+  }
+  function setBookCoverPos(hash, pct){
+    if(!hash) return;
+    pct = Math.max(0, Math.min(100, Math.round(pct)));
+    state[BOOK_COVER_POS_PREFIX + hash] = {c: "v1:" + pct, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+  }
   // Цветной выступ под обложкой (как у карточек QR-кодов): цвет — средний по нижней части видимой области обложки, темнее на 20 %
   // (та же формула, что cardShade в itemcards.js). Нет доступа к пикселям — остаётся серый по умолчанию.
   function applyCoverShade(thumb){
@@ -13707,7 +13740,8 @@
         var nw = img.naturalWidth, nh = img.naturalHeight;
         if(!nw || !nh) return;
         var target = 1 / 1.02, ar = nw / nh, vh = ar < target ? nh * ar / target : nh;
-        var y0 = (nh - vh) / 2 + vh * 0.7, sh = vh * 0.3;
+        var pos = parseFloat(thumb.dataset.coverPos); if(!(pos >= 0 && pos <= 100)) pos = 50;
+        var y0 = (nh - vh) * pos / 100 + vh * 0.7, sh = vh * 0.3;
         var cv = document.createElement("canvas"); cv.width = 24; cv.height = 8;
         var g = cv.getContext("2d");
         g.drawImage(img, 0, y0, nw, sh, 0, 0, 24, 8);
@@ -13729,6 +13763,11 @@
       if(!thumb) return;
       thumb.classList.remove("book-cover-placeholder");
       thumb.innerHTML = '<img src="' + url + '" alt="" draggable="false">';
+      if(thumb.closest(".books-cards-grid")){ // «Книги-карточки»: показываем выбранную пользователем часть обложки
+        var pos = getBookCoverPos(hash);
+        thumb.dataset.coverPos = String(pos);
+        thumb.querySelector("img").style.objectPosition = "50% " + pos + "%";
+      }
       applyCoverShade(thumb);
     });
   }
@@ -13774,6 +13813,7 @@
         '<div class="book-cover-name"></div>' +
         '<div class="book-cover-actions">' +
           '<button type="button" class="mdeditor-cover-reset-btn' + (revealed ? " visible" : "") + '" title="Сбросить обложку">' + BOOK_COVER_RESET_ICON_SVG + '</button>' +
+          (cardsMode ? '<button type="button" class="mdeditor-cover-pos-btn' + (revealed ? " visible" : "") + '" title="Положение обложки">' + BOOK_COVER_POS_ICON_SVG + '</button>' : "") +
           '<button type="button" class="mdeditor-note-btn' + (revealed ? " visible" : "") + '" title="Заметка книги">' + BOOK_NOTE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-share-btn' + (revealed ? " visible" : "") + '" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
@@ -13785,6 +13825,93 @@
       if(it.hash && !isBookCoverDisabled(it.hash)) loadBookCoverIntoThumb(idx, it.hash);
     });
     bindBooksRowActions(gridEl, items, true);
+  }
+
+  // Экран «Положение обложки» (режим «Книги-карточки», кнопка .mdeditor-cover-pos-btn): окошко размером с карточку (та же
+  // пропорция 1:1,02, скругление и выступ, что у карточек списка) + полоска всей обложки с рамкой видимой части. Обложка
+  // двигается пальцем по вертикали (object-position: 50% NN%); положение сохраняется по отпусканию пальца (setBookCoverPos).
+  // Подменяет #settingsTabContent целиком, как renderBooksInfoScreen; «домик» возвращает к списку книг.
+  function openBookCoverPosition(it){
+    var container = document.getElementById("settingsTabContent");
+    if(!container || !it || !it.hash) return;
+    if(window.AppNav) window.AppNav.push(function(){ renderSettingsTabBooks(); });
+    container.innerHTML =
+      '<div class="mdeditor-tab cover-pos-tab">' +
+        '<h3 class="common-tab-title">Положение обложки</h3>' +
+        '<div class="cover-pos-wrap" id="coverPosWrap"></div>' +
+        '<div class="mdeditor-status" id="coverPosHint"></div>' +
+        '<div class="mdeditor-fab-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="coverPosCenterBtn" title="По центру">' + BOOK_COVER_POS_CENTER_ICON_SVG + '</button>' +
+          '<button type="button" class="mdeditor-fab-btn" id="coverPosHomeBtn" title="Назад к книгам">' + READER_HOME_ICON_SVG + '</button>' +
+        '</div>' +
+      '</div>';
+    var homeBtn = document.getElementById("coverPosHomeBtn");
+    if(homeBtn) homeBtn.addEventListener("click", function(){
+      if(window.AppNav) window.AppNav.push(function(){ openBookCoverPosition(it); });
+      renderSettingsTabBooks();
+    });
+    var wrap = document.getElementById("coverPosWrap"), hint = document.getElementById("coverPosHint"), centerBtn = document.getElementById("coverPosCenterBtn");
+    getBookCoverUrl(it.hash).then(function(url){
+      if(!document.getElementById("coverPosWrap")) return; // экран успели покинуть
+      if(!url){ hint.textContent = "У этой книги нет обложки."; return; }
+      var probe = new Image();
+      probe.onload = function(){
+        if(!document.getElementById("coverPosWrap")) return;
+        var nw = probe.naturalWidth, nh = probe.naturalHeight;
+        var STRIP_W = 56;
+        var avail = (container.clientWidth || 360) - 16;
+        var W = Math.max(120, Math.min(320, Math.floor(avail - STRIP_W - 16)));
+        var Hw = Math.round(W * 1.02);
+        var Himg = W * nh / nw; // высота обложки, вписанной в ширину окошка
+        var range = Himg - Hw;  // на сколько обложка выше окошка: именно на столько её можно двигать
+        var stripH = Math.round(STRIP_W * nh / nw), frameH = Math.round(STRIP_W * 1.02);
+        wrap.innerHTML =
+          '<div class="cover-pos-window" id="coverPosWindow" style="width:' + W + 'px;height:' + Hw + 'px;--book-card-w:' + W + 'px"><img src="' + url + '" alt="" draggable="false"></div>' +
+          '<div class="cover-pos-strip" style="width:' + STRIP_W + 'px;height:' + stripH + 'px"><img src="' + url + '" alt="" draggable="false"><div class="cover-pos-frame" id="coverPosFrame" style="height:' + frameH + 'px"></div></div>';
+        var win = document.getElementById("coverPosWindow"), img = win.querySelector("img"), frame = document.getElementById("coverPosFrame");
+        var pos = getBookCoverPos(it.hash);
+        function show(){
+          img.style.objectPosition = "50% " + pos + "%";
+          frame.style.top = Math.round((stripH - frameH) * pos / 100) + "px";
+          win.dataset.coverPos = String(pos);
+          applyCoverShade(win); // выступ окошка — по цвету видимой части
+        }
+        show();
+        if(!(range > 1)){
+          hint.textContent = "Эта обложка не выше карточки — по вертикали двигать нечего.";
+          centerBtn.disabled = true;
+          return;
+        }
+        hint.textContent = "Двигайте обложку пальцем вверх-вниз: в окошке — то, что будет видно в карточке.";
+        var startY = 0, startPos = 0, dragging = false;
+        win.addEventListener("pointerdown", function(e){
+          dragging = true; startY = e.clientY; startPos = pos;
+          try{ win.setPointerCapture(e.pointerId); }catch(err){}
+          e.preventDefault();
+        });
+        win.addEventListener("pointermove", function(e){
+          if(!dragging) return;
+          pos = Math.max(0, Math.min(100, startPos - (e.clientY - startY) / range * 100)); // палец вниз — видна верхняя часть
+          show();
+        });
+        function end(){
+          if(!dragging) return;
+          dragging = false;
+          setBookCoverPos(it.hash, pos);
+          pos = getBookCoverPos(it.hash);
+          show();
+        }
+        win.addEventListener("pointerup", end);
+        win.addEventListener("pointercancel", end);
+        centerBtn.addEventListener("click", function(){
+          setBookCoverPos(it.hash, 50);
+          pos = 50;
+          show();
+        });
+      };
+      probe.onerror = function(){ hint.textContent = "Не удалось прочитать обложку."; };
+      probe.src = url;
+    });
   }
 
   // Полноэкранная инструкция вкладки "Книги" — открывается кнопкой "i" из нижнего ряда
@@ -13805,6 +13932,7 @@
     html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
+    html += iconRow(BOOK_COVER_POS_ICON_SVG, "Только в режиме «Книги-карточки», в тех же раскрывающихся кнопках: «Положение обложки» — обложка книги обычно выше карточки, и здесь пальцем двигается вверх-вниз та часть, что видна в окошке карточки. Рядом — полоска всей обложки с рамкой видимой части; кнопка с прицелом возвращает положение по центру. Положение запоминается для каждой книги.");
     html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
 
     container.innerHTML =

@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.5 (17.11) — экран «Положение обложки» книги-карточки (`.cover-pos-*`), кнопка `.mdeditor-cover-pos-btn` оформлена как остальные кнопки карточки книги. Откат: components.css 26.4.
    Версия: 26.4 (17.11) — режим «Книги-карточки» списка книг: `.books-cards-grid` (карточка книги размером и с цветным выступом снизу, как `.item-card`; ширину считает `applyBookCardsSize` в my.js → `--book-card-w`). Откат: components.css 26.3.
    Версия: 16.4 (16.11) — лицо таймера карточки: svg на всю карточку (`.item-card-timer-svg`), маленькая кнопка «Стоп» в нижней полосе.
    Версия: 26.3 (15.11) — `.item-card-qr-btn` (кнопка «Показать QR-код» среди кнопок карточки при удержании) оформлена как кнопка-глаз. Откат: components.css 26.1.
@@ -3634,6 +3635,7 @@
      только за необратимым удалением. Используются и в строке списка
      (.mdeditor-row), и в сетке обложек (.book-cover-actions ниже). ---------- */
   .mdeditor-cover-reset-btn,
+  .mdeditor-cover-pos-btn,
   .mdeditor-note-btn,
   .mdeditor-share-btn,
   .mdeditor-edit-btn{
@@ -3652,15 +3654,18 @@
     -webkit-tap-highlight-color:transparent;
   }
   .mdeditor-cover-reset-btn svg,
+  .mdeditor-cover-pos-btn svg,
   .mdeditor-note-btn svg,
   .mdeditor-share-btn svg,
   .mdeditor-edit-btn svg{ width:16px; height:16px; }
   .mdeditor-cover-reset-btn.visible,
+  .mdeditor-cover-pos-btn.visible,
   .mdeditor-note-btn.visible,
   .mdeditor-share-btn.visible,
   .mdeditor-edit-btn.visible{ visibility:visible; }
   @media (hover:hover) and (pointer:fine){
     .mdeditor-cover-reset-btn:hover,
+    .mdeditor-cover-pos-btn:hover,
     .mdeditor-note-btn:hover,
     .mdeditor-share-btn:hover,
     .mdeditor-edit-btn:hover{ background:var(--parchment-dark); }
@@ -3782,6 +3787,7 @@
      новой CSS-переменной не заводим, plain rgba() — универсально
      поддерживается, в отличие от color-mix()). */
   .book-cover-actions .mdeditor-cover-reset-btn,
+  .book-cover-actions .mdeditor-cover-pos-btn,
   .book-cover-actions .mdeditor-note-btn,
   .book-cover-actions .mdeditor-share-btn,
   .book-cover-actions .mdeditor-edit-btn,
@@ -3792,6 +3798,7 @@
   .book-cover-actions .mdeditor-delete-btn{ color:#ff8a80; }
   @media (hover:hover) and (pointer:fine){
     .book-cover-actions .mdeditor-cover-reset-btn:hover,
+    .book-cover-actions .mdeditor-cover-pos-btn:hover,
     .book-cover-actions .mdeditor-note-btn:hover,
     .book-cover-actions .mdeditor-share-btn:hover,
     .book-cover-actions .mdeditor-edit-btn:hover,
@@ -3827,6 +3834,21 @@
     box-shadow:0 calc(var(--book-card-w, 110px) * 0.04) 0 var(--cover-shade, #8d8576);
   }
   .books-cards-grid .book-cover-name{ margin-top:calc(var(--book-card-w, 110px) * 0.04 + 4px); }
+
+  /* ---------- экран «Положение обложки» (my.js openBookCoverPosition): окошко как карточка + полоска всей обложки ---------- */
+  .cover-pos-wrap{ display:flex; align-items:flex-start; justify-content:center; gap:16px; padding:8px 0 calc(var(--book-card-w, 110px) * 0.04 + 8px); }
+  .cover-pos-window{
+    position:relative; flex:0 0 auto; overflow:hidden; box-sizing:border-box;
+    border-radius:calc(var(--book-card-w, 110px) * 0.12);
+    background:#dcd6cc;
+    box-shadow:0 calc(var(--book-card-w, 110px) * 0.04) 0 var(--cover-shade, #8d8576);
+    touch-action:none; cursor:grab;
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+  }
+  .cover-pos-window img{ width:100%; height:100%; object-fit:cover; display:block; pointer-events:none; -webkit-user-drag:none; }
+  .cover-pos-strip{ position:relative; flex:0 0 auto; border-radius:6px; overflow:hidden; background:#dcd6cc; }
+  .cover-pos-strip img{ width:100%; height:100%; display:block; pointer-events:none; -webkit-user-drag:none; }
+  .cover-pos-frame{ position:absolute; left:0; right:0; box-sizing:border-box; border:2px solid #fff; border-radius:5px; box-shadow:0 0 0 1px rgba(0,0,0,.55), 0 0 0 999px rgba(0,0,0,.35); }
 
   /* ---------- список закладок (#mdBookmarksList, renderBookmarksScreen в
      mdeditor.js) растёт СНИЗУ ВВЕРХ (settings-content-bottom прижимает
