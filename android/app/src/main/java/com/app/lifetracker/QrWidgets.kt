@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.1 (17.11) — таймер в виджете больше не отстаёт после блокировки телефона: пока экран погашен, обработчик минутной перерисовки ([armCycle]) стоит на часах uptime, которые во сне не идут, и ничего не рисует; после разблокировки кольцо показывало старое число до ближайшего срока. Теперь включение экрана и разблокировка ([onScreenOn], [onUserPresent]) сразу перерисовывают виджеты с таймерами ([refreshTimerFaces]) и заново взводят точный срок по настенным часам. Откат: QrWidgets.kt 16.0.
 // Версия: 16.0 (17.11) — единый диспетчер движения стопки (ТЗ TZ_motion_dispatcher.md, [QrPriority.Motion]): слайд-шоу, круг равных/смена верха и возврат наверх больше не двигают стопку сами, а проходят через одно решение ([motionDecide]) — пока пользователь работает с карточками (нажатие: 60 с, смахивание: 120 с после последнего касания, каждое новое касание обнуляет срок), стопка стоит на месте, а порядок карточек замораживается ([order] + [freeze]), так что под рукой ничего не меняется; отложенное движение исполняется по сроку или при включении экрана. Действия самого пользователя (двойное нажатие, край группы, настройка виджета) и постановка виджета паузу обходят. Откат: QrWidgets.kt 15.3.
 // Версия: 15.3 (17.11) — нажатие у края карточки-группы («Привычки», «Будильники», «Таймеры»; [groupNav]) пересоздаёт адаптер стопки и закрепляет её на этой же карточке ([pinSlot]), а не только перезагружает данные: после листания привычек (2-я, 3-я) обратное смахивание к календарю оставляло StackView сдвинутым (карточка «Будильник» съезжала). Откат: QrWidgets.kt 15.2.
 // Версия: 15.2 (16.11) — скрытые таймеры в карточке «Таймеры» виджета: `Card.hid` (поле `hidden` в `tmr`), нажатие на не запущенный скрытый таймер запускает его скрытым (`CardTimers.start(..., hidden)`). Откат: QrWidgets.kt 15.1.
@@ -1944,13 +1945,14 @@ object QrWidgets {
             val r = object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) {
                     try {
-                        onScreenOn(c.applicationContext)
+                        if (i.action == Intent.ACTION_USER_PRESENT) refreshTimerFaces(c.applicationContext) else onScreenOn(c.applicationContext)
                     } catch (e: Exception) {
                         Log.e("QrMotion", "screenOn: " + e)
                     }
                 }
             }
             val f = IntentFilter(Intent.ACTION_SCREEN_ON)
+            f.addAction(Intent.ACTION_USER_PRESENT) // разблокировка: лицо таймера должно быть свежим к тому моменту, когда человек увидит виджет
             if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED) else app.registerReceiver(r, f)
         } catch (e: Exception) {
             screenRecv = false
@@ -1966,6 +1968,26 @@ object QrWidgets {
         deferredIds.clear()
         for (id in rets) returnToTop(app, id)
         for (id in tops) if (id !in rets) update(app, mgr, id)
+        refreshTimerFaces(app, rets + tops)
+    }
+
+    /**
+     * Лицо таймера ([QrTimerFace]) рисуется по часам телефона в момент перерисовки, а минутный обработчик ([armCycle]) стоит на uptime — во сне (экран погашен) эти часы не идут, и
+     * обработчик срабатывает с опозданием, а при погашенном экране ещё и ничего не рисует. Поэтому при включении экрана и разблокировке виджеты с карточкой «Таймеры» перерисовываются сразу
+     * (только лицо: порядок стопки не трогается, положение решает диспетчер движения), а сроки ближайших перерисовок взводятся заново от настенных часов. [skip] — виджеты, только что обновлённые целиком.
+     */
+    private fun refreshTimerFaces(app: Context, skip: Collection<Int> = emptyList()) {
+        val mgr = AppWidgetManager.getInstance(app)
+        val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
+        for (id in ids) {
+            if (id in skip) continue
+            try {
+                if (cfgFor(app, id)?.timers == true) update(app, mgr, id)
+            } catch (e: Exception) {
+                Log.e("QrMotion", "refreshTimerFaces: " + e)
+            }
+        }
+        armCycle(app, ids)
     }
 
     /** Стопку только что переставили мы (обновление, возврат наверх, «после срабатывания»): запросы фабрики в ближайшие секунды — не смахивание. */
