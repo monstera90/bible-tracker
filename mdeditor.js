@@ -1,6 +1,7 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 25.0 (17.11)
+   Версия: 25.1 (17.11)
+   Версия: 25.1 (17.11) — заголовок корня списка заметок — название режима: «Список моих заметок» / «Заметки-карточки» (в папке — имя папки). Откат: mdeditor.js 25.0.
    Версия: 25.0 (17.11) — структурная правка: у списка заметок два режима — «Список моих заметок» (как был) и «Заметки-карточки» (карточки как у вкладки QR-кодов, цвет и выступ как у виджета; пиктограмма заметки/папки + название). Кнопка режима `mdNotesViewModeBtn` стоит слева от «+» и показывает режим, В КОТОРЫЙ переключит клик; в режиме карточек слева от неё кнопка размера `mdNotesSizeBtn` (ползунок 0,7–2, `mdNotesSizeBar`). Выбор и масштаб — localStorage (`mdNotesViewMode_v1`, `mdNotesCardsSize_v1`). Откат: mdeditor.js 24.1.
    Версия: 24.1 (15.11) — белый экран после ухода в другое приложение и возврата: `flushPendingSyncNow` (my.js) при сворачивании звал `flushPendingMdEditorEdit`, а та уничтожала CodeMirror (`destroyEditor`, cmView = null) при том, что экран заметки оставался на месте; возврат целиком зависел от перемонтирования по таймерам, а `rememberScrollBeforeHide` в `onAppPause` не видел редактора (editorIsShown требует cmView). Новая `flushOnAppPause` только сохраняет и отправляет правки, редактор не трогает; экспорт `MdEditor.flushOnAppPause`. Откат: mdeditor.js 24.0.
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
@@ -3595,7 +3596,7 @@ window.initMdEditorModule = function(deps){
     var hasAnyNotes = false;
     notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
-    html += isRoot ? notesHeadHtml() : '<h3 class="common-tab-title">' + escName(node.name) + '</h3>';
+    html += isRoot ? '<h3 class="common-tab-title">' + (cardsMode ? 'Заметки-карточки' : 'Список моих заметок') + '</h3>' : '<h3 class="common-tab-title">' + escName(node.name) + '</h3>'; // заголовок корня — название режима
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
