@@ -5760,7 +5760,7 @@ window.initMdEditorModule = function(deps){
     if(!CT || !CT.mountDayColumn) return;
     try{
       // форма мероприятия открывается слоем поверх заметки: правки текста перед этим сохраняем
-      dayCal = CT.mountDayColumn(host, { day: Date.now(), beforeForm: function(){ flushAutosaveNow(); } });
+      dayCal = CT.mountDayColumn(host, { day: Date.now(), beforeForm: function(){ flushAutosaveNow(); }, onLayout: function(){ if(cmView) cmView.requestMeasure(); } });
     }catch(e){ dayCal = null; }
     if(dayCal && cmView) cmView.requestMeasure(); // редактор стал обтекать колонку — перемерить строки
   }

@@ -70,8 +70,8 @@
    мероприятие на этот час, щипок по вертикали — масштаб (общий `calendarHourPx_v1`); подписи часов лежат внутри колонки. Форма открывается ПОВЕРХ заметки
    (`extForm`: `.cal-dayform` в `.settings-modal-box`, `container()` отдаёт её, `renderMain` при открытой форме её закрывает и возвращает `screen`),
    заметка и редактор не перерисовываются. Колонка сама перерисовывается при изменении данных (раз в 30 с и из `tick`), сама снимается, если host ушёл из DOM.
-   Окно колонки (`dayWindowStart`): не с 00:00, а с первого ещё не закончившегося мероприятия дня за вычетом 2 часов (не больше 2 пустых часов
-   сверху; если все мероприятия прошли — с первого за день; мероприятий нет — весь день). Смещение `winOff` (минуты) учитывают раскладка блоков,
+   Окно колонки (`dayWindowStart`): не с 00:00, а с первого ещё не закончившегося нескрытого мероприятия дня за вычетом 2 часов (не больше 2 пустых
+   часов сверху; если все прошли — с первого за день; нет ни одного нескрытого мероприятия — колонки нет, `opts.onLayout` просит редактор перемерить). Смещение `winOff` (минуты) учитывают раскладка блоков,
    подписи часов, сетка, красная линия, щипок и тап по пустому месту. Окно пересчитывается в `tick`, когда мероприятие заканчивается.
    Хранилище для неё подготавливает my.js: `window.__ltEnsureCalendarStore`.
    =========================================================================== */
@@ -1002,18 +1002,19 @@
     screen = f.prevScreen;
     try{ f.onClose(); }catch(e){}
   }
-  // С какой минуты дня показывать колонку в заметке: с первого ещё не закончившегося мероприятия (сегодня; если все прошли — с первого за день),
-  // но не больше чем с 2 часов пустого времени до него. Мероприятий нет — весь день с 00:00.
+  // С какой минуты дня показывать колонку в заметке: с первого ещё не закончившегося мероприятия дня за вычетом 2 часов (сегодня; если все прошли — с первого за день),
+  // но не больше 2 пустых часов сверху. Скрытые на этом устройстве мероприятия не считаются; нет ни одного нескрытого мероприятия — возвращает -1 (колонка не показывается).
   var DAYCOL_LEAD_MIN = 120;
   function dayWindowStart(segs, isToday, now){
     var first = -1, firstAny = -1;
     segs.forEach(function(sg){
-      if(!sg.ev) return; // трекеры окно не двигают
+      if(!sg.ev || isHidden(sg.ev.id)) return; // трекеры и скрытые мероприятия окно не двигают
       if(firstAny < 0 || sg.top < firstAny) firstAny = sg.top;
       var over = isToday && (sg.at + sg.dur < now); // как пометка .cal-wk-past
       if(!over && (first < 0 || sg.top < first)) first = sg.top;
     });
     var m = first >= 0 ? first : firstAny;
+    if(m < 0) return -1;
     return m > DAYCOL_LEAD_MIN ? Math.floor(m) - DAYCOL_LEAD_MIN : 0;
   }
   function mountDayColumn(host, opts){
@@ -1040,6 +1041,18 @@
       var segs = weekSegments(day, 1)[0];
       var trk = trackersOn ? weekTrackerSegments(day, 1)[0] : null;
       winOff = dayWindowStart(segs, isToday, now);
+      if(winOff < 0){ // в этот день нет нескрытых мероприятий — колонку не показываем, заметка идёт на всю ширину
+        var wasShown = el.style.display !== "none";
+        el.innerHTML = "";
+        el.style.display = "none";
+        host.classList.remove("daycal-on");
+        sig = signature();
+        if(wasShown && opts.onLayout){ try{ opts.onLayout(); }catch(e){} }
+        return;
+      }
+      var wasHidden = el.style.display === "none";
+      el.style.display = "";
+      host.classList.add("daycal-on");
       var labels = "";
       for(var h = 1; h < 24; h++){
         if(h * 60 <= winOff) continue;
@@ -1049,6 +1062,7 @@
         '<div class="cal-dc-labels">' + labels + '</div>' + dayColHtml(day, segs, trk, isToday, now, winOff) + '</div>';
       applyCalColors(el);
       sig = signature();
+      if(wasHidden && opts.onLayout){ try{ opts.onLayout(); }catch(e){} } // колонка появилась — редактор перемерить
     }
     // красная линия «сейчас» и пометка прошедших — на месте; изменились данные или сменился «сегодня» — полная перерисовка
     function tick(){
