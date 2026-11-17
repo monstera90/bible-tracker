@@ -1,5 +1,6 @@
 /* ===========================================================================
    ctxmenu.js
+   Версия: 2.2 (17.11) — `toast(msg, ms)`: необязательная длительность (по умолчанию 1,9 с). Откат: ctxmenu.js 2.1.
    Версия: 2.1 (11.11)
    Круговое контекстное меню выделения текста и история скопированных в приложении фрагментов.
    Системное меню выделения в APK скрыто (SelectionMenuWebView.kt), поэтому «Копировать / Вставить / Вырезать» и
@@ -178,7 +179,7 @@
     var t = (el.getAttribute("type") || "text").toLowerCase();
     return t === "text" || t === "search" || t === "url" || t === "tel" || t === "email";
   }
-  function toast(msg){
+  function toast(msg, ms){
     injectStyle();
     var old = document.querySelector(".lt-ctx-toast");
     if(old && old.parentNode) old.parentNode.removeChild(old);
@@ -186,7 +187,7 @@
     d.className = "lt-ctx-toast";
     d.textContent = msg;
     document.body.appendChild(d);
-    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, 1900);
+    setTimeout(function(){ if(d.parentNode) d.parentNode.removeChild(d); }, ms || 1900);
   }
   function rectOfRange(range){
     var rs = range.getClientRects();

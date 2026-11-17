@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 150.3 (17.11) — «Книги-карточки»: в меню долгого удержания книги кнопка с виджетом (`.mdeditor-widget-btn`): плашка со списком виджетов (`openBookWidgetPicker`), выбор добавляет книгу в карточку «Книги» этого виджета (включает его галочку «Отображать книги»), повторный выбор убирает; тосты и хранение — widgets.js (`toggleBook`). Для виджетов: `widgetBooksList`, `widgetBookCover`, id книги `bookWidgetId`; смена положения/сброс обложки перерисовывает виджеты. Названия экранов: «Список книг», «Ваши книги», «Книги-карточки» (заголовок, кнопка переключения, «i»). Откат: my.js 150.2.
    Версия: 150.2 (17.11) — «Конструктор виджетов» больше не вкладка режима колеса (кнопка `settingsTabWidgetsBtn` убрана): он открывается кнопкой в нижнем ряду вкладки «QR-коды» (`openWidgetsFromCards`), домик и «назад» ведут обратно к карточкам; пиктограмма вкладки «QR-коды» — стопка карточек. Откат: my.js 150.1.
    Версия: 150.1 (17.11) — режим «Книги-карточки»: в меню долгого удержания книги кнопка «Положение обложки» (`.mdeditor-cover-pos-btn`, только в этом режиме) открывает экран `openBookCoverPosition`: окошко размером с карточку, обложка двигается пальцем по вертикали, рядом полоска всей обложки с рамкой видимой части. Положение (0–100 %, по умолчанию 50) хранится по книге в state `__bookCoverPos:<хэш>` ({c:"v1:NN", t}), ездит через облако и архив; применяется как `object-position` карточки и учитывается в цвете выступа (`applyCoverShade`). Откат: my.js 150.0.
    Версия: 150.0 (17.11) — структурная правка: у списка книг три режима — «Книги-карточки» (новый, по умолчанию для всех), «Обложки», «Список»; кнопка нижнего ряда листает их по кругу. Выбор пользователя хранится в `state["__booksViewMode"]` ({c:"cards"|"cover"|"list", t}) и ездит через облако/архив, переживая переустановку; старый localStorage `bibleBooksViewMode_v1` один раз переносится (t=1), без записи — «cards». Карточка книги — размер и цветной выступ снизу как у карточки QR (`renderBooksCoverItems(…, true)`, `applyBookCardsSize`). Откат: my.js 149.7.
@@ -2108,6 +2109,8 @@
   // «Положение обложки»: окошко и стрелки вверх/вниз
   var BOOK_COVER_POS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="8" width="12" height="8" rx="2"></rect><polyline points="9,5 12,2.5 15,5"></polyline><polyline points="9,19 12,21.5 15,19"></polyline></svg>';
   var BOOK_COVER_POS_CENTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><line x1="12" y1="3" x2="12" y2="6"></line><line x1="12" y1="18" x2="12" y2="21"></line><line x1="3" y1="12" x2="6" y2="12"></line><line x1="18" y1="12" x2="21" y2="12"></line></svg>';
+  // «В виджет»: сетка карточек с плюсом
+  var BOOK_WIDGET_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6h-6z"></path><path d="M14 4h6v6h-6z"></path><path d="M4 14h6v6h-6z"></path><path d="M14 17h6"></path><path d="M17 14v6"></path></svg>';
   // «Книги-карточки»: карточка с цветным выступом снизу (как карточки QR)
   var BOOKS_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var BOOKS_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
@@ -10436,6 +10439,8 @@
         escapeHtml: escapeHtml,
         READER_HOME_ICON_SVG: READER_HOME_ICON_SVG,
         getItemCards: ensureItemCards,
+        listBooks: widgetBooksList, // книги пользователя для карточки «Книги» виджета: Promise<[{id, name, hash}]>
+        bookCover: widgetBookCover, // обложка книги: Promise<{url, pos}|null>
         // задачи и события календаря для карточек стопки (галочки «Показывать задачи» / «Показывать события календаря»)
         getCalendarFeed: function(from, to){
           try{
@@ -13379,6 +13384,7 @@
       if(disabled){ if(i === -1) list.push(hash); }
       else if(i !== -1){ list.splice(i, 1); }
       localStorage.setItem(BOOKS_COVER_DISABLED_KEY, JSON.stringify(list));
+      resyncWidgetsSoon();
     }catch(e){}
   }
 
@@ -13548,8 +13554,8 @@
   function booksViewModeBtnInfo(mode){ // кнопка показывает режим, В КОТОРЫЙ переключит клик
     var next = nextBooksViewMode(mode);
     return next === "cards" ? {title: "Книги-карточки", icon: BOOKS_VIEW_CARDS_ICON_SVG}
-      : next === "cover" ? {title: "Обложки", icon: BOOKS_VIEW_COVER_ICON_SVG}
-      : {title: "Список", icon: BOOKS_VIEW_LIST_ICON_SVG};
+      : next === "cover" ? {title: "Ваши книги", icon: BOOKS_VIEW_COVER_ICON_SVG}
+      : {title: "Список книг", icon: BOOKS_VIEW_LIST_ICON_SVG};
   }
   function booksFabRowHtml(){
     var mode = curBooksViewMode();
@@ -13613,7 +13619,7 @@
   function hideRevealedBookActionButtons(){
     if(!revealedBookDeleteRows.size) return;
     revealedBookDeleteRows.clear();
-    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-cover-pos-btn.visible, #booksList .mdeditor-note-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
+    document.querySelectorAll("#booksList .mdeditor-cover-reset-btn.visible, #booksList .mdeditor-cover-pos-btn.visible, #booksList .mdeditor-widget-btn.visible, #booksList .mdeditor-note-btn.visible, #booksList .mdeditor-share-btn.visible, #booksList .mdeditor-edit-btn.visible, #booksList .mdeditor-delete-btn.visible").forEach(function(btn){
       btn.classList.remove("visible");
     });
   }
@@ -13623,7 +13629,7 @@
   function bindBooksRowActions(containerEl, items, isCoverMode){
     bindBooksOutsideClickOnce();
     var rowSelector = isCoverMode ? ".book-cover-card" : ".mdeditor-row";
-    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-cover-pos-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
+    var actionBtnSelector = ".mdeditor-cover-reset-btn, .mdeditor-cover-pos-btn, .mdeditor-widget-btn, .mdeditor-note-btn, .mdeditor-share-btn, .mdeditor-edit-btn, .mdeditor-delete-btn";
     // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js)
     var press = LTPress.bind(containerEl, { sel: rowSelector, ms: 350, blockAll: true, onLong: function(info){
       var it = items[Number(info.el.dataset.index)];
@@ -13663,6 +13669,12 @@
           return;
         }
         openBookCoverPosition(it);
+        return;
+      }
+      var widgetBtn = e.target.closest(".mdeditor-widget-btn");
+      if(isCoverMode && widgetBtn){
+        press.reset();
+        openBookWidgetPicker(it, widgetBtn);
         return;
       }
       if(e.target.closest(".mdeditor-note-btn")){
@@ -13733,6 +13745,7 @@
     state[BOOK_COVER_POS_PREFIX + hash] = {c: "v1:" + pct, t: Date.now()};
     saveLocalStateNow();
     scheduleCloudPush();
+    resyncWidgetsSoon();
   }
   // Цветной выступ под обложкой (как у карточек QR-кодов): цвет — средний по нижней части видимой области обложки, темнее на 20 %
   // (та же формула, что cardShade в itemcards.js). Нет доступа к пикселям — остаётся серый по умолчанию.
@@ -13818,6 +13831,7 @@
         '<div class="book-cover-actions">' +
           '<button type="button" class="mdeditor-cover-reset-btn' + (revealed ? " visible" : "") + '" title="Сбросить обложку">' + BOOK_COVER_RESET_ICON_SVG + '</button>' +
           (cardsMode ? '<button type="button" class="mdeditor-cover-pos-btn' + (revealed ? " visible" : "") + '" title="Положение обложки">' + BOOK_COVER_POS_ICON_SVG + '</button>' : "") +
+          (cardsMode ? '<button type="button" class="mdeditor-widget-btn' + (revealed ? " visible" : "") + '" title="Показывать в виджете">' + BOOK_WIDGET_ICON_SVG + '</button>' : "") +
           '<button type="button" class="mdeditor-note-btn' + (revealed ? " visible" : "") + '" title="Заметка книги">' + BOOK_NOTE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-share-btn' + (revealed ? " visible" : "") + '" title="Поделиться">' + SHARE_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-edit-btn' + (revealed ? " visible" : "") + '" title="Переименовать">' + PENCIL_ICON_SVG + '</button>' +
@@ -13829,6 +13843,41 @@
       if(it.hash && !isBookCoverDisabled(it.hash)) loadBookCoverIntoThumb(idx, it.hash);
     });
     bindBooksRowActions(gridEl, items, true);
+  }
+
+  // ---------- «Показывать в виджете» (кнопка .mdeditor-widget-btn, режим «Книги-карточки») ----------
+  // Стабильный id книги для виджетов: начало хэша (до 24 знаков, переживает переименование); у книги без хэша — по имени.
+  function bookWidgetId(it){
+    var h = it && it.hash ? String(it.hash).replace(/[^A-Za-z0-9]/g, "").slice(0, 24) : "";
+    if(h) return h;
+    var nm = String((it && it.name) || ""), x = 5381;
+    for(var i = 0; i < nm.length; i++) x = ((x * 33) ^ nm.charCodeAt(i)) >>> 0;
+    return "n" + x.toString(16);
+  }
+  function widgetBooksList(){
+    return listBooksEntries().then(function(items){
+      return items.map(function(it){ return { id: bookWidgetId(it), name: it.name, hash: it.hash || null }; });
+    });
+  }
+  function widgetBookCover(hash){
+    if(!hash || isBookCoverDisabled(hash)) return Promise.resolve(null);
+    return getBookCoverUrl(hash).then(function(url){ return url ? { url: url, pos: getBookCoverPos(hash) } : null; });
+  }
+  function resyncWidgetsSoon(){ try{ if(window.WidgetsTab && window.WidgetsTab.scheduleSync) window.WidgetsTab.scheduleSync(2000); }catch(e){} }
+  function openBookWidgetPicker(it, anchorBtn){
+    var W = ensureWidgets();
+    if(!W || typeof W.widgetsForBook !== "function") return;
+    var id = bookWidgetId(it), rows = W.widgetsForBook(id);
+    if(!rows.length){ W.toast(W.noWidgetsText, 4200); return; }
+    var items = rows.map(function(r){
+      return {
+        key: r.id,
+        svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
+        title: "Виджет " + r.n + (r.has ? " — книга уже здесь" : ""),
+        current: r.has
+      };
+    });
+    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, it.name); }, { label: "Выберите виджет", text: "Виджет:" });
   }
 
   // Экран «Положение обложки» (режим «Книги-карточки», кнопка .mdeditor-cover-pos-btn): окошко размером с карточку (та же
@@ -13930,14 +13979,15 @@
     }
 
     var html = '';
-    html += iconRow(BOOKS_VIEW_CARDS_ICON_SVG, "Переключает показ книг по кругу: «Книги-карточки» (по умолчанию: обложки размером с карточки виджета и QR-кодов, с цветным выступом снизу), «Обложки» (обычные обложки) и «Список» (имена файлов). Выбранный режим запоминается и переживает перезапуск и переустановку приложения.");
+    html += iconRow(BOOKS_VIEW_CARDS_ICON_SVG, "Переключает показ книг по кругу: «Книги-карточки» (по умолчанию: обложки размером с карточки виджета и QR-кодов, с цветным выступом снизу), «Ваши книги» (обычные обложки) и «Список книг» (имена файлов). Выбранный режим запоминается и переживает перезапуск и переустановку приложения.");
     html += iconRow(ipkdDaySvg(), "ИПКД: открывает ежедневное чтение на сегодняшнем дне. На кнопке — сегодняшнее число месяца. Пока сегодня ИПКД не открывали, язычок «Мои книги» внизу залит цветом. Внутри ИПКД «домик» возвращает к списку книг.");
     html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). PDF открывается страницами, как в обычном просмотрщике (картинки и оригинальная вёрстка; масштаб — щипком или двойным касанием). Если страницами открыть не удалось, PDF читается как текст — тогда сканы без текстового слоя и зашифрованные файлы не читаются.");
-    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
+    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Ваши книги»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
     html += iconRow(BOOK_COVER_POS_ICON_SVG, "Только в режиме «Книги-карточки», в тех же раскрывающихся кнопках: «Положение обложки» — обложка книги обычно выше карточки, и здесь пальцем двигается вверх-вниз та часть, что видна в окошке карточки. Рядом — полоска всей обложки с рамкой видимой части; кнопка с прицелом возвращает положение по центру. Положение запоминается для каждой книги.");
-    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Обложки», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
+    html += iconRow(BOOK_WIDGET_ICON_SVG, "Только в режиме «Книги-карточки», в тех же раскрывающихся кнопках: «Показывать в виджете» — откроется список ваших виджетов (число — номер виджета, закрашены те, где книга уже есть). Выберите виджет — книга появится в его карточке «Книги» (в настройках виджета включится галочка «Отображать книги»). Тот же выбор ещё раз убирает книгу из этого виджета.");
+    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Ваши книги», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
 
     container.innerHTML =
       '<h3 class="common-tab-title">Книги — кнопки</h3>' +
@@ -13971,7 +14021,7 @@
     var listClass = coverMode ? gridClass : "mdeditor-list";
     if(hideTitlesOn) listClass += " hide-titles";
     var html = '<div class="mdeditor-tab books-list-tab">';
-    html += '<h3 class="common-tab-title">Мои книги</h3>';
+    html += '<h3 class="common-tab-title">' + (cardsMode ? "Книги-карточки" : coverMode ? "Ваши книги" : "Список книг") + '</h3>';
     html += '<div class="' + listClass + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
     // Кнопка "Загрузить fb2, epub, pdf или zip книгу" переехала в нижний ряд — здесь остаётся только

@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.7 (17.11) — кнопка `.mdeditor-widget-btn` («Показывать в виджете», карточка книги) оформлена как остальные кнопки карточки книги. Откат: components.css 26.6.
    Версия: 26.6 (17.11) — режим «Заметки-карточки» списка заметок: `.note-card` (карточка `.item-card` цвета виджета #7f00ff с выступом #6600cd; размер — `--item-card-w`, его ставит `applyNotesCardsSize` в mdeditor.js). Откат: components.css 26.5.
    Версия: 26.5 (17.11) — экран «Положение обложки» книги-карточки (`.cover-pos-*`), кнопка `.mdeditor-cover-pos-btn` оформлена как остальные кнопки карточки книги. Откат: components.css 26.4.
    Версия: 26.4 (17.11) — режим «Книги-карточки» списка книг: `.books-cards-grid` (карточка книги размером и с цветным выступом снизу, как `.item-card`; ширину считает `applyBookCardsSize` в my.js → `--book-card-w`). Откат: components.css 26.3.
@@ -3637,6 +3638,7 @@
      (.mdeditor-row), и в сетке обложек (.book-cover-actions ниже). ---------- */
   .mdeditor-cover-reset-btn,
   .mdeditor-cover-pos-btn,
+  .mdeditor-widget-btn,
   .mdeditor-note-btn,
   .mdeditor-share-btn,
   .mdeditor-edit-btn{
@@ -3656,17 +3658,20 @@
   }
   .mdeditor-cover-reset-btn svg,
   .mdeditor-cover-pos-btn svg,
+  .mdeditor-widget-btn svg,
   .mdeditor-note-btn svg,
   .mdeditor-share-btn svg,
   .mdeditor-edit-btn svg{ width:16px; height:16px; }
   .mdeditor-cover-reset-btn.visible,
   .mdeditor-cover-pos-btn.visible,
+  .mdeditor-widget-btn.visible,
   .mdeditor-note-btn.visible,
   .mdeditor-share-btn.visible,
   .mdeditor-edit-btn.visible{ visibility:visible; }
   @media (hover:hover) and (pointer:fine){
     .mdeditor-cover-reset-btn:hover,
     .mdeditor-cover-pos-btn:hover,
+    .mdeditor-widget-btn:hover,
     .mdeditor-note-btn:hover,
     .mdeditor-share-btn:hover,
     .mdeditor-edit-btn:hover{ background:var(--parchment-dark); }
@@ -3789,6 +3794,7 @@
      поддерживается, в отличие от color-mix()). */
   .book-cover-actions .mdeditor-cover-reset-btn,
   .book-cover-actions .mdeditor-cover-pos-btn,
+  .book-cover-actions .mdeditor-widget-btn,
   .book-cover-actions .mdeditor-note-btn,
   .book-cover-actions .mdeditor-share-btn,
   .book-cover-actions .mdeditor-edit-btn,
@@ -3800,6 +3806,7 @@
   @media (hover:hover) and (pointer:fine){
     .book-cover-actions .mdeditor-cover-reset-btn:hover,
     .book-cover-actions .mdeditor-cover-pos-btn:hover,
+    .book-cover-actions .mdeditor-widget-btn:hover,
     .book-cover-actions .mdeditor-note-btn:hover,
     .book-cover-actions .mdeditor-share-btn:hover,
     .book-cover-actions .mdeditor-edit-btn:hover,

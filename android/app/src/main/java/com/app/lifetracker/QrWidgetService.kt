@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.17 (17.11) — карточка «Книги»: края листают книги (как у других групп), по центру и по самой карточке нажатие ничего не делает. Откат: QrWidgetService.kt 2.16.
 // Версия: 2.16 (17.11) — порядок карточек берётся с учётом заморозки диспетчера движения (`QrWidgets.order(ctx, cfg, widgetId)`): пока пользователь работает с карточками, стопка не перестраивается под рукой, меняются только лица; показанный порядок запоминается (`QrWidgets.noteShown`). Откат: QrWidgetService.kt 2.15.
 // Версия: 2.15 (16.11) — не запущенный таймер в карточке «Таймеры»: нажатие запускает его сразу (`timerstart`), без окна с карточкой на весь экран; код карточки лежит рядом как запасной путь. Откат: QrWidgetService.kt 2.14.
 // Версия: 2.14 (16.11) — таймер в карточке «Таймеры»: нажатие на идущий или приостановленный таймер останавливает его (`timerstop`), а не «ничего не меняет». Откат: QrWidgetService.kt 2.13.
@@ -111,7 +112,7 @@ class QrWidgetService : RemoteViewsService() {
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("habnav", -1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("habnav", 1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 val item = groupViews[c.key]?.card
-                if (item != null) {
+                if (item != null && c.dyn != "book") { // у книг нажатия по центру нет: без fill-in intent шаблон не срабатывает
                     val tap = if (c.dyn == "habit") {
                         // привычка: ScanActivity ждёт второго нажатия (одно открывает карту дней показанной привычки, двойное отмечает её и убирает из стопки до полуночи)
                         Intent().putExtra("key", item.key).putExtra("habit", true).putExtra("code", item.code)

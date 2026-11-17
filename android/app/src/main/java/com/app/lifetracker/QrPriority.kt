@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.6 (17.11) — карточка «Книги» (`Cfg.books`, `Cfg.bookCards`): четвёртая карточка-группа «bk_0» ([BOOK_SLOT_KEY]), элемент — одна книга виджета; баллов у книг нет (в круг равных и наверх по релевантности карточка не попадает, листается краями). Откат: QrPriority.kt 5.5.
 // Версия: 5.5 (17.11) — единый диспетчер движения стопки [Motion] (ТЗ TZ_motion_dispatcher.md): чистое решение «двигать сейчас / отложить до T / отбросить / только лицо» по намерению ([Motion.Kind]), последнему касанию и состоянию экрана; [Motion.reorderBySlots] — заморозка порядка на время паузы. Порядок карточек ([build]) не менялся. Откат: QrPriority.kt 5.4.
 // Версия: 5.4 (16.11) — время суток «Целый день» (ключ `a`, [WINDOWS]: 0–24 ч) у привычек и карточки «Сегодня»: в выбранные дни недели карточка весь день — «в своё время» ([SCORE_CYCLE]/[SCORE_SCHEDULED]), пока не отмечена (привычка скрывается отметкой, «Сегодня» — через «после срабатывания» = скрывать). Причина: «Сейчас её время: весь день». Откат: QrPriority.kt 5.3.
 // Версия: 5.3 (16.11) — событие календаря дальше [SOON_MS] (12 ч) больше не в круге равных и не наверху: у него нет сигнала, балл [SCORE_LOW] — карточка календаря стоит ниже карточек без сигналов (в том числе ниже несработавшего будильника); за 12 часов до начала балл [SCORE_EVENT_SOON], как и раньше. Откат: QrPriority.kt 5.2.
@@ -508,13 +509,17 @@ object QrPriority {
     const val TIMER_SLOT_PREFIX = "tmr_"
     const val TIMER_SLOT_KEY = TIMER_SLOT_PREFIX + "0"
 
+    /** Ключ карточки «Книги» в стопке (одна на все книги, добавленные в виджет на экране «Книги-карточки»). */
+    const val BOOK_SLOT_PREFIX = "bk_"
+    const val BOOK_SLOT_KEY = BOOK_SLOT_PREFIX + "0"
+
     /** Ключ карточки-группы? Один список на все виды: оболочка и [check] различают по нему слот и обычную карточку. */
-    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY || key == TIMER_SLOT_KEY
+    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY || key == TIMER_SLOT_KEY || key == BOOK_SLOT_KEY
 
     private fun isGroup(c: Card): Boolean = isGroupKey(c.key)
 
     /** Все карточки-группы виджета с их элементами и баллами (пустые группы — нет карточки). Единственное место, где перечислены виды групп. */
-    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(timerGroup(cfg, s), alarmGroup(cfg, s), habitGroup(cfg, s))
+    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(timerGroup(cfg, s), alarmGroup(cfg, s), habitGroup(cfg, s), bookGroup(cfg))
 
     /** Карточка группы в стопке: лицо элемента по умолчанию, [Card.cycleN] — очередей круга, [Card.gscore] / [Card.greason] — балл и причина. */
     private fun slotOf(g: Group): Card {
@@ -537,6 +542,21 @@ object QrPriority {
             else { scores.add(0); reasons.add("") }
         }
         return Group(ALARM_SLOT_KEY, "alarm", list, scores, reasons, defaultAlarmIndex(list, s))
+    }
+
+    // ---------- карточка «Книги» ----------
+
+    /** Сколько книг принимает карточка «Книги» (то же число — MAX_BOOKS в widgets.js). */
+    const val BOOK_NAV_MAX = 24
+
+    /** Книги карточки «Книги»: в порядке добавления в виджет, не больше [BOOK_NAV_MAX]; нет галочки — пусто. */
+    fun bookList(cfg: Cfg): List<Card> = if (!cfg.books) emptyList() else cfg.bookCards.take(BOOK_NAV_MAX)
+
+    /** Книги: элемент — одна книга. Баллов нет (все 0): карточка не поднимается наверх и в круг равных не входит; показана первая книга, остальные — краями карточки. */
+    private fun bookGroup(cfg: Cfg): Group? {
+        val list = bookList(cfg)
+        if (list.isEmpty()) return null
+        return Group(BOOK_SLOT_KEY, "book", list, list.map { 0 }, list.map { "" }, 0)
     }
 
     // ---------- карточка «Таймеры» ----------
