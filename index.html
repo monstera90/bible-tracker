@@ -449,16 +449,7 @@ window.addEventListener("error", function(e){
           <path d="M17 3c0 4-3 5-5 6 2 1 5 2 5 6"></path>
         </svg>
       </button>
-      <!-- «Конструктор виджетов» (widgets.js): вкладка режима колеса между «Дополнительными возможностями» (alt4, создаётся из JS сразу после Waiting) и «Событиями».
-           Живёт только в режиме колеса. -->
-      <button class="settings-tab" id="settingsTabWidgetsBtn" title="Конструктор виджетов" style="display:none;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="7" y="9" width="13" height="12" rx="2.5"></rect>
-          <path d="M5 6.5h11"></path>
-          <path d="M3.5 3.5h8"></path>
-          <path d="M13.5 15h3M15 13.5v3"></path>
-        </svg>
-      </button>
+      <!-- «Конструктор виджетов» (widgets.js) больше не вкладка колеса: открывается кнопкой в нижнем ряду вкладки «QR-коды» (itemcards.js, #itemCardsWidgetsBtn). -->
       <!-- Центр событий (история): колокольчик. Живёт ТОЛЬКО в режиме колеса — первая свободная вкладка бокового ряда сразу над «Дополнительными возможностями» (alt4);
            в DOM стоит сразу после «Waiting», а alt4 создаётся из JS между ними. Не вкладка задач: свой ключ "events". -->
       <button class="settings-tab" id="settingsTabEventsBtn" title="События" style="display:none;">
@@ -838,12 +829,11 @@ window.addEventListener("error", function(e){
       <!-- «QR-коды» / «Карточки предметов» (settingsTabSet2Btn9, ключ "set2s_9", itemcards.js): самостоятельный нижний язычок набора 1 справа от «Книг»,
            как «Заметки»/«Книги»/«Календарь»: бокового ряда нет, окно на всю область (my.js: isItemCardsBottomTab, updateNotesWide). -->
       <button class="settings-tab settings-tab-gear" id="settingsTabSet2Btn9" title="Карточки предметов">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3.5" y="3.5" width="6" height="6" rx="1"></rect>
-          <rect x="14.5" y="3.5" width="6" height="6" rx="1"></rect>
-          <rect x="3.5" y="14.5" width="6" height="6" rx="1"></rect>
-          <path d="M6.5 6.5h.01M17.5 6.5h.01M6.5 17.5h.01"></path>
-          <path d="M14.5 14.5h2.5M20.5 14.5h.01M14.5 17.5v3M17.5 17.5h3M18 20.5h2.5"></path>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="7" y="9" width="13" height="12" rx="2.5"></rect>
+          <path d="M5 6.5h11"></path>
+          <path d="M3.5 3.5h8"></path>
+          <path d="M13.5 15h3M15 13.5v3"></path>
         </svg>
       </button>
       <!-- «Задачи и активности» (settingsTabTasksStackBtn): справа от «QR-кодов», слева от «Календаря»; включает свой боковой ряд из ДВУХ РАЗНЫХ наборов вкладок:

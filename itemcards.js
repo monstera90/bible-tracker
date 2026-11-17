@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.3 (17.11) — в нижнем ряду слева от воронки кнопка «Конструктор виджетов» (`#itemCardsWidgetsBtn`, `WIDGETS_ICON_SVG`, `deps.openWidgetsEditor`): конструктор больше не вкладка колеса. Откат: itemcards.js 49.2.
    Версия: 49.2 (16.11) — скрытые таймеры (`noIsland`) входят в карточку «Таймеры» виджета (`widgetTimerList`), в лице таймера поле `noIsland`. Откат: itemcards.js 49.1.
   Версия: 51.1 (16.11) — запуск таймера нажатием в виджете без окна попадает в журнал событий: `drainWidgetTimers` (мост ≥ 39: `widgetTimerTake` / `widgetTimerAck`). Откат: itemcards.js 51.0.
    Версия: 51.0 (16.11) — у карточки-таймера (сетка вкладки 9 и показ по скану) нет кнопки «Стоп»: повторное нажатие на идущий или приостановленный таймер останавливает его (`toggleTimerForCard`), как в виджете; не запущен — нажатие запускает. Откат: itemcards.js 50.0.
@@ -429,6 +430,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   var PLUS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
   var DRAG_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"></path><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path></svg>';
+  // кнопка «Конструктор виджетов» в нижнем ряду: плитки-виджеты разного размера
+  var WIDGETS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="10" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="11" width="7" height="10" rx="1.5"></rect><rect x="3" y="16" width="8" height="5" rx="1.5"></rect></svg>';
   var SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
   var SCAN_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"></path><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"></path><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"></path><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"></path><rect x="8" y="8" width="3" height="3"></rect><rect x="13" y="8" width="3" height="3"></rect><rect x="8" y="13" width="3" height="3"></rect><path d="M13 13h3v3"></path></svg>';
   // часы со стрелкой вокруг («история»), слегка изменённые: стрелка по часовой, на кнопке «сегодняшняя дата»
@@ -1088,6 +1091,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     var showAll = getShowHidden();
     html += '<div class="mdeditor-fab-row">' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHiddenBtn"' + (curFilter === "fav" ? ' style="display:none;"' : '') + ' title="' + (showAll ? 'Показаны все карточки (нажмите, чтобы скрыть скрытые)' : 'Скрытые карточки не показаны (нажмите, чтобы показать все)') + '">' + (showAll ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="itemCardsWidgetsBtn" title="Конструктор виджетов">' + WIDGETS_ICON_SVG + '</button>' +
       '<span class="item-filter-wrap">' +
         '<div class="item-type-menu item-filter-menu" id="itemFilterMenu" style="display:none;">' +
           FILTERS.map(function(f){
@@ -1676,6 +1680,14 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       unflipAny();
       dragMode = !dragMode;
       renderGrid();
+    });
+    var widgetsBtn = document.getElementById("itemCardsWidgetsBtn");
+    if(widgetsBtn) widgetsBtn.addEventListener("click", function(){
+      if(!deps.openWidgetsEditor) return;
+      closeTypeMenu();
+      unflipAny();
+      screenMode = "form"; // экран конструктора рисует widgets.js вместо сетки: фоновые перерисовки сетки его не затрут
+      deps.openWidgetsEditor();
     });
     var filterBtn = document.getElementById("itemCardsFilterBtn");
     var filterMenu = document.getElementById("itemFilterMenu");

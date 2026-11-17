@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 150.2 (17.11) — «Конструктор виджетов» больше не вкладка режима колеса (кнопка `settingsTabWidgetsBtn` убрана): он открывается кнопкой в нижнем ряду вкладки «QR-коды» (`openWidgetsFromCards`), домик и «назад» ведут обратно к карточкам; пиктограмма вкладки «QR-коды» — стопка карточек. Откат: my.js 150.1.
    Версия: 150.1 (17.11) — режим «Книги-карточки»: в меню долгого удержания книги кнопка «Положение обложки» (`.mdeditor-cover-pos-btn`, только в этом режиме) открывает экран `openBookCoverPosition`: окошко размером с карточку, обложка двигается пальцем по вертикали, рядом полоска всей обложки с рамкой видимой части. Положение (0–100 %, по умолчанию 50) хранится по книге в state `__bookCoverPos:<хэш>` ({c:"v1:NN", t}), ездит через облако и архив; применяется как `object-position` карточки и учитывается в цвете выступа (`applyCoverShade`). Откат: my.js 150.0.
    Версия: 150.0 (17.11) — структурная правка: у списка книг три режима — «Книги-карточки» (новый, по умолчанию для всех), «Обложки», «Список»; кнопка нижнего ряда листает их по кругу. Выбор пользователя хранится в `state["__booksViewMode"]` ({c:"cards"|"cover"|"list", t}) и ездит через облако/архив, переживая переустановку; старый localStorage `bibleBooksViewMode_v1` один раз переносится (t=1), без записи — «cards». Карточка книги — размер и цветной выступ снизу как у карточки QR (`renderBooksCoverItems(…, true)`, `applyBookCardsSize`). Откат: my.js 149.7.
    Версия: 149.7 (16.11) — «Переслать в задачи» из кругового меню на сайтах: `window.LTSiteTask` (`tabs`, `create`) для таблички выбора списка, которую рисует оболочка (SiteSelectionMenu.kt); общая часть создания задачи вынесена в `createForwardedTask`. Откат: my.js 149.6.
@@ -10345,11 +10346,6 @@
         btn.style.display = (showTasks && tasksStackMode) ? "flex" : "none";
       }
     });
-    var wgBtn = document.getElementById(WIDGETS_TAB_BTN_ID);
-    if(wgBtn){
-      setTabDecor(wgBtn, false);
-      wgBtn.style.display = bottomAltMode ? "flex" : "none"; // как «События»: только в режиме колеса
-    }
     var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evBtn){
       // колокольчик — настоящая вкладка бокового ряда режима колеса (первая свободная над «Дополнительными возможностями»); вне колеса его нет
@@ -10486,6 +10482,13 @@
     var m = ensureWidgets();
     if(m) m.render();
     else container.innerHTML = '<div class="mood-diagram-empty">Конструктор виджетов недоступен</div>';
+  }
+
+  // Конструктор виджетов внутри вкладки «QR-коды» (set2s_9): окно остаётся на этой вкладке, экран рисует widgets.js; домик и «назад» на списке виджетов возвращают к карточкам
+  function openWidgetsFromCards(){
+    var m = ensureWidgets();
+    if(!m) return;
+    m.render({ onExit: function(){ if(currentSettingsTab === ITEM_CARDS_TAB_KEY) renderSettingsTabItemCards(); } });
   }
 
   // Вкладка «Трекер экранов»: весь экран рисует screentime.js
@@ -11334,6 +11337,7 @@
         getMdEditor: function(){ return MdEditor; },
         openNotesTab: function(){ switchSettingsTab("set2s_1"); },
         openItemCardsTab: function(){ switchSettingsTab("set2s_9"); }, // возврат из заметки к схеме «Сегодня»
+        openWidgetsEditor: openWidgetsFromCards, // кнопка «Конструктор виджетов» в нижнем ряду QR-кодов
         // QR «Создавать задачу»: вкладки для выбора (ключ, название, пиктограмма с настоящей вкладки) и добавление задачи по коду
         getTaskTabs: function(){
           return TASK_MOVABLE_TABS.map(function(k){ return {key: k, title: taskQrTabTitle(k), svg: TASK_MOVE_ICON_SVG(k)}; });
@@ -18538,7 +18542,7 @@
   //   переключаются отдельными переменными gearBtn/yearBtn/moodTabBtn, а не через EXTRA_TAB_IDS —
   //   поэтому единственный полный список из всех 5 нижних вкладок первого набора собран здесь
   //   вручную, а не через Object.keys(EXTRA_TAB_IDS), в котором только 2 из 5) идёт слева направо.
-  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([WIDGETS_TAB_KEY, EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar (место для соответствия позиций с набором 2, бокового язычка у него нет), worktasks..archive, events, screentime (снизу вверх)
+  var SETTINGS_SIDE_ORDER_1 = [CALENDAR_TAB_KEY].concat(Object.keys(TASK_TAB_IDS)).concat([EVENTS_TAB_KEY, SCREENTIME_TAB_KEY]); // calendar (место для соответствия позиций с набором 2, бокового язычка у него нет), worktasks..archive, events, screentime (снизу вверх)
   var SETTINGS_BOTTOM_ORDER_1 = ["gear","year","mood"].concat(Object.keys(EXTRA_TAB_IDS)); // gear,year,mood,extra2,extra3
   var SETTINGS_SIDE_ORDER_2 = Object.keys(SET2_TAB_IDS);              // set2s_15 (физически язычок колеса в стеке набора 1; здесь только ради соответствия позиций наборов), set2s_1..set2s_4, set2s_11, set2s_12, set2s_13, set2s_5, set2s_6, set2s_14, set2s_7..set2s_10 (порядок = порядок вкладок снизу вверх)
   var SETTINGS_BOTTOM_ORDER_2 = ["gear"].concat(Object.keys(SET2_EXTRA_TAB_IDS));
@@ -19204,7 +19208,7 @@
       else renderSettingsTabYear(yearGridScrollKeep);
       return;
     }
-    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && tab !== EVENTS_TAB_KEY && tab !== WIDGETS_TAB_KEY && !isInfoStackTab(tab) && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && tab !== EVENTS_TAB_KEY && !isInfoStackTab(tab) && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -19222,8 +19226,6 @@
   (function(){
     var evBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evBtn) evBtn.addEventListener("click", function(){ switchSettingsTabOnClick(EVENTS_TAB_KEY); });
-    var wgTabBtn = document.getElementById(WIDGETS_TAB_BTN_ID);
-    if(wgTabBtn) wgTabBtn.addEventListener("click", function(){ switchSettingsTabOnClick(WIDGETS_TAB_KEY); });
     var calBtn = document.getElementById(CALENDAR_TAB_BTN_ID);
     if(calBtn) calBtn.addEventListener("click", function(){ switchSettingsTabOnClick(CALENDAR_TAB_KEY); });
     var stBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
@@ -19446,7 +19448,7 @@
   function syncBottomAltModeForTab(tab){
     // «своя» вкладка набора 1 открыта, а на экране ряд набора 2 (пустой) — возвращаем набор 1
     if(isOwnStackTab(tab) && settingsActiveTabSet !== 1){ settingsActiveTabSet = 1; applySettingsTabSetVisibility(); }
-    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY || tab === WIDGETS_TAB_KEY || isInfoStackTab(tab)) setBottomAltMode(true);
+    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY || isInfoStackTab(tab)) setBottomAltMode(true);
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setTasksStackMode(true); // набор активностей живёт в ряду «Задачи и активности»
     else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
@@ -19577,7 +19579,7 @@
   }
   // скрыта ли вкладка с ключом tab (ключи как в switchSettingsTab: "inbox", "year", "set2s_3", "set2b_1" …)
   function isSettingsTabUserHidden(tab){
-    var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === WIDGETS_TAB_KEY ? WIDGETS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) || (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
+    var id = TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) || (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
       (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : (tab === WORKOUTS_TAB_KEY ? WORKOUTS_TAB_BTN_ID : null)));
     var btn = id ? document.getElementById(id) : null;
     return !!(btn && btn.classList.contains("settings-tab-user-hidden"));
@@ -19591,7 +19593,7 @@
         if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY) continue;
         if(set === 2 && isOwnStackTab(key)) continue; // «Статистика», «Инструменты» и «Активности» живут в наборе 1
         if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === "extra2") && !getShowAllTasksEnabled()) continue;
-        if(key === EVENTS_TAB_KEY || key === WIDGETS_TAB_KEY) continue; // «События» и «Конструктор виджетов» — вкладка режима колеса, как «Система» и alt-вкладки
+        if(key === EVENTS_TAB_KEY) continue; // «События» — вкладка режима колеса, как «Система» и alt-вкладки
         if(!isSettingsTabUserHidden(key)) return key;
       }
     }
@@ -19682,7 +19684,7 @@
     return {
       bottom: { host: "settingsTabsGear", ids: [INFO_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, TOOLS_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], SET2_TAB_IDS[ITEM_CARDS_TAB_KEY], TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID] },
       stats: { host: "settingsTabs", ids: vals(INFO_STACK_BTN_IDS) },
-      settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, WIDGETS_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
+      settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
       tools: { host: "settingsTabs", ids: vals(TOOLS_STACK_BTN_IDS) },
       activities: { host: "settingsTabs", ids: vals(ACTIVITIES_STACK_BTN_IDS) },
       tasks: { host: "settingsTabs", ids: vals(TASK_TAB_IDS).concat([EXTRA_TAB_IDS.extra2]) },
@@ -19729,8 +19731,6 @@
     });
     var evTabBtn = document.getElementById(EVENTS_TAB_BTN_ID);
     if(evTabBtn) evTabBtn.classList.toggle("active", tab === EVENTS_TAB_KEY);
-    var wgTabBtn2 = document.getElementById(WIDGETS_TAB_BTN_ID);
-    if(wgTabBtn2) wgTabBtn2.classList.toggle("active", tab === WIDGETS_TAB_KEY);
     // «Календарь» — нижний язычок: подсветку ведёт updateBottomGearButtons (computeBottomOwner)
     var stTabBtn = document.getElementById(SCREENTIME_TAB_BTN_ID);
     if(stTabBtn) stTabBtn.classList.toggle("active", tab === SCREENTIME_TAB_KEY);
@@ -19772,7 +19772,7 @@
   // ---- боковые ряды: какой вкладкой открывать ряд ----
   var STACK_LAST_TAB_KEY = "bibleStackLastTab_v1";
   function stackGroupTabs(g){
-    if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, WIDGETS_TAB_KEY, EVENTS_TAB_KEY], INFO_STACK_TABS); // «Настройки и статистика»: два набора вкладок в одном ряду
+    if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, EVENTS_TAB_KEY], INFO_STACK_TABS); // «Настройки и статистика»: два набора вкладок в одном ряду
     if(g === "tasks") return Object.keys(TASK_TAB_IDS).concat(["extra2"], ACTIVITIES_STACK_TABS); // «Задачи и активности»: два набора вкладок в одном ряду
     if(g === "tools") return TOOLS_STACK_TABS;
     if(g === "claude") return CLAUDE_STACK_TABS.concat(window.UserTabsMod ? window.UserTabsMod.keys() : []);
@@ -19785,7 +19785,7 @@
     return null;
   }
   function stackTabButtonId(tab){
-    return BOTTOM_ALT_TAB_IDS[tab] || TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === WIDGETS_TAB_KEY ? WIDGETS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) ||
+    return BOTTOM_ALT_TAB_IDS[tab] || TASK_TAB_IDS[tab] || (tab === EVENTS_TAB_KEY ? EVENTS_TAB_BTN_ID : null) || (tab === CALENDAR_TAB_KEY ? CALENDAR_TAB_BTN_ID : null) ||
       (tab === SCREENTIME_TAB_KEY ? SCREENTIME_TAB_BTN_ID : null) || EXTRA_TAB_IDS[tab] || SET2_TAB_IDS[tab] || SET2_EXTRA_TAB_IDS[tab] ||
       (window.UserTabsMod && window.UserTabsMod.isKey(tab) ? window.UserTabsMod.buttonId(tab) : null) ||
       (tab === "year" ? "settingsTabYearBtn" : (tab === "mood" ? "settingsTabMoodBtn" : (tab === WORKOUTS_TAB_KEY ? WORKOUTS_TAB_BTN_ID : null)));
@@ -22736,7 +22736,7 @@
     TASK_MOVABLE_TABS.forEach(function(k){ add(k, taskQrTabTitle(k), TASK_MOVE_ICON_SVG(k)); });
     add("archive", "Архив", btnSvg(TASK_TAB_IDS.archive));
     add(EVENTS_TAB_KEY, "События", btnSvg(EVENTS_TAB_BTN_ID));
-    add(WIDGETS_TAB_KEY, "Конструктор виджетов", btnSvg(WIDGETS_TAB_BTN_ID));
+    add(WIDGETS_TAB_KEY, "Конструктор виджетов", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="10" rx="1.5"></rect><rect x="14" y="3" width="7" height="5" rx="1.5"></rect><rect x="14" y="11" width="7" height="10" rx="1.5"></rect><rect x="3" y="16" width="8" height="5" rx="1.5"></rect></svg>');
     add(SCREENTIME_TAB_KEY, "Трекер экранов", btnSvg(SCREENTIME_TAB_BTN_ID));
     add(WORKOUTS_TAB_KEY, "Тренировки", btnSvg(WORKOUTS_TAB_BTN_ID));
     add("year", "Карта дней года", btnSvg("settingsTabYearBtn"));
@@ -22755,8 +22755,9 @@
   // Открыть вкладку по ключу: окно настроек (если закрыто) и нужный набор вкладок. false — такого ключа нет.
   function openComboTab(key){
     key = String(key || "");
+    if(key === WIDGETS_TAB_KEY){ openSettingsTabDirect(ITEM_CARDS_TAB_KEY); openWidgetsFromCards(); return true; } // конструктор виджетов — экран внутри «QR-кодов»
     if(SET2_TAB_IDS.hasOwnProperty(key) && !isOwnStackTab(key)){ openSettingsTabDirect(key); return true; }
-    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === WIDGETS_TAB_KEY || key === CALENDAR_TAB_KEY || key === WORKOUTS_TAB_KEY || isOwnStackTab(key);
+    var set1 = TASK_TAB_IDS.hasOwnProperty(key) || key === EVENTS_TAB_KEY || key === CALENDAR_TAB_KEY || key === WORKOUTS_TAB_KEY || isOwnStackTab(key);
     if(!set1) return false;
     var alreadyOpen = typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open");
     if(!alreadyOpen) openSettingsModal();

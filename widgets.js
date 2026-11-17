@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.1 (17.11) — конструктор открывается кнопкой из вкладки «QR-коды» (`render({onExit})`): на списке виджетов домик и «назад» возвращают к карточкам; вкладки колеса больше нет. Откат: widgets.js 7.0.
    Версия: 6.14 (16.11) — у привычек (экран «Привычки») и карточки «Сегодня» в времени суток появился чип «Целый день» (`a`): карточка весь день стоит выше, пока не отмечена (привычка — отметкой, «Сегодня» — нажатием/сканом; у «Сегодня» с «Целым днём» после срабатывания карточка скрывается до полуночи). «Целый день» и утро/обед/вечер взаимоисключающи. Откат: widgets.js 6.13.
    Версия: 6.13 (16.11) — в `tmr` у каждого таймера поле `hidden` (скрытый таймер без острова, `noIsland` в itemcards.js): скрытые таймеры входят в карточку «Таймеры», оболочка запускает их скрытыми; подсказка галочки «Отображать таймеры» обновлена. Откат: widgets.js 6.12.
    Версия: 6.12 (16.11) — в `tmr` у каждого таймера поле `color` (цвет таймера на вкладке QR-кодов): лицо в виджете и образец в форме рисуются этим цветом, а не зелёным. Откат: widgets.js 6.11.
@@ -14,7 +15,7 @@
    Версия: 6.4 (14.11) — «Сегодня, <день>» и «Как настроение?» того же размера, что на карточке события календаря (образец `moodFaceHtml`; в виджете — QrMood.kt).
    Версия: 6.3 (14.11) — галочка «Спрашивать о настроении» (`moodAsk`): служебная карточка «Как настроение?» (оболочка, QrMood.kt; в форме — образец `moodFaceHtml`, цвет `RPE_COLOR`); ответ из виджета страница вносит в журнал настроения (mood.js `drainWidgetMood`, мост ≥37).
    Версия: 6.2 (14.11)
-   Вкладка «Конструктор виджетов» (ключ "widgets", кнопка settingsTabWidgetsBtn): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
+   Экран «Конструктор виджетов» (кнопка #itemCardsWidgetsBtn в нижнем ряду вкладки «QR-коды»; ключ "widgets" остаётся для комбинированных карточек): виджеты рабочего стола «Стопка QR-карточек» 2×2 (Android, QrWidgets.kt).
    В виджет входит до 10 карточек вкладки «QR-коды» (itemcards.js); виден один, смахивание вверх/вниз листает по кругу; нажатие — как скан кода карточки.
    Настройки виджета: слайд-шоу «Переключать виджеты по кругу» (раз в N минут) ИЛИ «Переключение по релевантности»; у каждой карточки —
    необязательные время суток (утро/обед/вечер) и дни недели, когда она поднимается наверх, и что делать со стопкой после срабатывания карточки
@@ -829,6 +830,7 @@ var DAY_MS = 86400000;
       return "Подключённых Bluetooth-наушников не найдено — в карточке только телефон.";
     }
     function fabRow(inner){ return '<div class="mdeditor-fab-row">' + inner + '</div>'; }
+    var exitCb = null, exitArmed = null; // открыт из вкладки «QR-коды»: домик и «назад» на списке виджетов возвращают к карточкам
     function homeBtn(title, disabled){
       return '<button type="button" class="mdeditor-fab-btn" id="wgHomeBtn" title="' + esc(title) + '"' + (disabled ? ' tabindex="-1" aria-disabled="true"' : '') + '>' + HOME_SVG + '</button>';
     }
@@ -873,7 +875,7 @@ var DAY_MS = 86400000;
           '<div class="wg-row-sub">' + contentText(w) + ' · ' + modeText(w) + (placed[w.id] ? ' · на рабочем столе' : '') + '</div></div></div>';
       });
       if(!bridge()) html += '<div class="wg-hint">Виджеты работают только в приложении на телефоне (Android).</div>';
-      html += fabRow('<button type="button" class="mdeditor-fab-btn" id="wgAddBtn" title="Новый виджет">' + PLUS_SVG + '</button>' + homeBtn("", true));
+      html += fabRow('<button type="button" class="mdeditor-fab-btn" id="wgAddBtn" title="Новый виджет">' + PLUS_SVG + '</button>' + homeBtn(exitCb ? "К карточкам" : "", !exitCb));
       return html;
     }
 
@@ -1078,7 +1080,7 @@ var DAY_MS = 86400000;
     function bind(top){
       var root = rootEl(); if(!root) return;
       var home = $("wgHomeBtn");
-      if(home && !home.getAttribute("aria-disabled")) home.addEventListener("click", function(){ if(top.s === "form") homeUi(); else backUi(); });
+      if(home && !home.getAttribute("aria-disabled")) home.addEventListener("click", function(){ if(top.s === "form") homeUi(); else if(top.s === "list") exitToCards(); else backUi(); });
       if(top.s === "list"){
         $("wgAddBtn").addEventListener("click", function(){
           var w = { id: "w" + Date.now().toString(36), n: data.n + 1, cards: [], rotate: false, rotateMin: 5, relevance: true }; // у нового виджета «Переключение по релевантности» включено по умолчанию
@@ -1323,8 +1325,26 @@ var DAY_MS = 86400000;
       });
     }
 
-    function renderTab(){
+    function exitToCards(){
+      var cb = exitCb;
+      if(!cb) return;
+      var t = exitArmed; exitCb = null; exitArmed = null;
+      if(t && t.active){ t.active = false; try{ history.back(); }catch(e){} }
+      cb();
+    }
+    function renderTab(opts){
       if(armed){ armed.active = false; armed = null; }
+      if(exitArmed){ exitArmed.active = false; exitArmed = null; }
+      exitCb = (opts && typeof opts.onExit === "function") ? opts.onExit : null;
+      if(exitCb && window.AppNav){ // кнопка «назад» телефона на списке виджетов — к карточкам
+        var et = { active: true }; exitArmed = et;
+        window.AppNav.push(function(){
+          if(!et.active) return;
+          et.active = false; if(exitArmed === et) exitArmed = null;
+          var cb = exitCb; exitCb = null;
+          if(rootEl() && cb) cb();
+        });
+      }
       stack = [{ s: "list" }];
       data = load();
       migrateAlarmCards();
