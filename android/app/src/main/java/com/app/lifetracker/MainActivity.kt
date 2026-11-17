@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.4 (17.11) — главный WebView подключён к длинному скриншоту ([InnerScrollCapture.install]): кнопка «Прокрутка» в плашке снимка экрана была неактивна, потому что страница прокручивает внутренний блок, а не сам WebView. Откат: MainActivity.kt 18.3.
 // Версия: 18.3 (15.11) — белый экран после возврата из другого приложения: после возврата (onStop → onResume) проверяется, что страница рисует кадры (requestAnimationFrame отвечает); если нет — встряска окна WebView (INVISIBLE → VISIBLE), затем reload, затем recreate. Откат: MainActivity.kt 18.2.
 // Версия: 18.2 (15.11) — проверка новой сборки APK при запуске и возврате ([ApkUpdater], не чаще раза в 3 часа): диалог «Скачать / Позже»; versionCode установленного APK сообщается WebUpdater (`minApk`).
 // Версия: 18.1 (13.11)
@@ -1126,6 +1127,7 @@ class MainActivity : ComponentActivity() {
         statusStrip = View(this).apply { setBackgroundColor(DEFAULT_STATUS_COLOR) }
         navStrip = View(this).apply { setBackgroundColor(PAGE_BG_COLOR) }
         webView = SelectionMenuWebView(this) // без системного меню выделения (копирование — своя кнопка страницы)
+        InnerScrollCapture.install(webView) // длинный скриншот: прокручивается внутренний блок страницы (Android 12+)
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         siteSelectionMenu = SiteSelectionMenu(this, webHost)
         claudeTab = ClaudeTab(this, webHost)
