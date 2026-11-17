@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 13.8 (17.11) — `booktap`: нажатие по центру карточки «Книги» в виджете ничего не делает (окно не открывается). Откат: ScanActivity.kt 13.7.
+// Версия: 13.9 (17.11) — `booktap` (id книги): нажатие на карточку «Книги» в виджете открывает приложение на этой книге (MainActivity.ACTION_OPEN_BOOK), окно сканера не нужно. Откат: ScanActivity.kt 13.7.
 // Версия: 13.7 (16.11) — одно нажатие на карточку задачи в виджете открывает приложение на форме задачи (MainActivity.ACTION_OPEN_WIDGET_TASK), двойное по-прежнему отмечает выполненной. Откат: ScanActivity.kt 13.6.
 // Версия: 13.6 (16.11) — `timerstart` (ключ карточки): нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу ([QrWidgets.startTimer]) без окна с карточкой; не вышло — прежний путь по `code`. Откат: ScanActivity.kt 13.5.
 // Версия: 13.5 (16.11) — `timerstop` (ключ карточки): повторное нажатие на идущий таймер в карточке «Таймеры» виджета останавливает его ([QrWidgets.stopTimer]), окно не нужно. Откат: ScanActivity.kt 13.4.
@@ -63,6 +63,7 @@ class ScanActivity : ComponentActivity() {
     companion object {
         private val CARD_ID_RE = Regex("^[A-Za-z0-9]{4,32}$")
         private val EVENT_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
+        private val BOOK_ID_RE = Regex("^[A-Za-z0-9_-]{1,24}$") // id книги виджета (начало хэша, как `bookWidgetId` в my.js)
         const val SCAN_URL = WebAssetServer.ORIGIN + "/scan.html"
         /** Нажатие на карточку виджета «Стопка QR-карточек»: extra `code` — текст QR, `tok` — ключ установки (QrWidgets.token). */
         const val ACTION_SCAN_CODE = "com.app.lifetracker.SCAN_CODE"
@@ -167,7 +168,16 @@ class ScanActivity : ComponentActivity() {
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             try {
                 if (i.hasExtra("booktap")) {
-                    // карточка «Книги»: по центру ничего не делает
+                    // карточка «Книги»: открыть показанную книгу на основной закладке (id проверяет MainActivity)
+                    val bid = i.getStringExtra("booktap") ?: ""
+                    if (BOOK_ID_RE.matches(bid)) {
+                        val open = Intent(this, MainActivity::class.java).apply {
+                            action = MainActivity.ACTION_OPEN_BOOK
+                            putExtra(MainActivity.EXTRA_BOOK_ID, bid)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(open)
+                    }
                 } else if (i.hasExtra("tknav")) {
                     QrWidgets.taskNav(applicationContext, i.getIntExtra("wid", -1), i.getIntExtra("tknav", 0))
                 } else if (i.hasExtra("alnav")) {

@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 150.4 (17.11) — вход из оболочки `window.__ltOpenBook(id)` / параметр `?book=<id>` (`openBookFromNative`, `handleBookLaunchParam`): нажатие на карточку «Книги» в виджете открывает книгу на основной закладке (`openComboBookmark`); нет основной закладки — вкладка «Мои книги». Откат: my.js 150.3.
    Версия: 150.3 (17.11) — «Книги-карточки»: в меню долгого удержания книги кнопка с виджетом (`.mdeditor-widget-btn`): плашка со списком виджетов (`openBookWidgetPicker`), выбор добавляет книгу в карточку «Книги» этого виджета (включает его галочку «Отображать книги»), повторный выбор убирает; тосты и хранение — widgets.js (`toggleBook`). Для виджетов: `widgetBooksList`, `widgetBookCover`, id книги `bookWidgetId`; смена положения/сброс обложки перерисовывает виджеты. Названия экранов: «Список книг», «Ваши книги», «Книги-карточки» (заголовок, кнопка переключения, «i»). Откат: my.js 150.2.
    Версия: 150.2 (17.11) — «Конструктор виджетов» больше не вкладка режима колеса (кнопка `settingsTabWidgetsBtn` убрана): он открывается кнопкой в нижнем ряду вкладки «QR-коды» (`openWidgetsFromCards`), домик и «назад» ведут обратно к карточкам; пиктограмма вкладки «QR-коды» — стопка карточек. Откат: my.js 150.1.
    Версия: 150.1 (17.11) — режим «Книги-карточки»: в меню долгого удержания книги кнопка «Положение обложки» (`.mdeditor-cover-pos-btn`, только в этом режиме) открывает экран `openBookCoverPosition`: окошко размером с карточку, обложка двигается пальцем по вертикали, рядом полоска всей обложки с рамкой видимой части. Положение (0–100 %, по умолчанию 50) хранится по книге в state `__bookCoverPos:<хэш>` ({c:"v1:NN", t}), ездит через облако и архив; применяется как `object-position` карточки и учитывается в цвете выступа (`applyCoverShade`). Откат: my.js 150.0.
@@ -11435,6 +11436,34 @@
     })();
   }
   window.__ltOpenTaskForm = openTaskFormFromNative;
+  // Нажатие на карточку «Книги» в виджете (QrWidgets → ScanActivity → MainActivity): книга открывается на основной закладке.
+  // Оболочка зовёт window.__ltOpenBook(id) (приложение уже запущено); холодный старт — параметр адреса ?book=<id>.
+  // id — тот же, что в виджете (`bookWidgetId`: начало хэша книги). Нет основной закладки — вкладка «Мои книги»; список книг на холодном старте может быть
+  // ещё не готов — повторяем попытку (до ~8 с), пока книга не найдётся.
+  function openBookFromNative(id){
+    id = String(id || "");
+    if(!/^[A-Za-z0-9_-]{1,24}$/.test(id)) return;
+    var tries = 0;
+    (function attempt(){
+      var again = function(){ if(++tries < 28) setTimeout(attempt, 300); };
+      try{
+        widgetBooksList().then(function(list){
+          var hit = null;
+          (list || []).forEach(function(b){ if(!hit && b.id === id) hit = b; });
+          if(!hit || !hit.hash){ if(hit){ openSettingsTabDirect("set2s_7"); } else again(); return; }
+          if(!(typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) openSettingsModal();
+          openComboBookmark(hit.hash, "", function(ok){ if(!ok) openSettingsTabDirect("set2s_7"); });
+        }).catch(again);
+      }catch(e){ again(); }
+    })();
+  }
+  window.__ltOpenBook = openBookFromNative;
+  function handleBookLaunchParam(){
+    var m = /[?&]book=([A-Za-z0-9_-]{1,24})(?:&|$)/.exec(location.search || "");
+    if(!m) return;
+    try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
+    setTimeout(function(){ openBookFromNative(m[1]); }, 0);
+  }
   function handleTaskFormLaunchParam(){
     var m = /[?&]taskform=([A-Za-z0-9_-]{1,80})(?:&|$)/.exec(location.search || "");
     if(!m) return;
@@ -26674,6 +26703,7 @@
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
   try{ handleCalendarEventLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Событие из виджета: " + (e && e.message ? e.message : e)); }
   try{ handleTaskFormLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Задача из виджета: " + (e && e.message ? e.message : e)); }
+  try{ handleBookLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Книга из виджета: " + (e && e.message ? e.message : e)); }
   // Главной страницы больше нет: после перезагрузки приложение сразу открывает окно настроек на последней вкладке
   // (getResumeSettingsState внутри openSettingsModal). Остальные входы (карточка из оболочки, присланный файл) идут позже
   // и просто переключают вкладку в уже открытом окне.

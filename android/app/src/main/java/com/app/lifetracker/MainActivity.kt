@@ -11,6 +11,7 @@ package com.app.lifetracker
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
+// Версия: 1.3 (17.11) — вход ACTION_OPEN_BOOK (виджет → книга на основной закладке: window.__ltOpenBook / ?book=<id>).
 // Версия: 1.2 (16.11) — вход ACTION_OPEN_WIDGET_TASK (виджет → форма задачи: window.__ltOpenTaskForm / ?taskform=<id>); forwardHotkey — горячие клавиши из WebView сайтов уходят странице (HotkeysMod.press).
 // Версия: 1.1 (14.11) — вход ACTION_OPEN_EVENT (виджет → форма мероприятия: window.__ltOpenCalendarEvent / ?calev=<id>&calat=<мс>).
 // Версия: 1.0 (16.10) — вход ACTION_OPEN_CARD (ScanActivity → страница: window.__ltOpenCard / ?card=<id>).
@@ -79,6 +80,10 @@ class MainActivity : ComponentActivity() {
         const val ACTION_OPEN_CARD = "com.app.lifetracker.OPEN_CARD"
         /** Нажатие на карточку события календаря в виджете (ScanActivity): страница открывает форму этого мероприятия — window.__ltOpenCalendarEvent(id, at) / ?calev=<id>&calat=<мс>. */
         const val ACTION_OPEN_EVENT = "com.app.lifetracker.OPEN_EVENT"
+        /** Нажатие на карточку «Книги» в виджете (ScanActivity): страница открывает книгу на основной закладке — window.__ltOpenBook(id) / ?book=<id>. */
+        const val ACTION_OPEN_BOOK = "com.app.lifetracker.OPEN_BOOK"
+        const val EXTRA_BOOK_ID = "bookId"
+        private val BOOK_ID_RE = Regex("^[A-Za-z0-9_-]{1,24}$")
         const val EXTRA_EVENT_ID = "eventId"
         const val EXTRA_EVENT_AT = "eventAt"
         private val EVENT_ID_RE = Regex("^[A-Za-z0-9_-]{1,64}$")
@@ -410,10 +415,12 @@ class MainActivity : ComponentActivity() {
         val cardLaunch = cardLaunchOf(intent)
         val eventLaunch = eventLaunchOf(intent)
         val taskLaunch = widgetTaskLaunchOf(intent)
+        val bookLaunch = widgetBookLaunchOf(intent)
         webView.loadUrl(
             when {
                 intent?.action == ACTION_DIAG -> WebAssetServer.DIAG_URL
                 taskLaunch != null -> WebAssetServer.START_URL + "?taskform=" + taskLaunch
+                bookLaunch != null -> WebAssetServer.START_URL + "?book=" + bookLaunch
                 eventLaunch != null -> WebAssetServer.START_URL + "?calev=" + eventLaunch.first + "&calat=" + eventLaunch.second
                 cardLaunch != null -> WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second
                 else -> WebAssetServer.START_URL
@@ -453,6 +460,15 @@ class MainActivity : ComponentActivity() {
                 webView.loadUrl(WebAssetServer.START_URL + "?taskform=" + taskLaunch)
             }
         }
+        val bookLaunch = widgetBookLaunchOf(intent)
+        if (bookLaunch != null) {
+            if (pageTrusted) {
+                // id проверен (буквы, цифры, «_», «-»): в строку скрипта попадать нечему
+                webView.evaluateJavascript("window.__ltOpenBook && window.__ltOpenBook('$bookLaunch')", null)
+            } else {
+                webView.loadUrl(WebAssetServer.START_URL + "?book=" + bookLaunch)
+            }
+        }
         val cardLaunch = cardLaunchOf(intent)
         if (cardLaunch != null) {
             if (pageTrusted) {
@@ -464,6 +480,13 @@ class MainActivity : ComponentActivity() {
                 webView.loadUrl(WebAssetServer.START_URL + "?card=" + cardLaunch.first + "&cardmode=" + cardLaunch.second)
             }
         }
+    }
+
+    /** Id книги из intent ACTION_OPEN_BOOK или null. */
+    private fun widgetBookLaunchOf(intent: Intent?): String? {
+        if (intent?.action != ACTION_OPEN_BOOK) return null
+        val id = intent.getStringExtra(EXTRA_BOOK_ID) ?: return null
+        return if (BOOK_ID_RE.matches(id)) id else null
     }
 
     /** Id задачи из intent ACTION_OPEN_WIDGET_TASK или null. */
