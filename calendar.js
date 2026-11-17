@@ -178,6 +178,7 @@
   var TRK_KEY = "calendarTrackers_v1";
   var trackersOn = false;
   var POMO_CAL_MIN_MS = 20 * 60 * 1000; // рабочие отрезки помодоро короче 20 минут в календарь не попадают (в «Истории» и трекере экранов они остаются)
+  var WORKOUT_KIND_LABELS = { run: "Бег", walk: "Ходьба", bike: "Велосипед" };
   var TRACKER_SOURCES = [
     { key: "workout", label: "Тренировка", get: function(){
       var W = window.WorkoutsTab;
@@ -186,7 +187,8 @@
         var sub = [];
         if(r.totalMs > 0){ var mins = Math.round(r.totalMs / 60000); sub.push(mins >= 60 ? Math.floor(mins / 60) + " ч " + pad2(mins % 60) + " мин" : mins + " мин"); }
         if(r.m > 0) sub.push((Math.round(r.m / 10) / 100).toFixed(2).replace(".", ",") + " км");
-        return { start: r.start, end: r.end, dur: r.totalMs, sub: sub.join(" · ") };
+        // подпись блока — вид занятия (Бег / Ходьба / Велосипед), слово «Тренировка» в календарь не пишется
+        return { start: r.start, end: r.end, dur: r.totalMs, title: WORKOUT_KIND_LABELS[r.type] || WORKOUT_KIND_LABELS.run, sub: sub.join(" · ") };
       });
     } },
     // помодоро: законченные рабочие отрезки (pomodoro.js, `records()`; едут в облако — видны и на другом устройстве); название блока — название сессии
@@ -659,18 +661,21 @@
   function packDay(segs){
     var minH = MIN_BLOCK_PX * 60 / hourPx; // минимальная высота блока в минутах — по ней считается пересечение
     segs.sort(function(a, b){ return a.top - b.top || b.bottom - a.bottom; });
-    var cluster = [], colEnds = [], clusterEnd = -1;
+    var cluster = [], colEnds = [], colGrp = [], clusterEnd = -1;
     function flush(){
       for(var i = 0; i < cluster.length; i++) cluster[i].cols = colEnds.length;
-      cluster = []; colEnds = []; clusterEnd = -1;
+      cluster = []; colEnds = []; colGrp = []; clusterEnd = -1;
     }
     segs.forEach(function(sg){
       var bottom = Math.max(sg.bottom, sg.top + minH);
       if(cluster.length && sg.top >= clusterEnd) flush();
+      // тренировки, идущие подряд или внахлёст, не делят ширину: следующая рисуется поверх предыдущей в той же колонке
+      var grp = (sg.t && sg.t.src === "workout") ? "workout" : "";
       var col = -1;
-      for(var c = 0; c < colEnds.length; c++){ if(colEnds[c] <= sg.top){ col = c; break; } }
-      if(col < 0){ col = colEnds.length; colEnds.push(0); }
-      colEnds[col] = bottom;
+      for(var c = 0; c < colEnds.length; c++){ if(colEnds[c] <= sg.top || (grp && colGrp[c] === grp)){ col = c; break; } }
+      if(col < 0){ col = colEnds.length; colEnds.push(0); colGrp.push(""); }
+      colEnds[col] = Math.max(colEnds[col], bottom);
+      colGrp[col] = grp;
       sg.col = col;
       cluster.push(sg);
       clusterEnd = Math.max(clusterEnd, bottom);

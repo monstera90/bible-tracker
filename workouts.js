@@ -2742,9 +2742,9 @@
     render: function(){ infoOpen = false; importMsg = ""; tipHidden = false; saveLastResult(null); render(); }, // итоговая карточка живёт до ухода с вкладки
     drain: drain,
     addClimb: addClimb,
-    // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры)}], новые сверху
+    // для календаря («трекеры занятий»): записи как есть — [{id, start, end, totalMs (мс чистого движения), m (метры), type (run/walk/bike)}], новые сверху
     records: function(){
-      return allRecords().filter(function(r){ return !r.imp && !r.man; }).map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m) }; });
+      return allRecords().filter(function(r){ return !r.imp && !r.man; }).map(function(r){ return { id: r.id, start: r.start, end: num(r.end), totalMs: num(r.totalMs), m: num(r.m), type: kindOf(r) }; });
     },
     // для экспорта (раздел `workouts` в data.json): читаемые записи, старые сверху
     exportRecords: function(){
