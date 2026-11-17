@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.16 (17.11) — порядок карточек берётся с учётом заморозки диспетчера движения (`QrWidgets.order(ctx, cfg, widgetId)`): пока пользователь работает с карточками, стопка не перестраивается под рукой, меняются только лица; показанный порядок запоминается (`QrWidgets.noteShown`). Откат: QrWidgetService.kt 2.15.
 // Версия: 2.15 (16.11) — не запущенный таймер в карточке «Таймеры»: нажатие запускает его сразу (`timerstart`), без окна с карточкой на весь экран; код карточки лежит рядом как запасной путь. Откат: QrWidgetService.kt 2.14.
 // Версия: 2.14 (16.11) — таймер в карточке «Таймеры»: нажатие на идущий или приостановленный таймер останавливает его (`timerstop`), а не «ничего не меняет». Откат: QrWidgetService.kt 2.13.
 // Версия: 2.13 (15.11) — карточка «Таймеры» (dyn = "timer", слот «tmr_0») — ещё одна карточка-группа: края листают таймеры (`habnav` + ключ карточки), нажатие в центре запускает показанный таймер (код его карточки, как скан), у идущего — ничего не делает.
@@ -48,7 +49,7 @@ class QrWidgetService : RemoteViewsService() {
         override fun onDataSetChanged() {
             try {
                 val cfg = QrWidgets.cfgFor(ctx, widgetId)
-                val list = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg).cards
+                val list = if (cfg == null) emptyList() else QrWidgets.order(ctx, cfg, widgetId).cards
                 val fresh = HashMap<String, Bitmap>()
                 val pos = if (cfg != null && cfg.events) QrWidgets.eventPos(ctx, cfg) else Pair(0, 0)
                 val tpos = if (cfg != null && cfg.tasks) QrWidgets.taskPos(ctx, cfg) else Pair(0, 0)
@@ -64,6 +65,7 @@ class QrWidgetService : RemoteViewsService() {
                     }
                 }
                 cards = list
+                QrWidgets.noteShown(widgetId, list)
                 bitmaps = fresh
                 groupViews = gviews
             } catch (e: Throwable) {

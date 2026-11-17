@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.6 (17.11) — класс QrMotionTest: единый диспетчер движения стопки (QrPriority.Motion), ТЗ TZ_motion_dispatcher.md, п. 7.
 // Версия: 4.5 (16.11) — время суток «Целый день» (`a`): привычка и карточка «Сегодня» «в своё время» в любой час суток, только в выбранные дни недели, пока не отмечены (habits_allDay_*, allDay_*).
 // Версия: 4.4 (15.11) — карточка «Таймеры» (timers_*): идущий таймер выше всего, в том числе выше «Как тренировка?» и без «релевантности»; два идущих сменяют друг друга по минутам; таймер «в своё время суток» выше календаря и привычек; минутная перерисовка только пока идёт таймер.
 // Версия: 4.3 (15.11) — единая модель круга равных и карточек-групп: будильники — группа «alm_0» (элементы со своими баллами, alarmRow_*, alarmGroup_*), лицо группы в Result.faces вместо habitIdx; в круг входит любая карточка верхнего яруса (cycle_ordinaryCards_*), равные баллы гистерезис не держит (cycle_equalScoreNotHeld_*).
@@ -8,6 +9,7 @@ package com.app.lifetracker
 // Версия: 3.5 (14.11) — карточка «Будильники» (alarmRow_*).
 // Версия: 3.4 (14.11)
 
+import com.app.lifetracker.QrPriority.Motion
 import com.app.lifetracker.QrWidgets.Card
 import com.app.lifetracker.QrWidgets.Cfg
 import com.app.lifetracker.QrWidgets.Live
@@ -1130,4 +1132,100 @@ class QrPriorityTest {
     }
 
     private val SCORE = QrPriority.SCORE_CYCLE
+}
+
+/** Сценарии диспетчера движения стопки (TZ_motion_dispatcher.md, п. 7). */
+class QrMotionTest {
+    private val NOW = 1_000_000_000L
+
+    private fun inp(
+        kind: QrPriority.Motion.Kind, last: Long = 0L, swipe: Boolean = false, screen: Boolean = true,
+        onTarget: Boolean = false, exists: Boolean = true, now: Long = NOW
+    ) = Motion.Input(kind, now, last, swipe, screen, onTarget, exists)
+
+    /** 1. Касание 10 с назад + новая верхняя карточка → отложить до конца паузы. */
+    @Test fun touch10sAgo_newTop_deferred() {
+        val d = Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - 10_000L))
+        assertEquals(Motion.Action.DEFER, d.action)
+        assertEquals(NOW - 10_000L + Motion.INTERACTION_PAUSE_MS + Motion.MARGIN_MS, d.at)
+    }
+
+    /** 2. Новое касание до срока сдвигает срок. */
+    @Test fun newTouch_movesDeadline() {
+        val a = Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - 50_000L)).at
+        val b = Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - 5_000L)).at
+        assertTrue(b > a)
+    }
+
+    /** 3. Несколько намерений в паузу дают одно и то же решение «ждать до одного срока» (свёртка: срок один, а не по числу намерений). */
+    @Test fun manyIntents_oneDeadline() {
+        val last = NOW - 20_000L
+        val ats = listOf(Motion.Kind.NEW_TOP, Motion.Kind.RETURN_TOP, Motion.Kind.ROTATE).map { Motion.decide(inp(it, last = last)) }
+        assertTrue(ats.all { it.action == Motion.Action.DEFER })
+        assertEquals(1, ats.map { it.at }.toSet().size)
+        // после конца паузы — движение
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.NEW_TOP, last = last, now = ats[0].at)).action)
+    }
+
+    /** 4. Действия пользователя и постановка виджета паузу обходят. */
+    @Test fun userActionsBypassPause() {
+        val last = NOW - 1_000L
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.STAY_ON_SLOT, last = last)).action)
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.PLACED, last = last)).action)
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.STAY_ON_SLOT, last = last, screen = false)).action)
+    }
+
+    /** 5. Закрепление: решает цель, а не диспетчер; STAY_ON_SLOT всегда исполняется — цель берёт оболочка из закрепления. Здесь — что слот закрепления идёт первым при заморозке. */
+    @Test fun pinnedSlot_firstInFrozenOrder() {
+        val out = Motion.reorderBySlots(listOf("hab_0", "cal", "alm_0"), listOf("cal", "alm_0", "hab_0"), { it })
+        assertEquals(listOf("hab_0", "cal", "alm_0"), out)
+    }
+
+    /** 6. Стопка уже на целевой карточке → отбросить. */
+    @Test fun alreadyOnTarget_drop() {
+        assertEquals(Motion.Action.DROP, Motion.decide(inp(Motion.Kind.NEW_TOP, onTarget = true)).action)
+    }
+
+    /** 7. Цель исчезла → отбросить. */
+    @Test fun targetGone_drop() {
+        assertEquals(Motion.Action.DROP, Motion.decide(inp(Motion.Kind.RETURN_TOP, exists = false)).action)
+        assertEquals(Motion.Action.DROP, Motion.decide(inp(Motion.Kind.NEW_TOP, exists = false)).action)
+    }
+
+    /** 8. Экран выключен → не двигать, ждать включения экрана. */
+    @Test fun screenOff_deferredToScreenOn() {
+        val d = Motion.decide(inp(Motion.Kind.NEW_TOP, screen = false))
+        assertEquals(Motion.Action.DEFER, d.action)
+        assertEquals(Motion.AT_SCREEN_ON, d.at)
+        assertEquals(Motion.Action.DEFER, Motion.decide(inp(Motion.Kind.ROTATE, screen = false)).action)
+    }
+
+    /** 9. Только лицо — не движение, даже в паузу и при выключенном экране. */
+    @Test fun faceOnly_neverMoves() {
+        assertEquals(Motion.Action.FACE, Motion.decide(inp(Motion.Kind.FACE_ONLY, last = NOW - 1L)).action)
+        assertEquals(Motion.Action.FACE, Motion.decide(inp(Motion.Kind.FACE_ONLY, screen = false)).action)
+    }
+
+    /** 10. Границы: ровно пауза назад — ещё ждать только до запаса; касание из будущего (часы назад) паузы не создаёт; после смахивания пауза длиннее. */
+    @Test fun boundaries() {
+        // ровно INTERACTION_PAUSE_MS назад: срок прошёл (q == now) — двигать можно
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - Motion.INTERACTION_PAUSE_MS)).action)
+        // на миллисекунду раньше — ещё ждать
+        assertEquals(Motion.Action.DEFER, Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - Motion.INTERACTION_PAUSE_MS + 1L)).action)
+        // часы переведены назад: касание «из будущего» не держит стопку
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW + 3_600_000L)).action)
+        // нет касаний вообще
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.NEW_TOP, last = 0L)).action)
+        // после смахивания покой дольше: 90 с назад после нажатия — можно, после смахивания — ещё нельзя
+        assertEquals(Motion.Action.MOVE_NOW, Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - 90_000L, swipe = false)).action)
+        assertEquals(Motion.Action.DEFER, Motion.decide(inp(Motion.Kind.NEW_TOP, last = NOW - 90_000L, swipe = true)).action)
+    }
+
+    /** Заморозка порядка: исчезнувший слот пропускается, новые карточки встают в конец, слот занят один раз. */
+    @Test fun reorderBySlots_removedAndNew() {
+        val out = Motion.reorderBySlots(listOf("a", "gone", "b"), listOf("n1", "b", "a", "n2"), { it })
+        assertEquals(listOf("a", "b", "n1", "n2"), out)
+        assertEquals(listOf("x", "y"), Motion.reorderBySlots(emptyList(), listOf("x", "y"), { it }))
+        assertEquals(listOf("a", "b"), Motion.reorderBySlots(listOf("a", "a", "b"), listOf("a", "b"), { it }))
+    }
 }

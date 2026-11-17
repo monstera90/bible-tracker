@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.5 (17.11) — единый диспетчер движения стопки [Motion] (ТЗ TZ_motion_dispatcher.md): чистое решение «двигать сейчас / отложить до T / отбросить / только лицо» по намерению ([Motion.Kind]), последнему касанию и состоянию экрана; [Motion.reorderBySlots] — заморозка порядка на время паузы. Порядок карточек ([build]) не менялся. Откат: QrPriority.kt 5.4.
 // Версия: 5.4 (16.11) — время суток «Целый день» (ключ `a`, [WINDOWS]: 0–24 ч) у привычек и карточки «Сегодня»: в выбранные дни недели карточка весь день — «в своё время» ([SCORE_CYCLE]/[SCORE_SCHEDULED]), пока не отмечена (привычка скрывается отметкой, «Сегодня» — через «после срабатывания» = скрывать). Причина: «Сейчас её время: весь день». Откат: QrPriority.kt 5.3.
 // Версия: 5.3 (16.11) — событие календаря дальше [SOON_MS] (12 ч) больше не в круге равных и не наверху: у него нет сигнала, балл [SCORE_LOW] — карточка календаря стоит ниже карточек без сигналов (в том числе ниже несработавшего будильника); за 12 часов до начала балл [SCORE_EVENT_SOON], как и раньше. Откат: QrPriority.kt 5.2.
 // Версия: 5.2 (16.11) — «скоро» для события календаря — за 12 часов, а не за час ([SOON_MS]): событие, до которого меньше 12 часов, получает [SCORE_EVENT_SOON] (750) — чуть ниже заведённого будильника «скоро» (850), выше круга равных; дальше 12 часов — прежний балл круга. Причина показывает часы («через 3 ч 20 мин»). Откат: QrPriority.kt 5.1.
@@ -836,5 +837,108 @@ object QrPriority {
             }
         }
         return bad
+    }
+
+    // ---------- диспетчер движения стопки ----------
+
+    /**
+     * Единое правило «когда можно двигать стопку» (ТЗ TZ_motion_dispatcher.md). Здесь только чистое решение без Android: оболочка ([QrWidgets]) собирает вход
+     * (время, последнее касание, экран), вызывает [decide] и сама исполняет результат. Все механизмы, которые раньше двигали стопку каждый по-своему (слайд-шоу,
+     * круг равных и смена верхней карточки, возврат наверх), стали источниками намерений ([Kind]) и обязаны пройти через [decide].
+     *
+     * Правило паузы: пока с последнего касания пользователя (нажатие у края / в центре или замеченное смахивание) прошло меньше [INTERACTION_PAUSE_MS]
+     * (после смахивания — [DEEP_QUIET_MS]), стопку не двигает ничто, кроме действий самого пользователя ([Kind.STAY_ON_SLOT], [Kind.PLACED]).
+     * Каждое новое касание сдвигает срок (таймер обнуляется). Смахивание видно оболочке только косвенно и не всегда, поэтому после него покой длиннее.
+     */
+    object Motion {
+        /** Пауза после нажатия: столько стопка стоит на месте. */
+        const val INTERACTION_PAUSE_MS = 60_000L
+
+        /** Пауза после смахивания: часть смахиваний оболочка не замечает, поэтому ждём дольше. */
+        const val DEEP_QUIET_MS = 120_000L
+
+        /** Запас к сроку, чтобы обработчик, сработавший на миллисекунду раньше, не откладывал движение ещё раз. */
+        const val MARGIN_MS = 500L
+
+        /** «Отложено до включения экрана»: срока по часам нет, движение исполнит приёмник включения экрана (или любая следующая перерисовка). */
+        const val AT_SCREEN_ON = Long.MAX_VALUE
+
+        enum class Kind {
+            /** Слайд-шоу хочет показать следующую карточку. */
+            ROTATE,
+
+            /** Сверху должна стать другая карточка (круг равных, смена приоритета, таймер, заряд, полночь, тик). */
+            NEW_TOP,
+
+            /** Пора вернуть стопку к верхней карточке (возврат через минуту после смахивания, страховка). */
+            RETURN_TOP,
+
+            /** Пользователь сам сделал действие на карточке: пересоздать стопку и остаться на ней. Паузу обходит. */
+            STAY_ON_SLOT,
+
+            /** Меняется только лицо карточки, положение стопки не меняется. */
+            FACE_ONLY,
+
+            /** Виджет только что положили на экран (или пользователь изменил его настройки): первая карточка. Паузу обходит. */
+            PLACED
+        }
+
+        enum class Action { MOVE_NOW, DEFER, DROP, FACE }
+
+        /** [at] — только у [Action.DEFER]: момент (мс, часы телефона), когда спросить снова, либо [AT_SCREEN_ON]. [reason] — одна строка для лога. */
+        class Decision(val action: Action, val at: Long = 0L, val reason: String = "")
+
+        /**
+         * [lastInteractionAt] — последнее касание карточек (мс, 0 — не было); [lastWasSwipe] — было ли оно смахиванием; [screenOn] — экран включён;
+         * [onTarget] — стопка уже стоит на целевой карточке; [targetExists] — целевая карточка ещё есть в стопке.
+         */
+        class Input(
+            val kind: Kind,
+            val now: Long,
+            val lastInteractionAt: Long,
+            val lastWasSwipe: Boolean = false,
+            val screenOn: Boolean = true,
+            val onTarget: Boolean = false,
+            val targetExists: Boolean = true
+        )
+
+        /** Сколько стопка стоит на месте после касания. */
+        fun pauseMs(lastWasSwipe: Boolean): Long = if (lastWasSwipe) DEEP_QUIET_MS else INTERACTION_PAUSE_MS
+
+        /**
+         * Момент, раньше которого двигать нельзя; 0 — паузы нет. Касание «из будущего» (часы переведены назад) касанием не считается: иначе стопка
+         * простояла бы неподвижной, пока часы не догонят.
+         */
+        fun quietUntil(now: Long, lastInteractionAt: Long, lastWasSwipe: Boolean): Long =
+            if (lastInteractionAt <= 0L || lastInteractionAt > now) 0L else lastInteractionAt + pauseMs(lastWasSwipe)
+
+        fun decide(i: Input): Decision {
+            if (i.kind == Kind.FACE_ONLY) return Decision(Action.FACE, 0L, "только лицо")
+            if (i.kind == Kind.PLACED) return Decision(Action.MOVE_NOW, 0L, "виджет поставлен или настроен")
+            if (i.kind == Kind.STAY_ON_SLOT) return Decision(Action.MOVE_NOW, 0L, "действие пользователя")
+            if (!i.targetExists) return Decision(Action.DROP, 0L, "цель исчезла")
+            if (i.kind == Kind.NEW_TOP && i.onTarget) return Decision(Action.DROP, 0L, "стопка уже на цели")
+            if (!i.screenOn) return Decision(Action.DEFER, AT_SCREEN_ON, "экран выключен")
+            val q = quietUntil(i.now, i.lastInteractionAt, i.lastWasSwipe)
+            if (q > 0L && i.now < q) return Decision(Action.DEFER, q + MARGIN_MS, "пользователь работает с карточками")
+            return Decision(Action.MOVE_NOW, 0L, "пауза прошла")
+        }
+
+        /**
+         * Порядок [items] по списку слотов [slots] (так стопка не меняется под рукой, пока движение отложено): карточки, чей слот есть в [slots], идут в этом
+         * порядке (слот занят один раз), затем остальные — в их порядке; слоты, которых больше нет, пропускаются. [slotOf] должен давать слот
+         * ([QrWidgets.slotOf]: у карточки задач и события он не зависит от показанной задачи или события).
+         */
+        fun <T> reorderBySlots(slots: List<String>, items: List<T>, slotOf: (T) -> String): List<T> {
+            if (slots.isEmpty() || items.size < 2) return items
+            val left = ArrayList(items)
+            val out = ArrayList<T>(items.size)
+            for (s in slots) {
+                val at = left.indexOfFirst { slotOf(it) == s }
+                if (at >= 0) out.add(left.removeAt(at))
+            }
+            out.addAll(left)
+            return out
+        }
     }
 }

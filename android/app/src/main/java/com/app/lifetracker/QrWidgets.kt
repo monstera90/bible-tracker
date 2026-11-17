@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.0 (17.11) — единый диспетчер движения стопки (ТЗ TZ_motion_dispatcher.md, [QrPriority.Motion]): слайд-шоу, круг равных/смена верха и возврат наверх больше не двигают стопку сами, а проходят через одно решение ([motionDecide]) — пока пользователь работает с карточками (нажатие: 60 с, смахивание: 120 с после последнего касания, каждое новое касание обнуляет срок), стопка стоит на месте, а порядок карточек замораживается ([order] + [freeze]), так что под рукой ничего не меняется; отложенное движение исполняется по сроку или при включении экрана. Действия самого пользователя (двойное нажатие, край группы, настройка виджета) и постановка виджета паузу обходят. Откат: QrWidgets.kt 15.3.
 // Версия: 15.3 (17.11) — нажатие у края карточки-группы («Привычки», «Будильники», «Таймеры»; [groupNav]) пересоздаёт адаптер стопки и закрепляет её на этой же карточке ([pinSlot]), а не только перезагружает данные: после листания привычек (2-я, 3-я) обратное смахивание к календарю оставляло StackView сдвинутым (карточка «Будильник» съезжала). Откат: QrWidgets.kt 15.2.
 // Версия: 15.2 (16.11) — скрытые таймеры в карточке «Таймеры» виджета: `Card.hid` (поле `hidden` в `tmr`), нажатие на не запущенный скрытый таймер запускает его скрытым (`CardTimers.start(..., hidden)`). Откат: QrWidgets.kt 15.1.
 // Версия: 15.1 (16.11) — число минут в кольце таймера («Таймеры») меняется ровно в момент, когда остаток доходит до круглой минуты (23 → 22 в 22:00), а не по границе календарной минуты: `nextTimerFlip` в `armCycle`. Откат: QrWidgets.kt 15.0.
@@ -24,9 +25,11 @@ package com.app.lifetracker
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
+import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -147,7 +150,8 @@ object QrWidgets {
     private const val K_BTASK = "btask"
     private const val K_BTASKAT = "btaskat"
     private const val K_RETURN = "ret"
-    private const val K_TOUCH = "touch"       // время последнего касания карточек виджета пользователем, мс (слайд-шоу ждёт TOUCH_PAUSE_MS после него)
+    private const val K_TOUCH = "touch"       // время последнего касания карточек виджета пользователем, мс (стопка стоит на месте после него: QrPriority.Motion)
+    private const val K_TOUCH_SWIPE = "touchSwipe" // последнее касание было смахиванием (после него покой длиннее: смахивание видно не всегда)
     private const val K_RETFIRST = "retfirst" // id виджета → время первого смахивания в текущей серии (потолок откладывания возврата)
     private const val K_AEV = "alarmEv"       // очередь: заведённые/выключенные нажатием в виджете будильники — страница запишет их в журнал событий
     private const val K_AEVSEQ = "alarmEvSeq"
@@ -179,8 +183,7 @@ object QrWidgets {
     private const val GUARD_TICK_MS = 15_000L
     private const val FLIP_MARGIN_MS = 60L // запас, чтобы будильник, сработавший чуть раньше, не нарисовал прежнее число
     private const val SWIPE_QUIET_MS = 4_000L
-    /** Сколько после касания карточек слайд-шоу их не листает. */
-    private const val TOUCH_PAUSE_MS = 30_000L
+    // Пауза после касания теперь общая для всех механизмов и живёт в QrPriority.Motion (INTERACTION_PAUSE_MS / DEEP_QUIET_MS).
 
     /** Сколько ждать после последнего запроса фабрики, прежде чем считать смахивание законченным (анимация StackView ≈ 0,4 с). */
     private const val SWIPE_SETTLE_MS = 700L
@@ -224,6 +227,20 @@ object QrWidgets {
 
     @Volatile private var guardOn = false
     @Volatile private var lastTouchAt = 0L
+    @Volatile private var lastTouchSwipe = false
+
+    // ---------- состояние диспетчера движения ----------
+    private val motionLock = Any()
+    /** id виджета → слоты ([slotOf]) в порядке, который сейчас отдан стопке (его запоминает фабрика, [noteShown]). */
+    private val shownSlots = HashMap<Int, List<String>>()
+    /** id виджета → порядок слотов, замороженный на время отложенного движения: фабрика отдаёт карточки в нём, а не в новом порядке плана. */
+    private val frozenSlots = HashMap<Int, List<String>>()
+    /** Виджеты с отложенной сменой верха до включения экрана. */
+    private val deferredIds: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
+    /** Виджеты с отложенным возвратом наверх до включения экрана. */
+    private val pendingReturn: MutableSet<Int> = Collections.synchronizedSet(HashSet<Int>())
+    private val wakeTokens = HashMap<Int, Any>()
+    @Volatile private var screenRecv = false
     private val guardToken = Any()
     private val cycleToken = Any()
 
@@ -437,6 +454,10 @@ object QrWidgets {
     }
 
     fun forget(ctx: Context, ids: IntArray) {
+        for (wid in ids) { // состояние диспетчера движения удалённых виджетов
+            thaw(wid)
+            synchronized(motionLock) { shownSlots.remove(wid) }
+        }
         synchronized(LOCK) {
             val b = jmap(ctx, K_BIND)
             val t = jmap(ctx, K_TOP)
@@ -1354,9 +1375,18 @@ object QrWidgets {
      * со следующего дня они снова участвуют в подборе. Над всеми — «Как тренировка?», пока она ждёт оценки.
      * [Ordered.topKey] — ключ карточки наверху, если она поднята по релевантности (иначе пусто).
      */
-    fun order(ctx: Context, cfg: Cfg): Ordered {
+    fun order(ctx: Context, cfg: Cfg, widgetId: Int = -1): Ordered {
         val res = plan(ctx, cfg)
-        return Ordered(res.cards.map { it.card }, res.topKey)
+        val cards = res.cards.map { it.card }
+        // движение отложено (пользователь работает с карточками): порядок, в котором стопка показана, не меняется — меняются только лица карточек
+        val fz = if (widgetId >= 0) synchronized(motionLock) { frozenSlots[widgetId] } else null
+        return Ordered(if (fz != null) QrPriority.Motion.reorderBySlots(fz, cards) { slotOf(it) } else cards, res.topKey)
+    }
+
+    /** Фабрика загрузила карточки виджета [widgetId]: запоминаем порядок слотов, который сейчас показан (его замораживает [freeze]). */
+    fun noteShown(widgetId: Int, cards: List<Card>) {
+        if (widgetId < 0) return
+        synchronized(motionLock) { shownSlots[widgetId] = cards.map { slotOf(it) } }
     }
 
     // ---------- обновление ----------
@@ -1364,8 +1394,9 @@ object QrWidgets {
     /** У виджета есть «верхняя карточка», к которой стопка возвращается: «по релевантности», служебные «Как тренировка?» / «Как настроение?» или идущий таймер карточки «Таймеры». */
     private fun tracksTop(cfg: Cfg): Boolean = cfg.relevance || cfg.rpeAsk || cfg.moodAsk || cfg.timers
 
-    fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false) {
+    fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false, intent: QrPriority.Motion.Kind? = null) {
         val app = ctx.applicationContext
+        ensureScreenReceiver(app)
         val wasBound = isBound(app, id)
         if (!wasBound) claimPending(app, id)
         val fresh = !wasBound && isBound(app, id) // виджет только что положили на экран: стопка обязана стоять на первой карточке порядка
@@ -1378,8 +1409,26 @@ object QrWidgets {
         val topNew = if (cfg != null && tracksTop(cfg)) plan(app, cfg).anchorKey else ""
         val topOld = jmap(app, K_TOP).optString(id.toString(), "")
         val trackTop = cfg != null && tracksTop(cfg)
-        val moveTop = fresh || (trackTop && (resetTop || topNew != topOld))
-        val doRebuild = rebuild || moveTop
+        var moveTop = fresh || (trackTop && (resetTop || topNew != topOld))
+        var doRebuild = rebuild || moveTop
+        // Единое решение о движении (QrPriority.Motion): виджет только что положили / пользователь сам сделал действие — двигаем сразу; смена верхней карточки без
+        // участия пользователя ждёт, пока он работает с карточками (или пока экран выключен); тогда стопка не пересоздаётся, а её порядок замораживается.
+        if (doRebuild) {
+            val kind = when {
+                fresh -> QrPriority.Motion.Kind.PLACED
+                resetTop || rebuild -> intent ?: QrPriority.Motion.Kind.STAY_ON_SLOT
+                else -> QrPriority.Motion.Kind.NEW_TOP
+            }
+            val dec = motionDecide(app, kind)
+            if (dec.action == QrPriority.Motion.Action.MOVE_NOW) {
+                thaw(id)
+            } else {
+                doRebuild = false
+                moveTop = false
+                if (dec.action == QrPriority.Motion.Action.DEFER) onDeferred(app, id, kind, dec)
+                else Log.d("QrMotion", "id=" + id + " " + kind + " → " + dec.action + ": " + dec.reason)
+            }
+        }
         // Принцип «остаться на карточке»: недавнее действие на карточке-группе / карточке задач ([pinSlot]) — стопка пересоздаётся, но встаёт на неё же, а не на первую
         val pinned = if (doRebuild && !fresh && cfg != null) pinnedSlot(cfg.id) else ""
         val showAt = if (pinned.isNotEmpty() && cfg != null) slotPosition(app, cfg, pinned) else 0
@@ -1417,7 +1466,7 @@ object QrWidgets {
             rv.setDisplayedChild(R.id.qr_stack, showAt) // тем же обновлением, что и данные: стопка показывает первую карточку (или ту, на которой только что было действие)
             clearReturn(app, id)
         }
-        if (trackTop && (moveTop || topNew != topOld)) {
+        if (trackTop && moveTop) { // верх записывается, только когда стопка действительно переставлена (отложенное движение оставляет прежний)
             synchronized(LOCK) {
                 val t = jmap(app, K_TOP)
                 t.put(id.toString(), topNew)
@@ -1802,14 +1851,14 @@ object QrWidgets {
         val app = ctx.applicationContext
         val cfg = cfgFor(app, id) ?: return
         if (!cfg.rotate || visibleCount(app, cfg) < 2) return
-        // пользователь только что трогал карточки (нажатие или смахивание): не листаем, пока с касания не прошло 30 с — срок переносится на этот момент
-        val wait = touchedAt(app) + TOUCH_PAUSE_MS - System.currentTimeMillis()
-        if (wait > 0L) {
-            setAlarm(app, System.currentTimeMillis() + wait + 500L, rotatePi(app, id, true)!!)
+        // единое решение о движении: пользователь только что трогал карточки (нажатие или смахивание) — не листаем, срок переносится на конец паузы
+        val dec = motionDecide(app, QrPriority.Motion.Kind.ROTATE)
+        if (dec.action == QrPriority.Motion.Action.DEFER && dec.at != QrPriority.Motion.AT_SCREEN_ON) {
+            Log.d("QrMotion", "rotate id=" + id + " отложено: " + dec.reason)
+            setAlarm(app, dec.at, rotatePi(app, id, true)!!)
             return
         }
-        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (screenOn(pm) && !servicePending(app, cfg)) { // пока висит «Как тренировка?» или «Как настроение?», слайд-шоу стопку не листает
+        if (dec.action == QrPriority.Motion.Action.MOVE_NOW && !servicePending(app, cfg)) { // пока висит «Как тренировка?» или «Как настроение?», слайд-шоу стопку не листает
             val rv = RemoteViews(app.packageName, R.layout.qr_widget)
             rv.showPrevious(R.id.qr_stack) // позиции стопки идут в обратную сторону (QrWidgetService.getViewAt): «позиция − 1» — это следующая карточка
             suppressSwipe(id)
@@ -1818,14 +1867,106 @@ object QrWidgets {
         setAlarm(app, System.currentTimeMillis() + cfg.rotateMin * 60_000L, rotatePi(app, id, true)!!)
     }
 
-    /** Пользователь тронул карточки виджета (нажатие — из ScanActivity, смахивание — [onPossibleSwipe]): слайд-шоу ждёт [TOUCH_PAUSE_MS]. */
-    fun noteTouch(ctx: Context) {
+    /** Пользователь тронул карточки виджета (нажатие — из ScanActivity, смахивание — [onPossibleSwipe]): стопка стоит на месте [QrPriority.Motion.INTERACTION_PAUSE_MS] (после смахивания [QrPriority.Motion.DEEP_QUIET_MS]); [swipe] — это смахивание. */
+    fun noteTouch(ctx: Context, swipe: Boolean = false) {
         val now = System.currentTimeMillis()
         lastTouchAt = now
-        try { prefs(ctx).edit().putLong(K_TOUCH, now).apply() } catch (e: Exception) { }
+        lastTouchSwipe = swipe
+        try { prefs(ctx).edit().putLong(K_TOUCH, now).putBoolean(K_TOUCH_SWIPE, swipe).apply() } catch (e: Exception) { }
     }
 
     private fun touchedAt(app: Context): Long = Math.max(lastTouchAt, prefs(app).getLong(K_TOUCH, 0L))
+
+    /** Последнее касание было смахиванием (память процесса новее сохранённого — берём её, иначе сохранённое). */
+    private fun touchWasSwipe(app: Context): Boolean =
+        if (lastTouchAt > 0L && lastTouchAt >= prefs(app).getLong(K_TOUCH, 0L)) lastTouchSwipe else prefs(app).getBoolean(K_TOUCH_SWIPE, false)
+
+    // ---------- диспетчер движения: исполнитель ----------
+
+    /** Решение [QrPriority.Motion.decide] по нынешним часам, последнему касанию и состоянию экрана. Все механизмы, двигающие стопку, спрашивают здесь. */
+    private fun motionDecide(app: Context, kind: QrPriority.Motion.Kind, onTarget: Boolean = false, targetExists: Boolean = true): QrPriority.Motion.Decision {
+        val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return QrPriority.Motion.decide(
+            QrPriority.Motion.Input(kind, System.currentTimeMillis(), touchedAt(app), touchWasSwipe(app), screenOn(pm), onTarget, targetExists)
+        )
+    }
+
+    /** Заморозить порядок: стопка продолжает показывать карточки в том порядке, в котором они сейчас лежат, пока движение отложено. */
+    private fun freeze(id: Int) {
+        synchronized(motionLock) { if (frozenSlots[id] == null) shownSlots[id]?.let { frozenSlots[id] = it } }
+    }
+
+    /** Движение исполняется: порядок размораживается, отложенное снято. */
+    private fun thaw(id: Int) {
+        synchronized(motionLock) { frozenSlots.remove(id) }
+        deferredIds.remove(id)
+        pendingReturn.remove(id)
+        val token = synchronized(wakeTokens) { wakeTokens[id] }
+        if (token != null) main.removeCallbacksAndMessages(token)
+    }
+
+    /** Движение отложено: порядок замораживается, ставится одно ожидание (по сроку — обработчик, до включения экрана — приёмник [ensureScreenReceiver]). */
+    private fun onDeferred(app: Context, id: Int, kind: QrPriority.Motion.Kind, dec: QrPriority.Motion.Decision) {
+        freeze(id)
+        val untilScreen = dec.at == QrPriority.Motion.AT_SCREEN_ON
+        Log.d("QrMotion", "id=" + id + " " + kind + " отложено" + (if (untilScreen) " до включения экрана" else " на " + (dec.at - System.currentTimeMillis()) + " мс") + ": " + dec.reason)
+        when (kind) {
+            QrPriority.Motion.Kind.RETURN_TOP -> {
+                if (untilScreen) {
+                    pendingReturn.add(id)
+                    scheduleReturn(app, id, System.currentTimeMillis() + RETURN_AFTER_MS) // запасной срок: приёмник экрана мог не дожить
+                } else scheduleReturn(app, id, dec.at)
+            }
+            QrPriority.Motion.Kind.NEW_TOP -> if (untilScreen) deferredIds.add(id) else scheduleWake(app, id, dec.at)
+            else -> {}
+        }
+    }
+
+    /** Одно ожидание на виджет: в [at] перерисовка заново решает, можно ли уже двигать (прежняя смена верха остаётся в K_TOP «не записана»). */
+    private fun scheduleWake(app: Context, id: Int, at: Long) {
+        val token = synchronized(wakeTokens) { wakeTokens.getOrPut(id) { Any() } }
+        main.removeCallbacksAndMessages(token)
+        main.postAtTime({
+            try {
+                val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (screenOn(pm)) update(app, AppWidgetManager.getInstance(app), id) else deferredIds.add(id)
+            } catch (e: Exception) {
+                Log.e("QrMotion", "wake: " + e)
+            }
+        }, token, SystemClock.uptimeMillis() + Math.max(250L, at - System.currentTimeMillis()))
+    }
+
+    /** Приёмник включения экрана (динамический, живёт, пока жив процесс): отложенное «до включения экрана» решается заново — пауза, если она ещё идёт, перенесёт срок. */
+    private fun ensureScreenReceiver(app: Context) {
+        if (screenRecv) return
+        screenRecv = true
+        try {
+            val r = object : BroadcastReceiver() {
+                override fun onReceive(c: Context, i: Intent) {
+                    try {
+                        onScreenOn(c.applicationContext)
+                    } catch (e: Exception) {
+                        Log.e("QrMotion", "screenOn: " + e)
+                    }
+                }
+            }
+            val f = IntentFilter(Intent.ACTION_SCREEN_ON)
+            if (Build.VERSION.SDK_INT >= 33) app.registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED) else app.registerReceiver(r, f)
+        } catch (e: Exception) {
+            screenRecv = false
+            Log.e("QrMotion", "receiver: " + e)
+        }
+    }
+
+    private fun onScreenOn(app: Context) {
+        val mgr = AppWidgetManager.getInstance(app)
+        val rets = synchronized(pendingReturn) { ArrayList(pendingReturn) }
+        val tops = synchronized(deferredIds) { ArrayList(deferredIds) }
+        pendingReturn.clear()
+        deferredIds.clear()
+        for (id in rets) returnToTop(app, id)
+        for (id in tops) if (id !in rets) update(app, mgr, id)
+    }
 
     /** Стопку только что переставили мы (обновление, возврат наверх, «после срабатывания»): запросы фабрики в ближайшие секунды — не смахивание. */
     private fun suppressSwipe(id: Int) {
@@ -1841,7 +1982,7 @@ object QrWidgets {
     fun onPossibleSwipe(ctx: Context, id: Int, n: Int) {
         if (n < 2 || swipeSuppressed(id)) return
         val app = ctx.applicationContext
-        noteTouch(app) // смахнули стопку сами — слайд-шоу не мешает ближайшие 30 с
+        noteTouch(app, true) // смахнули стопку сами — стопка стоит на месте ближайшие 120 с (QrPriority.Motion.DEEP_QUIET_MS)
         main.post {
             // Возврат наверх взводим ПЕРВЫМ и отдельно: сбой при рисовании точек (виджет удалили, лаунчер не принял обновление) раньше глотался общим catch
             // и до armReturn дело не доходило — стопка не возвращалась никогда.
@@ -1926,8 +2067,12 @@ object QrWidgets {
             d
         }
         Log.d("QrReturn", "armed id=" + id + " in " + (due - now) + " ms, anchor=" + res.anchorKey)
-        val delay = Math.max(1_000L, due - now)
-        // точно по времени — пока жив процесс; будильник — запасной (процесс могли выгрузить)
+        postReturn(app, id, due)
+    }
+
+    /** Ставит возврат на [due]: точно по времени — пока жив процесс; будильник — запасной (процесс могли выгрузить). */
+    private fun postReturn(app: Context, id: Int, due: Long) {
+        val delay = Math.max(1_000L, due - System.currentTimeMillis())
         val token = synchronized(returnTokens) { returnTokens.getOrPut(id) { Any() } }
         main.removeCallbacksAndMessages(token)
         main.postAtTime({
@@ -1938,6 +2083,18 @@ object QrWidgets {
             }
         }, token, SystemClock.uptimeMillis() + delay)
         returnPi(app, id, true)?.let { setAlarm(app, due + 3_000L, it) }
+    }
+
+    /** Диспетчер отложил возврат: новый срок [due] (конец паузы после касания) пишется как у обычного возврата и ставится заново. */
+    private fun scheduleReturn(app: Context, id: Int, due: Long) {
+        synchronized(LOCK) {
+            val m = jmap(app, K_RETURN)
+            val f = jmap(app, K_RETFIRST)
+            m.put(id.toString(), due)
+            if (f.optLong(id.toString(), 0L) <= 0L) f.put(id.toString(), System.currentTimeMillis())
+            prefs(app).edit().putString(K_RETURN, m.toString()).putString(K_RETFIRST, f.toString()).apply()
+        }
+        postReturn(app, id, due)
     }
 
     /** Снимает ожидающий возврат (стопка и так переставлена наверх, или виджет удалён). */
@@ -1986,14 +2143,11 @@ object QrWidgets {
         if (anchor.isEmpty() || res.cards.size < 2) return
         suppressSwipe(id)
         dotsOn.remove(id)
-        synchronized(LOCK) {
-            val t = jmap(app, K_TOP)
-            t.put(id.toString(), anchor)
-            prefs(app).edit().putString(K_TOP, t.toString()).apply()
-        }
         // ОДНО полное обновление с пересозданием адаптера (как в onCardFired): сброс положения идёт в том же RemoteViews, что и данные.
         // Прежний возврат одним partiallyUpdateAppWidget(setDisplayedChild(0)) у смахнутой стопки не срабатывал — позицию StackView он не менял.
-        update(app, AppWidgetManager.getInstance(app), id, true, true)
+        // Верхняя карточка (K_TOP) записывается в update, только когда стопка действительно переставлена: пока пользователь работает с карточками,
+        // update отложит возврат (QrPriority.Motion) и сам поставит новый срок.
+        update(app, AppWidgetManager.getInstance(app), id, true, true, QrPriority.Motion.Kind.RETURN_TOP)
     }
 
     /** Полупрозрачный «скелет» карточки — показывается вместо пустого места, пока система подгружает карточку. */
