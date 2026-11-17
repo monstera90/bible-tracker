@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.6 (17.11) — режим «Заметки-карточки» списка заметок: `.note-card` (карточка `.item-card` цвета виджета #7f00ff с выступом #6600cd; размер — `--item-card-w`, его ставит `applyNotesCardsSize` в mdeditor.js). Откат: components.css 26.5.
    Версия: 26.5 (17.11) — экран «Положение обложки» книги-карточки (`.cover-pos-*`), кнопка `.mdeditor-cover-pos-btn` оформлена как остальные кнопки карточки книги. Откат: components.css 26.4.
    Версия: 26.4 (17.11) — режим «Книги-карточки» списка книг: `.books-cards-grid` (карточка книги размером и с цветным выступом снизу, как `.item-card`; ширину считает `applyBookCardsSize` в my.js → `--book-card-w`). Откат: components.css 26.3.
    Версия: 16.4 (16.11) — лицо таймера карточки: svg на всю карточку (`.item-card-timer-svg`), маленькая кнопка «Стоп» в нижней полосе.
@@ -5088,3 +5089,41 @@ html[data-theme="14"] .pdf-hl{
   transition:none;
 }
 .item-card.item-card-drop{ box-shadow:0 0 0 3px var(--ink, #000), 0 calc(var(--item-card-w, 112px) * 0.04) 0 var(--card-shade, #8d78df); }
+
+/* ===========================================================================
+   «Заметки-карточки» (режим списка заметок, mdeditor.js renderListScreen). Сетка — та же `.item-cards-grid`, что у QR-карточек
+   (колонки и ширина — --item-card-cols/--item-card-w из applyNotesCardsSize); карточка — `.item-card` с цветом виджета
+   (#7f00ff, выступ снизу #6600cd), пиктограмма заметки (папки — своя) сверху и название под ней. Карточка остаётся
+   `.mdeditor-row`, поэтому долгое нажатие, открытие и кнопки «закладка»/«удалить» работают как в списке.
+   =========================================================================== */
+.note-card.mdeditor-row{
+  display:block;
+  gap:0;
+  padding:0;
+  border:none;
+  background:#7f00ff;
+  color:#fff;
+  text-align:center;
+  --card-shade:#6600cd;
+  box-shadow:0 calc(var(--item-card-w, 112px) * 0.04) 0 #6600cd;
+}
+.note-card.mdeditor-row:hover{ background:#7f00ff; }
+.note-card .item-card-icon{
+  width:calc(var(--item-card-w, 112px) * 0.32);
+  height:calc(var(--item-card-w, 112px) * 0.32);
+  margin-bottom:calc(var(--item-card-w, 112px) * 0.05);
+}
+.note-card .item-card-icon svg{ width:100%; height:100%; color:#fff; }
+.note-card .item-card-title{ -webkit-line-clamp:3; }
+.note-card .mdeditor-bookmark-btn,
+.note-card .mdeditor-delete-btn{
+  position:absolute;
+  top:3px;
+  z-index:2;
+  background:rgba(0,0,0,.35);
+}
+.note-card .mdeditor-bookmark-btn{ right:3px; color:#fff; }
+.note-card .mdeditor-delete-btn{ right:31px; color:#ffd0cc; }
+.note-card .mdeditor-delete-btn:last-child{ right:3px; } /* у папки это единственная кнопка */
+.note-card .mdeditor-bookmark-btn svg,
+.note-card .mdeditor-delete-btn svg{ color:inherit; }

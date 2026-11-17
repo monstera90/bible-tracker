@@ -1,6 +1,7 @@
 /* ===========================================================================
    mdeditor.js
-   Версия: 24.1 (15.11)
+   Версия: 25.0 (17.11)
+   Версия: 25.0 (17.11) — структурная правка: у списка заметок два режима — «Список моих заметок» (как был) и «Заметки-карточки» (карточки как у вкладки QR-кодов, цвет и выступ как у виджета; пиктограмма заметки/папки + название). Кнопка режима `mdNotesViewModeBtn` стоит слева от «+» и показывает режим, В КОТОРЫЙ переключит клик; в режиме карточек слева от неё кнопка размера `mdNotesSizeBtn` (ползунок 0,7–2, `mdNotesSizeBar`). Выбор и масштаб — localStorage (`mdNotesViewMode_v1`, `mdNotesCardsSize_v1`). Откат: mdeditor.js 24.1.
    Версия: 24.1 (15.11) — белый экран после ухода в другое приложение и возврата: `flushPendingSyncNow` (my.js) при сворачивании звал `flushPendingMdEditorEdit`, а та уничтожала CodeMirror (`destroyEditor`, cmView = null) при том, что экран заметки оставался на месте; возврат целиком зависел от перемонтирования по таймерам, а `rememberScrollBeforeHide` в `onAppPause` не видел редактора (editorIsShown требует cmView). Новая `flushOnAppPause` только сохраняет и отправляет правки, редактор не трогает; экспорт `MdEditor.flushOnAppPause`. Откат: mdeditor.js 24.0.
    Версия: 17.1 (28.10) — «Сегодня»: `createDatedNote` запоминает созданную заметку как последнюю открытую (`persistDocStateNow`), `resumeLastNoteOrShowList` не перебивает заметку, открытую за время чтения `lastNote` (вместо заметки 28.10 открывалась вчерашняя 27.10).
    Версия: 17.0 (27.10) — структурная правка: комментарий дня «Карты дней года» хранится в заметке этого дня (имя `дд.мм.гггг`, папка `notes`): публичные `getDayNote`/`getDayNoteId`/`setDayNote`/`importDayNote`/`getDayNotesByDay` (+ `dayNoteRec`, `replaceNoteBody`, `noteBodyOnly`). Удаление заметки = удаление комментария. Откат: mdeditor.js 16.1.
@@ -3507,6 +3508,65 @@ window.initMdEditorModule = function(deps){
   // вложенных папок в общий список НЕ попадают, вместо них показывается
   // сама папка; "домик" всегда ведёт в корень.
   // ---------------------------------------------------------------------
+  // ---------- режимы показа списка заметок: «Список моих заметок» (по умолчанию) и «Заметки-карточки» ----------
+  // Режим и масштаб карточек хранятся на устройстве (localStorage). Кнопка нижнего ряда показывает режим, В КОТОРЫЙ
+  // переключит клик (как в списке книг); кнопка размера и ползунок — только в режиме карточек (как во вкладке QR-кодов).
+  var NOTES_VIEW_KEY = "mdNotesViewMode_v1";   // "list" | "cards"
+  var NOTES_CARDS_SIZE_KEY = "mdNotesCardsSize_v1";
+  var NOTES_CARDS_SIZE_MIN = 0.7, NOTES_CARDS_SIZE_MAX = 2;
+  var NOTES_CARD_BASE_PX = 110, NOTES_CARD_GAP_PX = 2; // как у карточек QR (itemcards.js applySize) и книг
+  var NOTES_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
+  var NOTES_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
+  var NOTES_SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
+  function getNotesViewMode(){
+    try{ return localStorage.getItem(NOTES_VIEW_KEY) === "cards" ? "cards" : "list"; }catch(e){ return "list"; }
+  }
+  function setNotesViewMode(m){ try{ localStorage.setItem(NOTES_VIEW_KEY, m === "cards" ? "cards" : "list"); }catch(e){} }
+  function getNotesCardsScale(){
+    var v = 1;
+    try{ v = parseFloat(localStorage.getItem(NOTES_CARDS_SIZE_KEY)); }catch(e){}
+    if(!isFinite(v)) v = 1;
+    return Math.min(NOTES_CARDS_SIZE_MAX, Math.max(NOTES_CARDS_SIZE_MIN, v));
+  }
+  function setNotesCardsScale(v){ try{ localStorage.setItem(NOTES_CARDS_SIZE_KEY, String(v)); }catch(e){} }
+  // ширина карточки: тот же расчёт, что applySize у «Карточек предметов» — база 110px × ползунок, целое число колонок, всю ширину занимают карточки
+  function applyNotesCardsSize(gridEl){
+    if(!gridEl) return;
+    var inner = gridEl.clientWidth;
+    if(!(inner > 40)) inner = 329; // область вкладки ещё не измерима: запасное значение (экран ~390px)
+    var base = NOTES_CARD_BASE_PX * getNotesCardsScale();
+    var cols = Math.max(1, Math.floor((inner + NOTES_CARD_GAP_PX) / (base + NOTES_CARD_GAP_PX)));
+    var w = (inner - NOTES_CARD_GAP_PX * (cols - 1)) / cols;
+    gridEl.style.setProperty("--item-card-cols", String(cols));
+    gridEl.style.setProperty("--item-card-w", (Math.floor(w * 100) / 100) + "px");
+  }
+  // длинное слово названия не рвётся, а ужимает шрифт (до 0,075 ширины карточки); не влезло и так — рвётся по буквам
+  function fitNoteCardText(gridEl){
+    if(!gridEl || !gridEl.querySelectorAll) return;
+    var nodes = gridEl.querySelectorAll(".item-card-title");
+    for(var i = 0; i < nodes.length; i++){
+      var el = nodes[i];
+      el.style.fontSize = "";
+      el.classList.remove("item-card-title-brk");
+      if(!el.clientWidth || !(el.scrollWidth > el.clientWidth + 1)) continue;
+      var card = el.closest ? el.closest(".item-card") : null;
+      var cw = card ? card.clientWidth : 0;
+      var size = parseFloat(window.getComputedStyle(el).fontSize) || 0;
+      if(!cw || !size) continue;
+      var minSize = cw * 0.075;
+      while(el.scrollWidth > el.clientWidth + 1 && size > minSize){ size -= 0.5; el.style.fontSize = size + "px"; }
+      if(el.scrollWidth > el.clientWidth + 1) el.classList.add("item-card-title-brk");
+    }
+  }
+  var notesCardsResizeTimer = null;
+  window.addEventListener("resize", function(){ // поворот экрана: колонки пересчитываются
+    if(notesCardsResizeTimer) clearTimeout(notesCardsResizeTimer);
+    notesCardsResizeTimer = setTimeout(function(){
+      var g = document.getElementById("mdEditorList");
+      if(g && g.classList.contains("note-cards-grid")){ applyNotesCardsSize(g); fitNoteCardText(g); }
+    }, 120);
+  });
+
   function renderListScreen(container){
     // дерево могли перестроить (перенос заметки в папку QR-заметок, приход правок): узел папки берём заново по пути
     currentDirNode = findNodeByPath(rootTree, folderPath(currentDirNode)) || rootTree;
@@ -3524,6 +3584,7 @@ window.initMdEditorModule = function(deps){
       return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
     });
     var items = folderItems.concat(fileItems);
+    var cardsMode = getNotesViewMode() === "cards"; // «Заметки-карточки» вместо «Списка моих заметок»
 
     var isRoot = (node === rootTree);
     // Есть ли хоть одна незыделенная заметка ВООБЩЕ (не только в текущей
@@ -3538,7 +3599,9 @@ window.initMdEditorModule = function(deps){
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
-      html += '<div class="mdeditor-list mdeditor-list-grid" id="mdEditorList"></div>';
+      html += cardsMode
+        ? '<div class="mdeditor-list item-cards-grid note-cards-grid" id="mdEditorList"></div>'
+        : '<div class="mdeditor-list mdeditor-list-grid" id="mdEditorList"></div>';
     }
     // Строка статуса — сюда попадают результаты импорта/экспорта
     // (см. handleImportFile/downloadAllNotesZip выше): "Импортировано: N",
@@ -3574,13 +3637,52 @@ window.initMdEditorModule = function(deps){
     html += '<input type="file" accept=".md,.zip,text/markdown,application/zip" id="mdEditorImportInput" style="display:none;">';
     html += '<input type="file" accept=".zip,application/zip" id="mdEditorImportImagesZipInput" style="display:none;">';
     html += '<div class="mdeditor-fab-row">';
+    // размер карточек — только в режиме «Заметки-карточки»; кнопка режима — сразу слева от «+» и показывает режим, В КОТОРЫЙ переключит клик
+    if(cardsMode) html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesSizeBtn" title="Размер карточек">' + NOTES_SIZE_ICON_SVG + '</button>';
+    html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesViewModeBtn" title="' + (cardsMode ? 'Список моих заметок' : 'Заметки-карточки') + '">' + (cardsMode ? NOTES_VIEW_LIST_ICON_SVG : NOTES_VIEW_CARDS_ICON_SVG) + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
     // «Закладки» — сразу слева от «домика» (экран со списком закладок заметок и книг)
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorBookmarksBtn" title="Закладки">' + BOOKMARK_ICON_SVG + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
     html += '</div>';
+    if(cardsMode){
+      html += '<div class="fontsize-bar" id="mdNotesSizeBar">' +
+        '<span class="task-iconsize-dot task-iconsize-dot-s"></span>' +
+        '<input type="range" class="fontsize-bar-range" id="mdNotesSizeRange" min="' + NOTES_CARDS_SIZE_MIN + '" max="' + NOTES_CARDS_SIZE_MAX + '" step="0.05" value="1" aria-label="Размер карточек">' +
+        '<span class="task-iconsize-dot task-iconsize-dot-l"></span>' +
+        '<span class="fontsize-bar-val" id="mdNotesSizeVal"></span>' +
+      '</div>';
+    }
     html += '</div>';
     container.innerHTML = html;
+
+    var viewModeBtn = document.getElementById("mdNotesViewModeBtn");
+    if(viewModeBtn){
+      viewModeBtn.addEventListener("click", function(){
+        setNotesViewMode(cardsMode ? "list" : "cards");
+        render();
+      });
+    }
+    var sizeBtn = document.getElementById("mdNotesSizeBtn");
+    var sizeBar = document.getElementById("mdNotesSizeBar");
+    var sizeRange = document.getElementById("mdNotesSizeRange");
+    var sizeVal = document.getElementById("mdNotesSizeVal");
+    if(sizeBtn && sizeBar && sizeRange && sizeVal){
+      var showSizeVal = function(){ sizeVal.textContent = Math.round(getNotesCardsScale() * 100) + "%"; };
+      sizeBtn.addEventListener("click", function(){
+        var open = !sizeBar.classList.contains("open");
+        sizeBar.classList.toggle("open", open);
+        if(open){ sizeRange.value = String(getNotesCardsScale()); showSizeVal(); }
+      });
+      sizeRange.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      sizeRange.addEventListener("input", function(){
+        var v = parseFloat(sizeRange.value);
+        if(!isFinite(v)) return;
+        setNotesCardsScale(v);
+        var g = document.getElementById("mdEditorList");
+        applyNotesCardsSize(g); fitNoteCardText(g); showSizeVal();
+      });
+    }
 
     var importInput = document.getElementById("mdEditorImportInput");
     var importBtn = document.getElementById("mdEditorImportBtn");
@@ -3635,17 +3737,19 @@ window.initMdEditorModule = function(deps){
 
     var listEl = document.getElementById("mdEditorList");
     if(listEl){
+      if(cardsMode) applyNotesCardsSize(listEl);
       items.forEach(function(it, idx){
         var row = document.createElement("div");
-        row.className = "mdeditor-row";
+        // карточка — тоже .mdeditor-row: долгое нажатие, клики и кнопки «закладка»/«удалить» работают те же, что в списке
+        row.className = cardsMode ? "mdeditor-row item-card note-card" + (it.type === "folder" ? " note-card-folder" : "") : "mdeditor-row";
         row.dataset.index = String(idx);
         var isNote = (it.type === "file");
-        row.innerHTML = (it.type === "folder" ? FOLDER_ICON_SVG : FILE_ICON_SVG) +
-          '<span class="mdeditor-row-name"></span>' +
+        var iconSvg = it.type === "folder" ? FOLDER_ICON_SVG : FILE_ICON_SVG;
+        row.innerHTML = (cardsMode ? '<div class="item-card-front"><div class="item-card-icon">' + iconSvg + '</div><div class="item-card-title"></div></div>' : iconSvg + '<span class="mdeditor-row-name"></span>') +
           (isNote ?
             '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' :
             '<button type="button" class="mdeditor-delete-btn" title="Удалить папку">' + DELETE_ICON_SVG + '</button>');
-        row.querySelector(".mdeditor-row-name").textContent = it.name;
+        row.querySelector(cardsMode ? ".item-card-title" : ".mdeditor-row-name").textContent = it.name;
         if(isNote){
           var key = it.name.toLowerCase();
           var bmBtn = row.querySelector(".mdeditor-bookmark-btn");
@@ -3660,6 +3764,7 @@ window.initMdEditorModule = function(deps){
         }
         listEl.appendChild(row);
       });
+      if(cardsMode) fitNoteCardText(listEl);
 
       // долгое нажатие (касание / левая кнопка мыши) и правый клик — одинаково (press.js)
       var press = LTPress.bind(listEl, { sel: ".mdeditor-row", ms: 350, blockAll: true, onLong: function(info){
