@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.8 (18.11)
    Версия: 26.7 (17.11) — кнопка `.mdeditor-widget-btn` («Показывать в виджете», карточка книги) оформлена как остальные кнопки карточки книги. Откат: components.css 26.6.
    Версия: 26.6 (17.11) — режим «Заметки-карточки» списка заметок: `.note-card` (карточка `.item-card` цвета виджета #7f00ff с выступом #6600cd; размер — `--item-card-w`, его ставит `applyNotesCardsSize` в mdeditor.js). Откат: components.css 26.5.
    Версия: 26.5 (17.11) — экран «Положение обложки» книги-карточки (`.cover-pos-*`), кнопка `.mdeditor-cover-pos-btn` оформлена как остальные кнопки карточки книги. Откат: components.css 26.4.
@@ -4437,7 +4438,8 @@ body::after{
 .settings-modal-overlay.notes-wide .item-cards-tab .item-type-menu:not(.item-filter-menu){
   inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
 }
-.settings-modal-overlay.notes-wide .item-cards-tab .fontsize-bar{
+.settings-modal-overlay.notes-wide .item-cards-tab .fontsize-bar,
+.settings-modal-overlay.notes-wide .books-list-tab .fontsize-bar{
   inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
   width:calc(100% - var(--fab-gap, 6px) * 2 - var(--notes-wide-extra, 0px));
 }

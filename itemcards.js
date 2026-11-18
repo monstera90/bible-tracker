@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.4 (18.11)
    Версия: 49.3 (17.11) — в нижнем ряду слева от воронки кнопка «Конструктор виджетов» (`#itemCardsWidgetsBtn`, `WIDGETS_ICON_SVG`, `deps.openWidgetsEditor`): конструктор больше не вкладка колеса. Откат: itemcards.js 49.2.
    Версия: 49.2 (16.11) — скрытые таймеры (`noIsland`) входят в карточку «Таймеры» виджета (`widgetTimerList`), в лице таймера поле `noIsland`. Откат: itemcards.js 49.1.
   Версия: 51.1 (16.11) — запуск таймера нажатием в виджете без окна попадает в журнал событий: `drainWidgetTimers` (мост ≥ 39: `widgetTimerTake` / `widgetTimerAck`). Откат: itemcards.js 51.0.
@@ -256,7 +257,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     if(c.noIsland && !c.virtual) return timerCodeId(c.seconds | 0, timerQrTitle(c.title), true);
     return c.id;
   }
-  var SIZE_MIN = 0.7, SIZE_MAX = 2;
+  var SIZE_MIN = 0.5, SIZE_MAX = 2;
   var ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // без похожих знаков (i, l, o, 0, 1)
 
   // ---------- пиктограммы: имя -> содержимое <svg> (стиль закладок: 24x24, линия 1,7) ----------

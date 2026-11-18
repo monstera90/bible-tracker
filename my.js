@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.0 (18.11)
    Версия: 150.4 (17.11) — вход из оболочки `window.__ltOpenBook(id)` / параметр `?book=<id>` (`openBookFromNative`, `handleBookLaunchParam`): нажатие на карточку «Книги» в виджете открывает книгу на основной закладке (`openComboBookmark`); нет основной закладки — вкладка «Мои книги». Откат: my.js 150.3.
    Версия: 150.3 (17.11) — «Книги-карточки»: в меню долгого удержания книги кнопка с виджетом (`.mdeditor-widget-btn`): плашка со списком виджетов (`openBookWidgetPicker`), выбор добавляет книгу в карточку «Книги» этого виджета (включает его галочку «Отображать книги»), повторный выбор убирает; тосты и хранение — widgets.js (`toggleBook`). Для виджетов: `widgetBooksList`, `widgetBookCover`, id книги `bookWidgetId`; смена положения/сброс обложки перерисовывает виджеты. Названия экранов: «Список книг», «Ваши книги», «Книги-карточки» (заголовок, кнопка переключения, «i»). Откат: my.js 150.2.
    Версия: 150.2 (17.11) — «Конструктор виджетов» больше не вкладка режима колеса (кнопка `settingsTabWidgetsBtn` убрана): он открывается кнопкой в нижнем ряду вкладки «QR-коды» (`openWidgetsFromCards`), домик и «назад» ведут обратно к карточкам; пиктограмма вкладки «QR-коды» — стопка карточек. Откат: my.js 150.1.
@@ -8322,6 +8323,7 @@
         "bibleTabOrder_v1": "порядок язычков окна настроек (по группам) — старое хранилище, читается только для переноса в state",
         "bibleBooksViewMode_v1": "вид списка книг — старое хранилище, читается только для переноса в state (`__booksViewMode`)",
         "bibleBooksHideTitles_v1": "скрытие заголовков книг",
+        "bibleBookCardsSize_v1": "размер карточек книг («Книги-карточки») на этом устройстве",
         "bibleBookCoverDisabled_v1": "отключение обложек",
         "bibleReadingMode_v1": "режим чтения",
         "bibleRedSortByFlag_v1": "сортировка красных задач",
@@ -11452,7 +11454,7 @@
           (list || []).forEach(function(b){ if(!hit && b.id === id) hit = b; });
           if(!hit || !hit.hash){ if(hit){ openSettingsTabDirect("set2s_7"); } else again(); return; }
           if(!(typeof settingsModalOverlay !== "undefined" && settingsModalOverlay && settingsModalOverlay.classList.contains("open"))) openSettingsModal();
-          openComboBookmark(hit.hash, "", function(ok){ if(!ok) openSettingsTabDirect("set2s_7"); });
+          openBookMainOrLast(hit.hash);
         }).catch(again);
       }catch(e){ again(); }
     })();
@@ -13586,6 +13588,15 @@
       : next === "cover" ? {title: "Ваши книги", icon: BOOKS_VIEW_COVER_ICON_SVG}
       : {title: "Список книг", icon: BOOKS_VIEW_LIST_ICON_SVG};
   }
+  var BOOKS_SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
+  function booksSizeBarHtml(){
+    return '<div class="fontsize-bar" id="booksSizeBar">' +
+      '<span class="task-iconsize-dot task-iconsize-dot-s"></span>' +
+      '<input type="range" class="fontsize-bar-range" id="booksSizeRange" min="' + BOOK_CARDS_SIZE_MIN + '" max="' + BOOK_CARDS_SIZE_MAX + '" step="0.05" value="1" aria-label="Размер карточек">' +
+      '<span class="task-iconsize-dot task-iconsize-dot-l"></span>' +
+      '<span class="fontsize-bar-val" id="booksSizeVal"></span>' +
+    '</div>';
+  }
   function booksFabRowHtml(){
     var mode = curBooksViewMode();
     var coverMode = mode !== "list"; // «Обложки» и «Книги-карточки»: подписи под обложками можно скрыть
@@ -13599,6 +13610,7 @@
         '<button type="button" class="mdeditor-fab-btn" id="booksInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         ipkdFabBtnHtml() + // ИПКД — сразу справа от «i» (число месяца, открывает сегодняшний день)
         '<button type="button" class="mdeditor-fab-btn" id="booksImportBtn" title="Загрузить fb2, epub, pdf или zip книгу">' + BOOKS_UPLOAD_ICON_SVG + '</button>' +
+        (mode === "cards" ? '<button type="button" class="mdeditor-fab-btn" id="booksSizeBtn" title="Размер карточек">' + BOOKS_SIZE_ICON_SVG + '</button>' : "") +
         '<button type="button" class="mdeditor-fab-btn" id="booksViewModeBtn" title="' + modeBtn.title + '">' +
           modeBtn.icon +
         '</button>' +
@@ -13618,6 +13630,27 @@
         booksViewMode = nextBooksViewMode(curBooksViewMode());
         setBooksViewMode(booksViewMode);
         renderSettingsTabBooks();
+      });
+    }
+    var sizeBtn = document.getElementById("booksSizeBtn");
+    var sizeBar = document.getElementById("booksSizeBar");
+    var sizeRange = document.getElementById("booksSizeRange");
+    var sizeVal = document.getElementById("booksSizeVal");
+    if(sizeBtn && sizeBar && sizeRange && sizeVal){
+      var showSizeVal = function(){ sizeVal.textContent = Math.round(getBookCardsScale() * 100) + "%"; };
+      sizeBtn.addEventListener("click", function(){
+        var open = !sizeBar.classList.contains("open");
+        sizeBar.classList.toggle("open", open);
+        if(open){ sizeRange.value = String(getBookCardsScale()); showSizeVal(); }
+      });
+      sizeRange.addEventListener("mousedown", function(e){ e.preventDefault(); });
+      sizeRange.addEventListener("input", function(){
+        var v = parseFloat(sizeRange.value);
+        if(!isFinite(v)) return;
+        setBookCardsScale(v);
+        var g = document.getElementById("booksList");
+        if(g && g.classList.contains("books-cards-grid")) applyBookCardsSize(g);
+        showSizeVal();
       });
     }
     var hideTitlesBtn = document.getElementById("booksHideTitlesBtn");
@@ -13728,7 +13761,14 @@
       }
       if(press.consume()) return;
       if(revealedBookDeleteRows.size){ hideRevealedBookActionButtons(); return; }
-      openBookReader(it.name);
+      // Основная закладка книги; нет её — последнее место чтения (его openBookReader берёт сам, когда позиция не передана).
+      var mainBm = it.hash ? getMainBookBookmark(it.hash) : null;
+      if(mainBm && mainBm.position){
+        var mainPos = mainBm.position;
+        openBookReader(it.name, function(){ return mainPos; });
+      } else {
+        openBookReader(it.name);
+      }
     });
   }
 
@@ -13822,11 +13862,22 @@
   // (BOOKS_BASE_PX), зазор 2px, число колонок целое, карточки занимают всю ширину. От --book-card-w в CSS считается всё:
   // высота (×1,02 — CARD_ASPECT / FACE_BODY виджета), скругление (×0,12), выступ снизу (×0,04).
   var BOOK_CARD_BASE_PX = 110, BOOK_CARD_GAP_PX = 2;
+  // Масштаб карточек книг (кнопка размера в нижнем ряду, только в режиме «Книги-карточки»): база 110px × ползунок, на этом устройстве.
+  var BOOK_CARDS_SIZE_KEY = "bibleBookCardsSize_v1";
+  var BOOK_CARDS_SIZE_MIN = 0.5, BOOK_CARDS_SIZE_MAX = 2;
+  function getBookCardsScale(){
+    var v = 1;
+    try{ v = parseFloat(localStorage.getItem(BOOK_CARDS_SIZE_KEY)); }catch(e){}
+    if(!isFinite(v)) v = 1;
+    return Math.min(BOOK_CARDS_SIZE_MAX, Math.max(BOOK_CARDS_SIZE_MIN, v));
+  }
+  function setBookCardsScale(v){ try{ localStorage.setItem(BOOK_CARDS_SIZE_KEY, String(v)); }catch(e){} }
   function applyBookCardsSize(gridEl){
     if(!gridEl) return;
     var inner = gridEl.clientWidth;
     if(!(inner > 40)) inner = 329; // область вкладки ещё не измерима: запасное значение (экран ~390px)
-    var cols = Math.max(1, Math.floor((inner + BOOK_CARD_GAP_PX) / (BOOK_CARD_BASE_PX + BOOK_CARD_GAP_PX)));
+    var base = BOOK_CARD_BASE_PX * getBookCardsScale();
+    var cols = Math.max(1, Math.floor((inner + BOOK_CARD_GAP_PX) / (base + BOOK_CARD_GAP_PX)));
     var w = (inner - BOOK_CARD_GAP_PX * (cols - 1)) / cols;
     gridEl.style.setProperty("--book-card-cols", String(cols));
     gridEl.style.setProperty("--book-card-w", (Math.floor(w * 100) / 100) + "px");
@@ -14057,6 +14108,7 @@
     // скрытый <input type="file">, который она открывает.
     html += '<input type="file" accept=".fb2,.epub,.pdf,.zip,application/zip,application/pdf" id="booksImportInput" style="display:none;">';
     html += booksFabRowHtml();
+    if(cardsMode) html += booksSizeBarHtml();
     html += '</div>';
     container.innerHTML = html;
     bindBooksFabRow();
@@ -22856,6 +22908,14 @@
       (items || []).forEach(function(b){ out.push({type: "book", hash: b.hash, bookmarkId: b.bookmarkId, name: b.name || b.bookName, bookName: b.bookName}); });
       cb(out);
     });
+  }
+  // Нажатие на книгу в виджете: основная закладка; нет её — последнее место чтения (сохранённая позиция книги).
+  // Саму открытую книгу ведёт openBookAtMarginBookmark (одна сборка, вкладка «Мои книги»; нет файла на устройстве — сообщение там же).
+  function openBookMainOrLast(hash){
+    var main = getMainBookBookmark(hash);
+    var data = getBookState(hash);
+    var pos = (main && main.position) || (data && data.position) || null;
+    openBookAtMarginBookmark(hash, pos);
   }
   // Открыть книжную закладку по (хеш книги, id закладки): текущее место закладки берётся на момент запуска.
   // Основная («контактная») закладка при каждом переносе (moveMainBookmarkTo, restoreBookPrevMain) удаляется и создаётся

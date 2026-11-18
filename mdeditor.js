@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.2 (18.11)
    Версия: 25.1 (17.11)
    Версия: 25.1 (17.11) — заголовок корня списка заметок — название режима: «Список моих заметок» / «Заметки-карточки» (в папке — имя папки). Откат: mdeditor.js 25.0.
    Версия: 25.0 (17.11) — структурная правка: у списка заметок два режима — «Список моих заметок» (как был) и «Заметки-карточки» (карточки как у вкладки QR-кодов, цвет и выступ как у виджета; пиктограмма заметки/папки + название). Кнопка режима `mdNotesViewModeBtn` стоит слева от «+» и показывает режим, В КОТОРЫЙ переключит клик; в режиме карточек слева от неё кнопка размера `mdNotesSizeBtn` (ползунок 0,7–2, `mdNotesSizeBar`). Выбор и масштаб — localStorage (`mdNotesViewMode_v1`, `mdNotesCardsSize_v1`). Откат: mdeditor.js 24.1.
@@ -3514,7 +3515,7 @@ window.initMdEditorModule = function(deps){
   // переключит клик (как в списке книг); кнопка размера и ползунок — только в режиме карточек (как во вкладке QR-кодов).
   var NOTES_VIEW_KEY = "mdNotesViewMode_v1";   // "list" | "cards"
   var NOTES_CARDS_SIZE_KEY = "mdNotesCardsSize_v1";
-  var NOTES_CARDS_SIZE_MIN = 0.7, NOTES_CARDS_SIZE_MAX = 2;
+  var NOTES_CARDS_SIZE_MIN = 0.5, NOTES_CARDS_SIZE_MAX = 2;
   var NOTES_CARD_BASE_PX = 110, NOTES_CARD_GAP_PX = 2; // как у карточек QR (itemcards.js applySize) и книг
   var NOTES_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var NOTES_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
