@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.4 (18.11) — заметки-карточки в карточке «Книги»: заметку можно добавить в виджет с экрана «Заметки-карточки» (долгое нажатие → кнопка с виджетом; `toggleBook(…, "note")`). Заметка лежит в том же списке `bookList`, id с приставкой `nt_` (`isNoteId`), лицо рисует `noteFacePng` (цвет заметки, значок, название); список заметок для лиц — деп `listNotes`. Нажатие на карточку открывает заметку. Откат: widgets.js 7.3.
    Версия: 7.3 (17.11) — лицо книги шириной 480 px, как у остальных лиц (было 400): в StackView более узкая картинка не заполняла слот, книга выходила меньше и сдвинутой, а из-за неё выглядывала задняя карточка. Откат: widgets.js 7.2.
    Версия: 7.2 (17.11) — галочка «Отображать книги» (`books`, список книг виджета — `bookList`: [{h: id книги, n: имя}]): в стопку добавляется ОДНА карточка со всеми книгами, добавленными в этот виджет на экране «Книги-карточки» (долгое нажатие на книге → кнопка со списком виджетов; `WidgetsTab.toggleBook`, `widgetsForBook`; тосты — здесь же). Лицо книги (обложка по положению, цветной выступ как в приложении, у книги без обложки — название на заглушке) рисует страница (`bookFacePng`, ключ картинки `bk_<id>`) и шлёт оболочке; в `bks` уходят ключ и название. Листание краями и точки — как у карточек-групп (QrPriority `bk_0`). Откат: widgets.js 7.1.
    Версия: 7.1 (17.11) — конструктор открывается кнопкой из вкладки «QR-коды» (`render({onExit})`): на списке виджетов домик и «назад» возвращают к карточкам; вкладки колеса больше нет. Откат: widgets.js 7.0.
@@ -57,8 +58,13 @@
   var BOOK_PLACEHOLDER_SRC = "book-cover-placeholder.jpg"; // та же заглушка, что у книг без обложки в приложении (лежит рядом с index.html)
   var TOAST_BOOK_ON = "Теперь книга будет отображаться в вашем виджете";
   var TOAST_BOOK_OFF = "Теперь эта книга не будет отображаться в вашем виджете";
-  var TOAST_NO_BOOKS = "Вы еще не добавили ни одной книги для отображения в виджете. Вы можете сделать это на экране «Книги-карточки».";
-  var TOAST_NO_WIDGETS = "У вас пока нет виджетов. Создайте их в конструкторе виджетов: он открывается кнопкой в нижнем ряду вкладки «Карточки».";
+  var TOAST_NO_BOOKS = "Вы еще не добавили ни одной книги или заметки для отображения в виджете. Вы можете сделать это на экранах «Книги-карточки» и «Заметки-карточки».";
+  var NOTE_ID_PREFIX = "nt_"; // id заметки в карточке «Книги» (то же — noteWidgetId в my.js); id книги такой приставки иметь не может
+var NOTE_DEFAULT_COLOR = "#7f00ff"; // цвет заметки-карточки, пока цвет не выбран (как в components.css, .note-card)
+var TOAST_NOTE_ON = "Теперь заметка будет отображаться в вашем виджете";
+var TOAST_NOTE_OFF = "Теперь эта заметка не будет отображаться в вашем виджете";
+var NOTE_FACE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M15 3v4h4"></path><line x1="7.5" y1="11" x2="14" y2="11"></line><line x1="7.5" y1="15" x2="14" y2="15"></line></svg>'; // та же пиктограмма заметки, что на карточке в приложении
+var TOAST_NO_WIDGETS = "У вас пока нет виджетов. Создайте их в конструкторе виджетов: он открывается кнопкой в нижнем ряду вкладки «Карточки».";
   var MAX_ALARMS = 16; // будильников, между которыми листает карточка будильников (то же число — QrPriority.ALARM_NAV_MAX)
   var MAX_EVENTS = 10; // кандидатов в «следующее событие»: оболочка показывает первое, которое ещё не началось, а нажатие у края карточки листает до 10 событий вперёд/назад (без зацикливания)
   var FEED_DAYS = 7; // неделя вперёд (сегодня…через 6 дней, чтобы название дня недели было однозначным): оболочка сама решает по часам, что показать, пока приложение закрыто
@@ -567,17 +573,65 @@ var DAY_MS = 86400000;
         });
       });
     }
-    // все книги, лежащие хоть в одном виджете с включённой галочкой: [{id, name, png}]; книги, которых в библиотеке уже нет, пропускаются
+    function isNoteId(id){ return typeof id === "string" && id.indexOf(NOTE_ID_PREFIX) === 0; }
+    // лицо заметки: та же карточка, что «Заметки-карточки» в приложении — заливка цветом заметки, цветной выступ снизу, белая пиктограмма и название (до трёх строк)
+    function noteFacePng(b){
+      var color = normHex(b.color) || NOTE_DEFAULT_COLOR, name = String(b.name || "Заметка");
+      var sig = JSON.stringify([name, color]), key = bookKey(b.id), hit = pngCache[key];
+      if(hit && hit.sig === sig) return Promise.resolve(hit.url);
+      return svgImage(NOTE_FACE_ICON_SVG).then(function(ico){
+        var out = "";
+        try{
+          var S = BOOK_FACE_PX, bodyH = Math.round(S * FACE_BODY), shift = Math.round(S * FACE_SHADE), r = S * 0.12;
+          var cv = document.createElement("canvas"); cv.width = S; cv.height = bodyH + shift;
+          var g = cv.getContext("2d");
+          rrect(g, 0, shift, S, bodyH, r); g.fillStyle = cardsOf().cardShade(color); g.fill(); // выступ снизу
+          rrect(g, 0, 0, S, bodyH, r); g.fillStyle = color; g.fill();
+          var isz = S * 0.32, itop = S * 0.14;
+          if(ico) g.drawImage(ico, (S - isz) / 2, itop, isz, isz);
+          var maxW = S * 0.8, fs = S * 0.095, lines = [];
+          for(;;){
+            g.font = "700 " + fs + "px sans-serif";
+            lines = wrapLines(g, name, maxW);
+            var widest = 0;
+            lines.forEach(function(ln){ var m = g.measureText(ln).width; if(m > widest) widest = m; });
+            if((lines.length <= 3 && widest <= maxW) || fs <= S * 0.055) break;
+            fs *= 0.92;
+          }
+          if(lines.length > 3){ lines = lines.slice(0, 3); lines[2] = lines[2].replace(/.?$/, "…"); }
+          g.fillStyle = "#ffffff"; g.textAlign = "center"; g.textBaseline = "top";
+          var top = itop + isz + S * 0.05;
+          lines.forEach(function(ln, i){ g.fillText(ln, S / 2, top + i * fs * 1.2, maxW); });
+          out = cv.toDataURL("image/webp", 0.9);
+        }catch(e){ out = ""; }
+        if(out) pngCache[key] = { sig: sig, url: out };
+        return out;
+      });
+    }
+    // все книги и заметки, лежащие хоть в одном виджете с включённой галочкой: [{id, name, png}]; тех, которых в библиотеке уже нет, пропускаем
     function loadBookRows(){
       var want = {}, ids = [];
       data.list.forEach(function(w){ if(w.books) w.bookList.forEach(function(x){ if(!want.hasOwnProperty(x.h)){ want[x.h] = x.n; ids.push(x.h); } }); });
       if(!ids.length || typeof deps.listBooks !== "function") return Promise.resolve([]);
-      return Promise.resolve().then(function(){ return deps.listBooks(); }).catch(function(){ return null; }).then(function(all){
-        var failed = !Array.isArray(all), byId = {}; // список не прочитался — книги остаются в виджетах, лица — заглушки с запомненным названием
+      var wantNotes = ids.some(isNoteId);
+      return Promise.all([
+        Promise.resolve().then(function(){ return deps.listBooks(); }).catch(function(){ return null; }),
+        wantNotes && typeof deps.listNotes === "function" ? Promise.resolve().then(function(){ return deps.listNotes(); }).catch(function(){ return null; }) : Promise.resolve(null)
+      ]).then(function(res){
+        var all = res[0], notes = res[1];
+        var failed = !Array.isArray(all), notesFailed = !Array.isArray(notes), byId = {}; // список не прочитался — они остаются в виджетах, лица — с запомненным названием
         if(!failed) all.forEach(function(b){ byId[b.id] = b; });
+        if(!notesFailed) notes.forEach(function(n){ byId[n.id] = { id: n.id, name: n.name, note: true, color: n.color || "" }; });
         var rows = [];
-        ids.forEach(function(id){ var b = failed ? { id: id, name: want[id], hash: null } : byId[id]; if(b) rows.push(b); });
-        return Promise.all(rows.map(function(b){ return bookFacePng(b).then(function(png){ return { id: b.id, name: b.name, png: png }; }); }));
+        ids.forEach(function(id){
+          var b;
+          if(isNoteId(id)) b = notesFailed ? { id: id, name: want[id], note: true, color: "" } : byId[id];
+          else b = failed ? { id: id, name: want[id], hash: null } : byId[id];
+          if(b) rows.push(b);
+        });
+        return Promise.all(rows.map(function(b){
+          return (b.note ? noteFacePng(b) : bookFacePng(b)).then(function(png){ return { id: b.id, name: b.name, png: png }; });
+        }));
       });
     }
     // книги одного виджета для оболочки: ключ (он же имя картинки) и название — в порядке добавления
@@ -591,21 +645,22 @@ var DAY_MS = 86400000;
       return data.list.map(function(w){ return { id: w.id, n: w.n, has: bookIndex(w, bookId) >= 0 }; });
     }
     // добавить книгу в виджет / убрать из него (повторный выбор того же виджета): включает галочку «Отображать книги»; тост — здесь
-    function toggleBook(widgetId, bookId, name){
+    function toggleBook(widgetId, bookId, name, kind){
+      var isNote = kind === "note"; // заметка-карточка лежит в том же списке, что и книги (id с приставкой nt_)
       var w = widgetById(widgetId);
       if(!w || !bookId) return "";
       var i = bookIndex(w, bookId);
       if(i >= 0){
         w.bookList.splice(i, 1);
         changed();
-        say(TOAST_BOOK_OFF, 3400);
+        say(isNote ? TOAST_NOTE_OFF : TOAST_BOOK_OFF, 3400);
         return "removed";
       }
-      if(w.bookList.length >= MAX_BOOKS){ say("В виджете уже " + MAX_BOOKS + " книг — больше не помещается. Уберите ненужные.", 4200); return ""; }
+      if(w.bookList.length >= MAX_BOOKS){ say("В виджете уже " + MAX_BOOKS + (isNote ? " карточек книг и заметок" : " книг") + " — больше не помещается. Уберите ненужные.", 4200); return ""; }
       w.bookList.push({ h: bookId, n: String(name || "").slice(0, 120) });
       w.books = true;
       changed();
-      say(TOAST_BOOK_ON, 3400);
+      say(isNote ? TOAST_NOTE_ON : TOAST_BOOK_ON, 3400);
       return "added";
     }
 
@@ -968,7 +1023,7 @@ var DAY_MS = 86400000;
       if(w.alarms) extra.push("будильники");
       if(w.habits) extra.push("привычки");
       if(w.timers) extra.push("таймеры");
-      if(w.books) extra.push("книги");
+      if(w.books) extra.push("книги и заметки");
       if(w.rpeAsk) extra.push("вопрос о тренировке");
       if(w.moodAsk) extra.push("вопрос о настроении");
       if(w.cards.length) return cardWord(w.cards.length) + (extra.length ? " + " + extra.join(" + ") : "");
@@ -1106,8 +1161,8 @@ var DAY_MS = 86400000;
       if(w.habits) html += '<div class="wg-hint">Нажмите на карточку привычек выше, чтобы задать время суток и дни недели каждой привычки: привычка в своё время встаёт в круг наравне с календарём.</div>';
       html += '<label class="wg-check"><input type="checkbox" id="wgTimers"' + (w.timers ? ' checked' : '') + '>Отображать таймеры</label>';
       if(w.timers) html += '<div class="wg-hint">Нажмите на карточку таймеров выше, чтобы выбрать каждому таймеру время суток (необязательно): в своё время таймер встаёт выше календаря. Идущий таймер всегда наверху.</div>';
-      html += '<label class="wg-check"><input type="checkbox" id="wgBooks"' + (w.books ? ' checked' : '') + '>Отображать книги</label>';
-      if(w.books) html += '<div class="wg-hint">Книги добавляются на экране «Книги-карточки»: долгое нажатие на книге, затем кнопка с виджетом. Сейчас в этом виджете книг: ' + w.bookList.length + '.</div>';
+      html += '<label class="wg-check"><input type="checkbox" id="wgBooks"' + (w.books ? ' checked' : '') + '>Отображать книги и заметки</label>';
+      if(w.books) html += '<div class="wg-hint">Книги добавляются на экране «Книги-карточки», заметки — на экране «Заметки-карточки»: долгое нажатие на карточке, затем кнопка с виджетом. Нажатие на карточку в виджете открывает книгу или заметку. Сейчас в этом виджете карточек: ' + w.bookList.length + '.</div>';
       html += checkRow("wgRpe", w.rpeAsk, "Спрашивать о тренировке", ["icfColors5", "wgrpe"], rpeHex(w));
       if(w.rpeAsk) html += palBlock(["icfColors5", "wgrpe"]);
       html += checkRow("wgMood", w.moodAsk, "Спрашивать о настроении", ["icfColors6", "wgmood"], moodHex(w));

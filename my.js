@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.2 (18.11) — «Заметки-карточки»: цвет карточки заметки (`getNoteCardColor`/`setNoteCardColor`, state `__noteColor:<id заметки>` = {c: "v1:#rrggbb", t}, ездит через облако и архив) и показ заметки в виджете (`openNoteWidgetPicker` — тот же выбор виджета, что у книг; заметка лежит в карточке «Книги», id `nt_…`, `noteWidgetId`). Для виджетов — `widgetNotesList` (деп `listNotes`); нажатие на заметку в виджете открывает её (`openNoteFromWidget` через `__ltOpenBook`). Всё это для mdeditor.js — через `window.LTNoteCards`. Палитра формы — та же, что у карточек QR (`ItemCards.colorPalette`). Откат: my.js 151.1.
    Версия: 151.1 (18.11) — `initFabRowSlider`: отступ кнопок от края окна `EDGE` 8 (был 6), запас полосы жеста `STRIP_PAD` 16, запасной размер кнопки 30 (нижний ряд 30×30 с отступом 8px, modals.css 22.1).
    Версия: 151.0 (18.11)
    Версия: 150.4 (17.11) — вход из оболочки `window.__ltOpenBook(id)` / параметр `?book=<id>` (`openBookFromNative`, `handleBookLaunchParam`): нажатие на карточку «Книги» в виджете открывает книгу на основной закладке (`openComboBookmark`); нет основной закладки — вкладка «Мои книги». Откат: my.js 150.3.
@@ -10445,6 +10446,7 @@
         getItemCards: ensureItemCards,
         listBooks: widgetBooksList, // книги пользователя для карточки «Книги» виджета: Promise<[{id, name, hash}]>
         bookCover: widgetBookCover, // обложка книги: Promise<{url, pos}|null>
+        listNotes: widgetNotesList, // заметки-карточки в карточке «Книги»: [{id (с приставкой nt_), name, color}] или null, пока заметки не загружены
         // задачи и события календаря для карточек стопки (галочки «Показывать задачи» / «Показывать события календаря»)
         getCalendarFeed: function(from, to){
           try{
@@ -11446,6 +11448,7 @@
   function openBookFromNative(id){
     id = String(id || "");
     if(!/^[A-Za-z0-9_-]{1,24}$/.test(id)) return;
+    if(id.indexOf("nt_") === 0){ openNoteFromWidget(id); return; } // карточка-заметка в той же карточке «Книги»
     var tries = 0;
     (function attempt(){
       var again = function(){ if(++tries < 28) setTimeout(attempt, 300); };
@@ -13960,6 +13963,91 @@
     });
     openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, it.name); }, { label: "Выберите виджет", text: "Виджет:" });
   }
+
+  // ---------- «Заметки-карточки»: цвет карточки и показ заметки в виджете (кнопки долгого удержания, mdeditor.js) ----------
+  // Цвет — по записи на заметку: state `__noteColor:<id заметки>` = {c: "v1:#rrggbb" (пусто после «v1:» — цвет по умолчанию), t}; ездит через облако и архив (слияние по последнему t).
+  var NOTE_COLOR_PREFIX = "__noteColor:";
+  function noteColorKeyOk(id){ return /^[A-Za-z0-9_-]{1,64}$/.test(String(id || "")); }
+  function normNoteColor(v){ return /^#[0-9a-fA-F]{6}$/.test(String(v || "")) ? String(v).toLowerCase() : ""; }
+  function getNoteCardColor(noteId){
+    var rec = noteColorKeyOk(noteId) ? state[NOTE_COLOR_PREFIX + noteId] : null;
+    if(!rec || typeof rec.c !== "string" || rec.c.indexOf("v1:") !== 0) return "";
+    return normNoteColor(rec.c.slice(3));
+  }
+  function setNoteCardColor(noteId, hex){
+    if(!noteColorKeyOk(noteId)) return false;
+    var c = normNoteColor(hex);
+    if(c === getNoteCardColor(noteId)) return true;
+    state[NOTE_COLOR_PREFIX + noteId] = {c: "v1:" + c, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+    resyncWidgetsSoon(); // лицо заметки в виджете перерисуется новым цветом
+    return true;
+  }
+  // цвет заливки и выступа снизу для карточки заметки: тот же расчёт выступа, что у карточек QR (itemcards.js cardShade); без цвета — null (карточка как по умолчанию)
+  function getNoteCardLook(noteId){
+    var c = getNoteCardColor(noteId);
+    if(!c) return null;
+    var shade = c;
+    try{ var ic = ensureItemCards(); if(ic && typeof ic.cardShade === "function") shade = ic.cardShade(c); }catch(e){}
+    return { bg: c, shade: shade };
+  }
+  // id заметки в виджете: «nt_» + id заметки (до 21 знака), иначе — «nt_» + короткий хэш; «nt_» у id книги быть не может (у книг только буквы и цифры)
+  function noteWidgetId(noteId){
+    var id = String(noteId || "");
+    if(/^[A-Za-z0-9_-]{1,21}$/.test(id)) return "nt_" + id;
+    var x = 5381;
+    for(var i = 0; i < id.length; i++) x = ((x * 33) ^ id.charCodeAt(i)) >>> 0;
+    return "nt_" + x.toString(16);
+  }
+  // заметки для лиц в виджете: [{id (виджета), noteId, name, color}]; null — заметки ещё не загружены (виджет не трогает заметки, пока список не прочитан)
+  function widgetNotesList(){
+    if(!MdEditor || typeof MdEditor.isNotesReady !== "function" || !MdEditor.isNotesReady() || typeof MdEditor.getSearchableNotes !== "function") return null;
+    return MdEditor.getSearchableNotes().map(function(n){
+      return { id: noteWidgetId(n.id), noteId: n.id, name: n.name, color: getNoteCardColor(n.id) };
+    });
+  }
+  // плашка со списком виджетов (как у книг): выбор добавляет заметку в карточку «Книги» этого виджета, повторный выбор убирает
+  function openNoteWidgetPicker(noteId, name, anchorBtn){
+    var W = ensureWidgets();
+    if(!W || typeof W.widgetsForBook !== "function") return;
+    var id = noteWidgetId(noteId), rows = W.widgetsForBook(id);
+    if(!rows.length){ W.toast(W.noWidgetsText, 4200); return; }
+    var items = rows.map(function(r){
+      return {
+        key: r.id,
+        svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
+        title: "Виджет " + r.n + (r.has ? " — заметка уже здесь" : ""),
+        current: r.has
+      };
+    });
+    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, name, "note"); }, { label: "Выберите виджет", text: "Виджет:" });
+  }
+  // нажатие на карточку-заметку в виджете: заметка открывается в «Моих заметках»; заметки на холодном старте могут быть ещё не готовы — повторяем (до ~8 с)
+  function openNoteFromWidget(widgetId){
+    var tries = 0;
+    (function attempt(){
+      var again = function(){ if(++tries < 28) setTimeout(attempt, 300); };
+      try{
+        var list = widgetNotesList();
+        if(!list){ again(); return; }
+        var hit = null;
+        list.forEach(function(n){ if(!hit && n.id === widgetId) hit = n; });
+        openSettingsTabDirect("set2s_1");
+        if(hit && MdEditor && typeof MdEditor.openNoteByQr === "function") MdEditor.openNoteByQr(hit.noteId); // заметки уже нет — остаёмся на списке заметок
+      }catch(e){ again(); }
+    })();
+  }
+  // всё, что нужно mdeditor.js для карточек-заметок (модуль создаётся раньше этих функций, поэтому через window)
+  window.LTNoteCards = {
+    getColor: getNoteCardColor,
+    setColor: setNoteCardColor,
+    getLook: getNoteCardLook,
+    pickWidget: openNoteWidgetPicker,
+    // палитра — ровно та же, что в формах карточек QR и в конструкторе виджетов (itemcards.js CARD_PALETTE_COLS): правка палитры там меняет и эту форму
+    paletteHtml: function(){ var ic = ensureItemCards(); return ic && typeof ic.colorPalette === "function" ? ic.colorPalette("notecard", "noteCardColors") : ""; },
+    paletteColor: function(hex){ var ic = ensureItemCards(); return ic && typeof ic.paletteColor === "function" ? ic.paletteColor(hex) : hex; }
+  };
 
   // Экран «Положение обложки» (режим «Книги-карточки», кнопка .mdeditor-cover-pos-btn): окошко размером с карточку (та же
   // пропорция 1:1,02, скругление и выступ, что у карточек списка) + полоска всей обложки с рамкой видимой части. Обложка

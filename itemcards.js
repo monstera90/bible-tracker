@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.5 (18.11) — подсказка палитры `colorPaletteHtml` для типа `notecard` (форма «Заметки-карточки», mdeditor.js: `LTNoteCards.paletteHtml` → `colorPalette("notecard", "noteCardColors")`): палитра та же, `CARD_PALETTE_COLS`. Откат: itemcards.js 49.4.
    Версия: 49.4 (18.11)
    Версия: 49.3 (17.11) — в нижнем ряду слева от воронки кнопка «Конструктор виджетов» (`#itemCardsWidgetsBtn`, `WIDGETS_ICON_SVG`, `deps.openWidgetsEditor`): конструктор больше не вкладка колеса. Откат: itemcards.js 49.2.
    Версия: 49.2 (16.11) — скрытые таймеры (`noIsland`) входят в карточку «Таймеры» виджета (`widgetTimerList`), в лице таймера поле `noIsland`. Откат: itemcards.js 49.1.
@@ -1808,6 +1809,8 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       ? 'Цвет карточки «Как тренировка?» в виджете.'
       : type === "wgmood"
       ? 'Цвет карточки «Как настроение?» в виджете.'
+      : type === "notecard"
+      ? 'Цвет карточки заметки. Сиреневый квадрат — вернуть цвет по умолчанию.'
       : 'Цвет карточки — необязательно. Сиреневый квадрат — цвет по умолчанию.') + '</div>';
     h += '<div class="habit-colors" id="' + (domId || "icfColors") + '">';
     CARD_PALETTE_ROWS.forEach(function(row){

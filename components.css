@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.10 (18.11) — «Заметки-карточки»: у карточки заметки меню долгого удержания в `.note-card-actions` (2×2: виджет, настройки карточки, закладка, удаление); цвет карточки — `--note-bg` / `--note-shade` (ставит mdeditor.js), без них прежний #7f00ff; кнопки `.mdeditor-notecard-btn` («Настройки карточки») и экран `.note-card-form`. Откат: components.css 26.9.
    Версия: 26.9 (18.11) — нижний ряд кнопок 30×30, отступы 8px (см. modals.css 22.1): `.ipkd-swap-fab`, попап «Аа», нижний ряд кнопок настроения, ряд «Начать/Скачать», плашки периода «Обзор» берут отступ из `--fab-gap`, высоту удлинённых кнопок — из `--fab-size`. Откат: components.css 26.8
    Версия: 26.8 (18.11)
    Версия: 26.7 (17.11) — кнопка `.mdeditor-widget-btn` («Показывать в виджете», карточка книги) оформлена как остальные кнопки карточки книги. Откат: components.css 26.6.
@@ -3641,6 +3642,7 @@
   .mdeditor-cover-reset-btn,
   .mdeditor-cover-pos-btn,
   .mdeditor-widget-btn,
+  .mdeditor-notecard-btn,
   .mdeditor-note-btn,
   .mdeditor-share-btn,
   .mdeditor-edit-btn{
@@ -3661,12 +3663,14 @@
   .mdeditor-cover-reset-btn svg,
   .mdeditor-cover-pos-btn svg,
   .mdeditor-widget-btn svg,
+  .mdeditor-notecard-btn svg,
   .mdeditor-note-btn svg,
   .mdeditor-share-btn svg,
   .mdeditor-edit-btn svg{ width:16px; height:16px; }
   .mdeditor-cover-reset-btn.visible,
   .mdeditor-cover-pos-btn.visible,
   .mdeditor-widget-btn.visible,
+  .mdeditor-notecard-btn.visible,
   .mdeditor-note-btn.visible,
   .mdeditor-share-btn.visible,
   .mdeditor-edit-btn.visible{ visibility:visible; }
@@ -3674,6 +3678,7 @@
     .mdeditor-cover-reset-btn:hover,
     .mdeditor-cover-pos-btn:hover,
     .mdeditor-widget-btn:hover,
+    .mdeditor-notecard-btn:hover,
     .mdeditor-note-btn:hover,
     .mdeditor-share-btn:hover,
     .mdeditor-edit-btn:hover{ background:var(--parchment-dark); }
@@ -5113,13 +5118,13 @@ html[data-theme="14"] .pdf-hl{
   gap:0;
   padding:0;
   border:none;
-  background:#7f00ff;
+  background:var(--note-bg, #7f00ff); /* свой цвет заметки (форма карточки) — --note-bg / --note-shade ставит mdeditor.js */
   color:#fff;
   text-align:center;
   --card-shade:#6600cd;
-  box-shadow:0 calc(var(--item-card-w, 112px) * 0.04) 0 #6600cd;
+  box-shadow:0 calc(var(--item-card-w, 112px) * 0.04) 0 var(--note-shade, #6600cd);
 }
-.note-card.mdeditor-row:hover{ background:#7f00ff; }
+.note-card.mdeditor-row:hover{ background:var(--note-bg, #7f00ff); }
 .note-card .item-card-icon{
   width:calc(var(--item-card-w, 112px) * 0.32);
   height:calc(var(--item-card-w, 112px) * 0.32);
@@ -5127,15 +5132,38 @@ html[data-theme="14"] .pdf-hl{
 }
 .note-card .item-card-icon svg{ width:100%; height:100%; color:#fff; }
 .note-card .item-card-title{ -webkit-line-clamp:3; }
-.note-card .mdeditor-bookmark-btn,
-.note-card .mdeditor-delete-btn{
+.note-card > .mdeditor-bookmark-btn,
+.note-card > .mdeditor-delete-btn{
   position:absolute;
   top:3px;
   z-index:2;
   background:rgba(0,0,0,.35);
 }
-.note-card .mdeditor-bookmark-btn{ right:3px; color:#fff; }
-.note-card .mdeditor-delete-btn{ right:31px; color:#ffd0cc; }
-.note-card .mdeditor-delete-btn:last-child{ right:3px; } /* у папки это единственная кнопка */
+.note-card > .mdeditor-bookmark-btn{ right:3px; color:#fff; }
+.note-card > .mdeditor-delete-btn{ right:31px; color:#ffd0cc; }
+.note-card > .mdeditor-delete-btn:last-child{ right:3px; } /* у папки это единственная кнопка */
+/* у заметки четыре кнопки меню долгого удержания: виджет, настройки карточки, закладка, удаление — сеткой 2×2 в правом верхнем углу */
+.note-card .note-card-actions{
+  position:absolute;
+  top:3px;
+  right:3px;
+  z-index:2;
+  display:flex;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+  gap:2px;
+  width:54px;
+  max-width:calc(100% - 6px);
+}
+.note-card .note-card-actions button{ background:rgba(0,0,0,.35); color:#fff; }
+.note-card .note-card-actions .mdeditor-delete-btn{ color:#ffd0cc; }
 .note-card .mdeditor-bookmark-btn svg,
-.note-card .mdeditor-delete-btn svg{ color:inherit; }
+.note-card .mdeditor-delete-btn svg,
+.note-card .mdeditor-widget-btn svg,
+.note-card .mdeditor-notecard-btn svg{ color:inherit; }
+
+/* экран «Карточка заметки» (кнопка настроек на карточке заметки): образец карточки и палитра (та же, что в формах карточек QR) */
+.note-card-form{ display:flex; flex-direction:column; gap:14px; padding:10px 12px 90px; }
+.note-card-form-name{ font-weight:700; word-break:break-word; }
+.note-card-form-preview{ width:110px; --item-card-w:110px; padding-bottom:calc(110px * 0.04); }
+.note-card-form-preview .note-card.mdeditor-row{ cursor:default; }

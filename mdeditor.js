@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.3 (18.11) — «Заметки-карточки»: долгое удержание заметки показывает четыре кнопки (2×2): «Показывать в виджете» (`LTNoteCards.pickWidget` — выбор виджета, как у книг-карточек), «Настройки карточки» (экран `openNoteCardForm` с палитрой цвета — той же, что у карточек QR, через `LTNoteCards.paletteHtml`), закладка и удаление. Цвет заметки (`LTNoteCards.getColor/setColor`, хранится в облаке) красит карточку (`--note-bg`/`--note-shade`) и её лицо в виджете. `isNotesReady` — для виджетов. Откат: mdeditor.js 25.2.
    Версия: 25.2 (18.11)
    Версия: 25.1 (17.11)
    Версия: 25.1 (17.11) — заголовок корня списка заметок — название режима: «Список моих заметок» / «Заметки-карточки» (в папке — имя папки). Откат: mdeditor.js 25.0.
@@ -3520,6 +3521,8 @@ window.initMdEditorModule = function(deps){
   var NOTES_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var NOTES_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
   var NOTES_SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
+  var NOTE_WIDGET_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6h-6z"></path><path d="M14 4h6v6h-6z"></path><path d="M4 14h6v6h-6z"></path><path d="M14 17h6"></path><path d="M17 14v6"></path></svg>'; // как у карточки книги (my.js BOOK_WIDGET_ICON_SVG)
+  var NOTE_CARD_SETTINGS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="9" cy="6" r="2" fill="currentColor"></circle><circle cx="15" cy="12" r="2" fill="currentColor"></circle><circle cx="8" cy="18" r="2" fill="currentColor"></circle></svg>'; // «Настройки карточки»: форма с палитрой цвета (позже и другие настройки)
   function getNotesViewMode(){
     try{ return localStorage.getItem(NOTES_VIEW_KEY) === "cards" ? "cards" : "list"; }catch(e){ return "list"; }
   }
@@ -3568,6 +3571,75 @@ window.initMdEditorModule = function(deps){
       if(g && g.classList.contains("note-cards-grid")){ applyNotesCardsSize(g); fitNoteCardText(g); }
     }, 120);
   });
+
+  // ---------- «Заметки-карточки»: кнопки меню долгого удержания, цвет карточки и экран «Настройки карточки» ----------
+  // «Показывать в виджете» и «Настройки карточки» раскрываются и прячутся вместе с кнопкой удаления
+  function revealNoteExtraBtns(rowEl, on){
+    var b = rowEl.querySelectorAll(".mdeditor-widget-btn, .mdeditor-notecard-btn");
+    for(var i = 0; i < b.length; i++) b[i].classList.toggle("visible", !!on);
+  }
+  // свой цвет заметки (выбирается на экране «Настройки карточки», хранится в my.js — LTNoteCards): заливка и цветной выступ снизу; без цвета — как раньше
+  function applyNoteCardColor(cardEl, noteId){
+    var api = window.LTNoteCards, look = null;
+    try{ look = api ? api.getLook(noteId) : null; }catch(e){ look = null; }
+    if(look){
+      cardEl.style.setProperty("--note-bg", look.bg);
+      cardEl.style.setProperty("--note-shade", look.shade);
+      cardEl.style.setProperty("--card-shade", look.shade);
+    } else {
+      cardEl.style.removeProperty("--note-bg");
+      cardEl.style.removeProperty("--note-shade");
+      cardEl.style.removeProperty("--card-shade");
+    }
+  }
+  // Экран «Карточка заметки»: образец карточки и палитра цвета — ровно та же, что в формах карточек QR и в конструкторе виджетов
+  // (itemcards.js CARD_PALETTE_COLS, разметка — LTNoteCards.paletteHtml): правка палитры там меняет и этот экран. Выбор сохраняется сразу.
+  // Подменяет #settingsTabContent целиком; «назад» и «домик» возвращают к списку заметок.
+  function openNoteCardForm(it){
+    var container = document.getElementById("settingsTabContent");
+    var api = window.LTNoteCards;
+    if(!container || !api || !it || it.type !== "file") return;
+    var prevDirNode = currentDirNode;
+    pushMdNav(function(){ currentDirNode = prevDirNode; screen = "list"; render(); });
+    container.innerHTML =
+      '<div class="mdeditor-tab note-card-form" id="noteCardForm">' +
+        '<h3 class="common-tab-title">Карточка заметки</h3>' +
+        '<div class="note-card-form-name" id="noteCardFormName"></div>' +
+        '<div class="note-card-form-preview"><div class="mdeditor-row item-card note-card" id="noteCardFormPreview">' +
+          '<div class="item-card-front"><div class="item-card-icon">' + FILE_ICON_SVG + '</div><div class="item-card-title" id="noteCardFormPreviewTitle"></div></div>' +
+        '</div></div>' +
+        api.paletteHtml() +
+        '<div class="mdeditor-fab-row">' +
+          '<button type="button" class="mdeditor-fab-btn" id="noteCardFormHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
+        '</div>' +
+      '</div>';
+    document.getElementById("noteCardFormName").textContent = it.name;
+    document.getElementById("noteCardFormPreviewTitle").textContent = it.name;
+    var preview = document.getElementById("noteCardFormPreview");
+    var colorsEl = document.getElementById("noteCardColors");
+    // что выбрано: свой цвет заметки, а без него — тот, которым карточка рисуется по умолчанию (фиолетовый #7f00ff из палитры)
+    function shownColor(){ return api.getColor(it.id) || "#7f00ff"; }
+    function refresh(){
+      applyNoteCardColor(preview, it.id);
+      if(!colorsEl) return;
+      var cur = shownColor(), bs = colorsEl.querySelectorAll(".habit-color");
+      for(var i = 0; i < bs.length; i++) bs[i].classList.toggle("selected", bs[i].getAttribute("data-color") === cur);
+    }
+    refresh();
+    if(colorsEl) colorsEl.addEventListener("click", function(e){
+      var b = e.target.closest(".habit-color");
+      if(!b) return;
+      api.setColor(it.id, b.getAttribute("data-color") || ""); // пустой квадрат (сиреневый) — вернуть цвет по умолчанию
+      refresh();
+    });
+    var homeBtn = document.getElementById("noteCardFormHomeBtn");
+    if(homeBtn) homeBtn.addEventListener("click", function(){
+      pushMdNav(function(){ openNoteCardForm(it); }); // «назад» из списка вернёт на эту форму
+      currentDirNode = prevDirNode;
+      screen = "list";
+      render();
+    });
+  }
 
   function renderListScreen(container){
     // дерево могли перестроить (перенос заметки в папку QR-заметок, приход правок): узел папки берём заново по пути
@@ -3749,7 +3821,9 @@ window.initMdEditorModule = function(deps){
         var iconSvg = it.type === "folder" ? FOLDER_ICON_SVG : FILE_ICON_SVG;
         row.innerHTML = (cardsMode ? '<div class="item-card-front"><div class="item-card-icon">' + iconSvg + '</div><div class="item-card-title"></div></div>' : iconSvg + '<span class="mdeditor-row-name"></span>') +
           (isNote ?
-            '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>' :
+            (cardsMode
+              ? '<div class="note-card-actions"><button type="button" class="mdeditor-widget-btn" title="Показывать в виджете">' + NOTE_WIDGET_ICON_SVG + '</button><button type="button" class="mdeditor-notecard-btn" title="Настройки карточки">' + NOTE_CARD_SETTINGS_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button><button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button></div>'
+              : '<button type="button" class="mdeditor-delete-btn" title="Удалить">' + DELETE_ICON_SVG + '</button><button type="button" class="mdeditor-bookmark-btn" title="Закладка">' + BOOKMARK_ICON_SVG + '</button>') :
             '<button type="button" class="mdeditor-delete-btn" title="Удалить папку">' + DELETE_ICON_SVG + '</button>');
         row.querySelector(cardsMode ? ".item-card-title" : ".mdeditor-row-name").textContent = it.name;
         if(isNote){
@@ -3760,6 +3834,8 @@ window.initMdEditorModule = function(deps){
           bmBtn.classList.toggle("visible", bookmarked || revealedBookmarkRows.has(key));
           var delBtn = row.querySelector(".mdeditor-delete-btn");
           delBtn.classList.toggle("visible", revealedBookmarkRows.has(key));
+          revealNoteExtraBtns(row, revealedBookmarkRows.has(key));
+          if(cardsMode) applyNoteCardColor(row, it.id);
         } else {
           var folderDelBtn = row.querySelector(".mdeditor-delete-btn");
           folderDelBtn.classList.toggle("visible", revealedFolderDeleteRows.has(it.node.path));
@@ -3780,6 +3856,7 @@ window.initMdEditorModule = function(deps){
           if(bmBtn) bmBtn.classList.add("visible");
           var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
           if(delBtn) delBtn.classList.add("visible");
+          revealNoteExtraBtns(rowEl, true);
         } else {
           revealedFolderDeleteRows.add(it.node.path);
           var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
@@ -3801,6 +3878,7 @@ window.initMdEditorModule = function(deps){
             if(bmBtn) bmBtn.classList.toggle("visible", bookmarkedNames.has(key));
             var delBtn = rowEl.querySelector(".mdeditor-delete-btn");
             if(delBtn) delBtn.classList.remove("visible");
+            revealNoteExtraBtns(rowEl, false);
           } else {
             var folderDelBtn = rowEl.querySelector(".mdeditor-delete-btn");
             if(folderDelBtn) folderDelBtn.classList.remove("visible");
@@ -3817,6 +3895,17 @@ window.initMdEditorModule = function(deps){
           press.reset();
           if(it.type === "folder") confirmDeleteFolder(it, node);
           else confirmDeleteNote(it, node);
+          return;
+        }
+        var noteWidgetBtn = e.target.closest(".mdeditor-widget-btn");
+        if(noteWidgetBtn){
+          press.reset();
+          if(it.type === "file" && window.LTNoteCards) window.LTNoteCards.pickWidget(it.id, it.name, noteWidgetBtn);
+          return;
+        }
+        if(e.target.closest(".mdeditor-notecard-btn")){
+          press.reset();
+          if(it.type === "file") openNoteCardForm(it);
           return;
         }
         if(e.target.closest(".mdeditor-bookmark-btn")){
@@ -7063,6 +7152,7 @@ window.initMdEditorModule = function(deps){
     setCardMetaListener: setCardMetaListener,
     addCardMetaListener: addCardMetaListener,
     getSearchableNotes: getSearchableNotes,
+    isNotesReady: function(){ return !!notesReady; }, // заметки загружены (виджеты: пока нет — карточки-заметки в них не трогаем)
     getBookmarkedNotes: function(){ return notesReady ? collectNoteBookmarkItems().map(function(x){ return { id: x.id, name: x.name }; }) : []; },
     // READER_PLAN.md, Этап B, шаг 5 (11.09) — для общего ZIP-бэкапа
     // (кнопка "Скачать" в модалке синхронизации, см. bindExportButton в
