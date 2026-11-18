@@ -512,10 +512,10 @@
       ".wk-root{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;position:relative;}" +
       ".wk-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;padding-top:4px;padding-bottom:12px;}" +
       ".wk-scroll::-webkit-scrollbar{display:none;width:0;height:0;}" +
-      "#wkLive{position:absolute;left:0;right:0;bottom:calc(var(--fab-size,36px) + 2 * var(--fab-gap,6px));max-height:60%;overflow-y:auto;z-index:5;pointer-events:none;}" +
+      "#wkLive{position:absolute;left:0;right:0;bottom:calc(var(--fab-size,30px) + 2 * var(--fab-gap,8px));max-height:60%;overflow-y:auto;z-index:5;pointer-events:none;}" +
       "#wkLive > *{pointer-events:auto;}" + // тень убрана: контейнер с overflow обрезал её по прямоугольнику, получалась серая подложка вокруг карточки
       "#wkLive .wk-card,#wkLive .wk-msg{margin-bottom:0;}" +
-      "#wkLive > * + *{margin-top:var(--fab-gap,6px);}" +
+      "#wkLive > * + *{margin-top:var(--fab-gap,8px);}" +
       ".wk-per{width:auto;min-width:40px;padding:0 6px;font:inherit;font-size:11px;white-space:nowrap;}" +
       ".wk-per.on{background:var(--wood);color:var(--parchment);border-color:var(--wood);}" +
       ".wk-nav{display:flex;align-items:center;justify-content:space-between;margin:4px 0 6px;}" +
@@ -559,7 +559,7 @@
       ".wk-kind svg{display:block;width:18px;height:18px;}" +
       ".wk-live-head .wk-kind{margin-right:0;vertical-align:middle;}" +
       ".wk-kind-menu{position:absolute;z-index:6;pointer-events:none;}" +
-      ".wk-kind-menu .wk-kind-btn + .wk-kind-btn{margin-top:var(--fab-gap,6px);}" +
+      ".wk-kind-menu .wk-kind-btn + .wk-kind-btn{margin-top:var(--fab-gap,8px);}" +
       ".wk-kind-menu .wk-kind-btn svg{width:20px;height:20px;}" +
       "#wkRecBtn.wk-active{color:#e53935;}" +
       "#wkRecBtn.wk-blocked{opacity:.45;}" +

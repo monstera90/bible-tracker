@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 22.1 (18.11) — нижний ряд кнопок: квадраты 30×30 (было 36×36; `--fab-size`), отступ от края окна, от низа и между кнопками 8px (`--fab-gap`, было 6px); слоты вкладок задач пересчитываются сами (шаг 38px). Удлинённые кнопки («Начать», плашки периодов, номер страницы PDF) — только высота 30px. Область нажатия кнопок шире видимой на 2px с каждой стороны (34×34 у квадратных; у удлинённых +4px по ширине и высоте): невидимый `::after` в конце файла, раздел «ОБЛАСТЬ НАЖАТИЯ КНОПОК РЯДА». «В библиотеку» — круг 30px. Правый отступ «домика» 8px от края рамки при открытом боковом ряде; без бокового ряда (`.notes-wide`) прибавляется ширина колонки (`--notes-wide-extra`), так что «домик» стоит на том же месте экрана — механизм прежний. Откат: modals.css 22.0.
    Версия: 22.0 (13.11)
    Версия: 16.2 (25.10) — `.settings-modal-box.cal-week-flush`: окно без боковых полей и боковой рамки, пока на вкладке «Календарь» открыт режим «Неделя» (calendar.js `syncFlush`).
    Версия: 16.1 (25.10) — компактные язычки: боковые 35×55px (было 45×68), нижние 55×35px, кнопка-язычок `.settings-fab` 35×35px; отступы оверлея и заплатка угла под колонку 35px.
@@ -1064,17 +1065,17 @@
     .settings-modal-overlay.notes-wide.reading-mode-active{ --notes-wide-extra:0px; }
   }
   .settings-modal-overlay.notes-wide .settings-modal-box .mdeditor-fab-row{
-    inset-inline-end:calc(var(--fab-gap, 6px) + var(--notes-wide-extra, 0px));
+    inset-inline-end:calc(var(--fab-gap, 8px) + var(--notes-wide-extra, 0px));
   }
   /* «В библиотеку» (#bookReaderAddLibBtn, книга открыта «на лету»): круглая кнопка поменьше висит ВНЕ потока ряда справа от «домика» — в освободившейся
      колонке вкладок (--notes-wide-extra), поэтому ряд не растёт, «домик» и остальные кнопки стоят на месте. Диаметр = колонка − 6px, зазор до «домика» 5px.
      Логические свойства — в раскладке левши кнопка уходит на другую сторону вместе с рядом. */
   .mdeditor-fab-row .mdeditor-fab-btn.book-reader-addlib-btn{
-    --lib-d:calc(var(--notes-wide-extra, 0px) - 6px);
+    --lib-d:30px;
     position:absolute;
     width:var(--lib-d);height:var(--lib-d);
     inset-inline-end:calc(-1 * (var(--lib-d) + 5px));
-    bottom:calc((var(--fab-size, 36px) - var(--lib-d)) / 2);
+    bottom:calc((var(--fab-size, 30px) - var(--lib-d)) / 2);
     border-radius:50%;
     padding:0;
   }
@@ -1082,8 +1083,8 @@
   /* в режиме чтения окно не расширено и колонки нет — справа места нет: кнопка встаёт над «домиком» */
   .settings-modal-overlay.reading-mode-active .mdeditor-fab-row .mdeditor-fab-btn.book-reader-addlib-btn{
     --lib-d:30px;
-    inset-inline-end:calc((var(--fab-size, 36px) - var(--lib-d)) / 2);
-    bottom:calc(100% + 6px);
+    inset-inline-end:calc((var(--fab-size, 30px) - var(--lib-d)) / 2);
+    bottom:calc(100% + var(--fab-gap, 8px));
   }
   .settings-modal-box.lt-flush-sides{
     padding-left:0;
@@ -1556,15 +1557,18 @@
      перекрыта (частичное перекрытие/просвечивание — ожидаемо). */
   .mdeditor-forgotten-pills{
     position:absolute;
-    left:var(--fab-gap, 6px);
-    right:var(--fab-gap, 6px);
-    bottom:var(--fab-gap, 6px);
+    left:var(--fab-gap, 8px);
+    right:var(--fab-gap, 8px);
+    bottom:var(--fab-gap, 8px);
     display:flex;
-    gap:var(--fab-gap, 6px);
+    gap:var(--fab-gap, 8px);
     z-index:5;
   }
   .mdeditor-forgotten-pills .review-pill{
     box-shadow:0 2px 6px rgba(0,0,0,.28);
+    height:var(--fab-size, 30px);
+    box-sizing:border-box;
+    padding-block:0;
   }
   .mdeditor-forgotten-tab{ padding-bottom:60px; }
 
@@ -2019,9 +2023,9 @@
   .task-add-fab{
     display:none;
     position:absolute;
-    inset-inline-end:var(--fab-gap, 6px);
-    bottom:var(--fab-gap, 6px);
-    width:var(--fab-size, 36px);height:var(--fab-size, 36px);
+    inset-inline-end:var(--fab-gap, 8px);
+    bottom:var(--fab-gap, 8px);
+    width:var(--fab-size, 30px);height:var(--fab-size, 30px);
     border-radius:8px;
     border:1px solid var(--groove-shadow);
     background:#fffef8;
@@ -2074,8 +2078,8 @@
   .task-fontsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (4 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (4 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-fontsize-wrap.visible{ display:flex; }
@@ -2085,8 +2089,8 @@
   .task-iconsize-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (5 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (5 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-iconsize-wrap.visible{ display:flex; }
@@ -2099,11 +2103,11 @@
     position:absolute;
     z-index:6;
     box-sizing:border-box;
-    inset-inline-end:var(--fab-gap, 6px);
-    bottom:calc(var(--fab-gap, 6px) * 2 + var(--fab-size, 36px));
-    width:calc(100% - var(--fab-gap, 6px) * 2);
-    max-width:calc(var(--fab-size, 36px) * 9 + var(--fab-gap, 6px) * 8);
-    height:var(--fab-size, 36px);
+    inset-inline-end:var(--fab-gap, 8px);
+    bottom:calc(var(--fab-gap, 8px) * 2 + var(--fab-size, 30px));
+    width:calc(100% - var(--fab-gap, 8px) * 2);
+    max-width:calc(var(--fab-size, 30px) * 9 + var(--fab-gap, 8px) * 8);
+    height:var(--fab-size, 30px);
     padding:0 12px;
     align-items:center;
     gap:10px;
@@ -2158,8 +2162,8 @@
   .task-iconsize-range::-moz-range-thumb,
   .fontsize-bar-range::-moz-range-thumb{ width:20px; height:20px; border:none; border-radius:50%; background:var(--wood); }
   /* Ползунок шрифта стоит на второй «ступеньке» над рядом кнопок: на первой — кнопка переносов слов из попапа «Аа»
-     (она на 7px выше ряда). Подпись — размер в px, чуть шире подписи процентов. */
-  .fontsize-bar{ bottom:calc(var(--fab-gap, 6px) + 2 * var(--fab-size, 36px) + 14px); }
+     (она на один зазор выше ряда). Подпись — размер в px, чуть шире подписи процентов. */
+  .fontsize-bar{ bottom:calc(3 * var(--fab-gap, 8px) + 2 * var(--fab-size, 30px)); }
   .fontsize-bar-val{ min-width:4.4em; }
   /* Плашка QR-кода заметки (кнопка QR в ряду редактора, mdeditor.js): квадрат на всю ширину окна (минус отступы по краям, как у
      ползунка), над рядом на расстоянии --fab-gap. Сторону (и ограничение по высоте на низком экране) выставляет mdeditor.js —
@@ -2169,11 +2173,11 @@
     position:absolute;
     z-index:7;
     box-sizing:border-box;
-    left:var(--fab-gap, 6px);
-    right:var(--fab-gap, 6px);
+    left:var(--fab-gap, 8px);
+    right:var(--fab-gap, 8px);
     margin:0 auto;
-    bottom:calc(var(--fab-gap, 6px) * 2 + var(--fab-size, 36px));
-    width:calc(100% - var(--fab-gap, 6px) * 2);
+    bottom:calc(var(--fab-gap, 8px) * 2 + var(--fab-size, 30px));
+    width:calc(100% - var(--fab-gap, 8px) * 2);
     padding:12px;
     align-items:center;
     justify-content:center;
@@ -2196,14 +2200,14 @@
   .task-format-wrap{
     display:none;
     position:absolute;
-    bottom:var(--fab-gap, 6px);
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-format-wrap.visible{ display:flex; }
-  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 6px) + (6 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 6px) + (7 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 6px) + (8 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
-  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 6px) + (9 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-format-wrap-strike{ inset-inline-end:calc(var(--fab-gap, 8px) + (6 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
+  .task-format-wrap-underline{ inset-inline-end:calc(var(--fab-gap, 8px) + (7 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
+  .task-format-wrap-italic{ inset-inline-end:calc(var(--fab-gap, 8px) + (8 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
+  .task-format-wrap-bold{ inset-inline-end:calc(var(--fab-gap, 8px) + (9 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
   /* (14.10) Кнопки «Выделить текст» и «Копировать» из нижнего ряда задач убраны (маркер — жестом удержания в режиме чтения,
      копирование — системным способом); слоты левее них сдвинуты на 2 назад: Ч 6, П 7, К 8, Ж 9, «глаз»/сортировка/меню/звенья/«i» 10, «i» дальняя 11. */
   /* "глаз" — скрыть/показать на вкладке "Next" задачи, уже привязанные к
@@ -2226,8 +2230,8 @@
   .task-fullscreen-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 1 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + 1 * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-fullscreen-wrap.visible{ display:flex; }
@@ -2243,8 +2247,8 @@
   .task-hide-linked-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-hide-linked-wrap.visible{ display:flex; }
@@ -2262,8 +2266,8 @@
   .task-joint-menu-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-joint-menu-wrap.visible{ display:flex; }
@@ -2334,8 +2338,8 @@
   .task-red-sort-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-red-sort-wrap.visible{ display:flex; }
@@ -2352,8 +2356,8 @@
   .task-info-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (10 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-info-wrap.visible{ display:flex; }
@@ -2362,7 +2366,7 @@
      стоит ближе к "Ж" (right:280), а "i" — левее неё (right:319). Класс
      вешает JS: syncTaskFabRowForTab и openTaskNextPicker (my.js). На остальных
      вкладках задач класса нет — "i" остаётся на right:280 без дырки в ряду. */
-  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 6px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-info-wrap.task-info-wrap-far{ inset-inline-end:calc(var(--fab-gap, 8px) + (11 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
   /* скрепка — между "Аа" и "+" (см. index.html и ТЗ пользователя, та же
      логика попапа не нужна: сразу открывает системный диалог выбора
      файла, см. initTaskGlobalToolbar в my.js) */
@@ -2373,8 +2377,8 @@
   .task-tag-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 3 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + 3 * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-tag-wrap.visible{ display:flex; }
@@ -2422,8 +2426,8 @@
   .task-attach-wrap{
     display:none;
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + (3 + var(--tag-s, 0)) * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + (3 + var(--tag-s, 0)) * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   .task-attach-wrap.visible{ display:flex; }
@@ -2627,8 +2631,8 @@
      render() (my.js), тем же приёмом, что у globalFab/homeStubHide там же. */
   .task-project-fab-link{
     position:absolute;
-    inset-inline-end:calc(var(--fab-gap, 6px) + 10 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:calc(var(--fab-gap, 8px) + 10 * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
   /* "+" этого экрана (см. #taskProjectCreateFab в my.js) — тот же класс
@@ -2640,7 +2644,7 @@
      на остальных вкладках задач (.task-add-fab-shifted ниже) — угол там
      тоже занят домиком, теперь уже общим для всех вкладок. */
   #taskProjectCreateFab{
-    right:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px)));
+    right:calc(var(--fab-gap, 8px) + 2 * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
   }
   /* "Домик" (#taskProjectHomeBtn) — правый угол ряда (доработка 13.09:
      раньше стояла самой левой, но в "Моём блокноте" — mdeditor.js —
@@ -2653,8 +2657,8 @@
      над кнопкой без текста ("подбородок"). */
   .task-project-fab-home{
     position:absolute;
-    inset-inline-end:var(--fab-gap, 6px);
-    bottom:var(--fab-gap, 6px);
+    inset-inline-end:var(--fab-gap, 8px);
+    bottom:var(--fab-gap, 8px);
     z-index:5;
   }
 
@@ -2674,8 +2678,8 @@
   #taskFabHomeStub{
     display:none;
     position:absolute;
-    right:var(--fab-gap, 6px);
-    bottom:var(--fab-gap, 6px);
+    right:var(--fab-gap, 8px);
+    bottom:var(--fab-gap, 8px);
     z-index:5;
     cursor:default;
     pointer-events:none;
@@ -2686,7 +2690,7 @@
      выше) на то же место, что и на экране "Все задачи проекта" (right:48,
      см. #taskProjectCreateFab выше) — угол теперь всегда занят домиком,
      а не только на списке "Мои проекты" (доработка 13.09). */
-  .task-add-fab.task-add-fab-shifted{ inset-inline-end:calc(var(--fab-gap, 6px) + 2 * (var(--fab-size, 36px) + var(--fab-gap, 6px))); }
+  .task-add-fab.task-add-fab-shifted{ inset-inline-end:calc(var(--fab-gap, 8px) + 2 * (var(--fab-size, 30px) + var(--fab-gap, 8px))); }
 
   /* сетка выбора вкладки-назначения (перенос задачи) — переиспользует
      общее модальное окно (modalOverlay/modalBox), тот же приём, что и у
@@ -2834,7 +2838,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
    ширины окна, а кнопки вываливались бы за её правый край (flex-shrink:0) */
 .mdeditor-fab-row{ width:max-content; }
 /* «Начать» на вкладке «Извлечение субтитров»: единственная кнопка ряда шире квадрата — по ширине текста */
-.mdeditor-fab-row .mdeditor-fab-btn.subtitle-start-btn{ width:auto; padding:0 12px; }
+.mdeditor-fab-row .mdeditor-fab-btn.subtitle-start-btn{ width:auto; height:var(--fab-size, 30px); padding:0 12px; }
 .mdeditor-fab-row > *{ transition:opacity .18s ease; }
 /* ТЗ 30.09: не помещающиеся кнопки больше не прячутся — показываются целиком/обрезанными краем экрана
    и остаются кликабельными (класс .fab-slide-off JS теперь не ставит, правило оставлено безвредным) */
@@ -2859,7 +2863,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
    кнопок не менялся. Базовые width/height у .mdeditor-fab-btn остались 32px в components.css —
    здесь они перекрываются (modals.css грузится позже; специфичность выше у составных селекторов).
    ========================================================================= */
-.settings-modal-box{ --fab-size:36px; --fab-gap:6px; }
+.settings-modal-box{ --fab-size:30px; --fab-gap:8px; }
 .mdeditor-fab-row .mdeditor-fab-btn,
 .task-fontsize-wrap .mdeditor-fab-btn,
 .task-iconsize-wrap .mdeditor-fab-btn,
@@ -2873,6 +2877,33 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-tag-wrap .mdeditor-fab-btn,
 .task-project-fab-link,
 .task-project-fab-home{
-  width:var(--fab-size, 36px);
-  height:var(--fab-size, 36px);
+  width:var(--fab-size, 30px);
+  height:var(--fab-size, 30px);
+}
+
+/* ===========================================================================
+   ОБЛАСТЬ НАЖАТИЯ КНОПОК РЯДА (ТЗ пользователя от 18.11) — видимая кнопка 30×30, нажимается область 34×34: невидимый ::after
+   выступает на 2px с каждой стороны (inset:-2px). У удлинённых кнопок (текст, плашки периодов) высота 30px, область — на 2px
+   больше со всех сторон. Промежуток между кнопками и отступ от края 8px (--fab-gap) — области соседей не пересекаются
+   (между ними остаётся 4px). position:relative задан через :where() (нулевая специфичность): кнопки, у которых position
+   уже задан (абсолютные «домик», «+», «В библиотеку»), остаются как были.
+   ========================================================================= */
+:where(.mdeditor-fab-btn, .task-project-fab-link, .task-project-fab-home, .task-add-fab,
+  .mdeditor-forgotten-pills .review-pill, #settingsTabContent .review-pills .review-pill,
+  .workbooks-actions-row .workbooks-run-btn, .workbooks-actions-row .workbooks-result-btn){
+  position:relative;
+}
+.mdeditor-fab-btn::after,
+.task-project-fab-link::after,
+.task-project-fab-home::after,
+.task-add-fab::after,
+#taskFabHomeStub::after,
+.mdeditor-forgotten-pills .review-pill::after,
+#settingsTabContent .review-pills .review-pill::after,
+.workbooks-actions-row .workbooks-run-btn::after,
+.workbooks-actions-row .workbooks-result-btn::after{
+  content:"";
+  position:absolute;
+  inset:-2px;
+  background:transparent;
 }

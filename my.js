@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.1 (18.11) — `initFabRowSlider`: отступ кнопок от края окна `EDGE` 8 (был 6), запас полосы жеста `STRIP_PAD` 16, запасной размер кнопки 30 (нижний ряд 30×30 с отступом 8px, modals.css 22.1).
    Версия: 151.0 (18.11)
    Версия: 150.4 (17.11) — вход из оболочки `window.__ltOpenBook(id)` / параметр `?book=<id>` (`openBookFromNative`, `handleBookLaunchParam`): нажатие на карточку «Книги» в виджете открывает книгу на основной закладке (`openComboBookmark`); нет основной закладки — вкладка «Мои книги». Откат: my.js 150.3.
    Версия: 150.3 (17.11) — «Книги-карточки»: в меню долгого удержания книги кнопка с виджетом (`.mdeditor-widget-btn`): плашка со списком виджетов (`openBookWidgetPicker`), выбор добавляет книгу в карточку «Книги» этого виджета (включает его галочку «Отображать книги»), повторный выбор убирает; тосты и хранение — widgets.js (`toggleBook`). Для виджетов: `widgetBooksList`, `widgetBookCover`, id книги `bookWidgetId`; смена положения/сброс обложки перерисовывает виджеты. Названия экранов: «Список книг», «Ваши книги», «Книги-карточки» (заголовок, кнопка переключения, «i»). Откат: my.js 150.2.
@@ -7587,11 +7588,11 @@
     var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, " +
       ".task-fullscreen-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
       ".task-info-wrap, .task-attach-wrap, .task-tag-wrap, .task-project-fab-link, .task-project-fab-home";
-    var EDGE = 6;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
-    var STRIP_PAD = 14;     // отступ полосы жеста над кнопками: bottom:6 + запас 8; высота полосы = STRIP_PAD + --fab-size
+    var EDGE = 8;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
+    var STRIP_PAD = 16;     // отступ полосы жеста над кнопками: bottom:8 + запас 8; высота полосы = STRIP_PAD + --fab-size
     function stripH(){      // высота полосы ряда от низа окна (размер кнопок — --fab-size в modals.css, по умолчанию 40)
       var sz = parseFloat(getComputedStyle(box).getPropertyValue("--fab-size"));
-      return STRIP_PAD + (sz > 0 ? sz : 36);
+      return STRIP_PAD + (sz > 0 ? sz : 30);
     }
     var SWIPE_MIN = 36;     // минимальный горизонтальный путь жеста, px
     var slid = false;       // false — «дом виден», true — «крайняя левая кнопка видна»
@@ -15335,7 +15336,7 @@
     return (
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
       '<div class="mdeditor-fab-row">' +
-        '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,40px);padding:0 8px;font-size:13px;"></button>' +
+        '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,30px);padding:0 8px;font-size:13px;"></button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomOutBtn" title="Уменьшить">−</button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomInBtn" title="Увеличить">+</button>' +
         '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="bookReaderFullscreenBtn" title="Полноэкранный режим"></button>' +
