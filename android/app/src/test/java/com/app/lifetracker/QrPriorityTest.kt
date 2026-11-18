@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 4.7 (18.11) — карточка «Заметки» (notes_*): отдельная группа «nt_0»; заметка «в своё время» (утро/обед/вечер/все время) — в круге равных, без времени суток — нет.
 // Версия: 4.6 (17.11) — класс QrMotionTest: единый диспетчер движения стопки (QrPriority.Motion), ТЗ TZ_motion_dispatcher.md, п. 7.
 // Версия: 4.5 (16.11) — время суток «Целый день» (`a`): привычка и карточка «Сегодня» «в своё время» в любой час суток, только в выбранные дни недели, пока не отмечены (habits_allDay_*, allDay_*).
 // Версия: 4.4 (15.11) — карточка «Таймеры» (timers_*): идущий таймер выше всего, в том числе выше «Как тренировка?» и без «релевантности»; два идущих сменяют друг друга по минутам; таймер «в своё время суток» выше календаря и привычек; минутная перерисовка только пока идёт таймер.
@@ -840,6 +841,37 @@ class QrPriorityTest {
         assertEquals(listOf("cal", "hab_0"), keys(run(cf, s)))
         assertEquals(listOf("run", "read", "water"), QrPriority.habitList(cf, s).map { it.key })
         assertEquals(2, QrPriority.groups(cf, s)[0].turns) // очередей в круге — по числу привычек «в своё время»
+    }
+
+    // ---------- карточка «Заметки» (отдельно от «Книг»; время суток заметки выбирается на экране «Заметки-карточки») ----------
+
+    private fun note(key: String, times: Set<String> = emptySet()) = card(key, times = times, dyn = "note")
+
+    private fun cfgNotes(notes: List<Card>, cards: List<Card> = emptyList(), books: List<Card> = emptyList()) =
+        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = true, cards = cards, books = books.isNotEmpty(), bookCards = books, notes = true, noteCards = notes)
+
+    @Test fun notes_dueNoteEntersTheCircle_othersDoNot() {
+        val ns = listOf(note("bk_nt_eve", setOf("e")), note("bk_nt_morn", setOf("m")), note("bk_nt_none"))
+        val cf = cfgNotes(ns, listOf(card("cal")))
+        val s = snap(cal(8))
+        assertEquals(listOf("cal", "nt_0"), keys(run(cf, s))) // ОДНА карточка «Заметки»
+        val g = QrPriority.groups(cf, s).first { it.key == QrPriority.NOTE_SLOT_KEY }
+        assertEquals(listOf(0, QrPriority.SCORE_CYCLE, 0), g.scores) // утро: в круг входит только утренняя заметка
+        assertEquals(1, g.defaultIdx) // показана заметка «в своё время»
+        assertEquals(1, g.turns)
+    }
+
+    @Test fun notes_allDay_alwaysDue_noTime_neverDue() {
+        val cf = cfgNotes(listOf(note("bk_nt_all", setOf("a")), note("bk_nt_none")))
+        for (h in listOf(3, 8, 13, 16, 20)) {
+            val g = QrPriority.groups(cf, snap(cal(h))).first { it.key == QrPriority.NOTE_SLOT_KEY }
+            assertEquals(listOf(QrPriority.SCORE_CYCLE, 0), g.scores)
+        }
+    }
+
+    @Test fun notes_areSeparateCardFromBooks() {
+        val cf = cfgNotes(listOf(note("bk_nt_x")), books = listOf(card("bk_book1", dyn = "book")))
+        assertEquals(listOf("bk_0", "nt_0"), keys(run(cf, snap(cal(8)))))
     }
 
     @Test fun habits_manyDue_stillExactlyOneCard() {

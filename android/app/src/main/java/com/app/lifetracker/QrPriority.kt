@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.7 (18.11) — карточка «Заметки» (`Cfg.notes`, `Cfg.noteCards`): пятая карточка-группа «nt_0» ([NOTE_SLOT_KEY]), отдельная от «Книг»; элемент — одна заметка виджета. Заметка, у которой сейчас её время суток (утро/обед/вечер/все время, [Card.times] — выбирается на экране «Заметки-карточки»), имеет балл [SCORE_CYCLE]: встаёт в круг равных наравне с календарём и привычками; заметка без времени суток — балл 0, листается краями. Откат: QrPriority.kt 5.6.
 // Версия: 5.6 (17.11) — карточка «Книги» (`Cfg.books`, `Cfg.bookCards`): четвёртая карточка-группа «bk_0» ([BOOK_SLOT_KEY]), элемент — одна книга виджета; баллов у книг нет (в круг равных и наверх по релевантности карточка не попадает, листается краями). Откат: QrPriority.kt 5.5.
 // Версия: 5.5 (17.11) — единый диспетчер движения стопки [Motion] (ТЗ TZ_motion_dispatcher.md): чистое решение «двигать сейчас / отложить до T / отбросить / только лицо» по намерению ([Motion.Kind]), последнему касанию и состоянию экрана; [Motion.reorderBySlots] — заморозка порядка на время паузы. Порядок карточек ([build]) не менялся. Откат: QrPriority.kt 5.4.
 // Версия: 5.4 (16.11) — время суток «Целый день» (ключ `a`, [WINDOWS]: 0–24 ч) у привычек и карточки «Сегодня»: в выбранные дни недели карточка весь день — «в своё время» ([SCORE_CYCLE]/[SCORE_SCHEDULED]), пока не отмечена (привычка скрывается отметкой, «Сегодня» — через «после срабатывания» = скрывать). Причина: «Сейчас её время: весь день». Откат: QrPriority.kt 5.3.
@@ -513,13 +514,17 @@ object QrPriority {
     const val BOOK_SLOT_PREFIX = "bk_"
     const val BOOK_SLOT_KEY = BOOK_SLOT_PREFIX + "0"
 
+    /** Ключ карточки «Заметки» в стопке (одна на все заметки, добавленные в виджет на экране «Заметки-карточки»; отдельно от карточки «Книги»). */
+    const val NOTE_SLOT_PREFIX = "nt_"
+    const val NOTE_SLOT_KEY = NOTE_SLOT_PREFIX + "0"
+
     /** Ключ карточки-группы? Один список на все виды: оболочка и [check] различают по нему слот и обычную карточку. */
-    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY || key == TIMER_SLOT_KEY || key == BOOK_SLOT_KEY
+    fun isGroupKey(key: String): Boolean = key == HABIT_SLOT_KEY || key == ALARM_SLOT_KEY || key == TIMER_SLOT_KEY || key == BOOK_SLOT_KEY || key == NOTE_SLOT_KEY
 
     private fun isGroup(c: Card): Boolean = isGroupKey(c.key)
 
     /** Все карточки-группы виджета с их элементами и баллами (пустые группы — нет карточки). Единственное место, где перечислены виды групп. */
-    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(timerGroup(cfg, s), alarmGroup(cfg, s), habitGroup(cfg, s), bookGroup(cfg))
+    fun groups(cfg: Cfg, s: Snapshot): List<Group> = listOfNotNull(timerGroup(cfg, s), alarmGroup(cfg, s), habitGroup(cfg, s), bookGroup(cfg), noteGroup(cfg, s))
 
     /** Карточка группы в стопке: лицо элемента по умолчанию, [Card.cycleN] — очередей круга, [Card.gscore] / [Card.greason] — балл и причина. */
     private fun slotOf(g: Group): Card {
@@ -557,6 +562,29 @@ object QrPriority {
         val list = bookList(cfg)
         if (list.isEmpty()) return null
         return Group(BOOK_SLOT_KEY, "book", list, list.map { 0 }, list.map { "" }, 0)
+    }
+
+    // ---------- карточка «Заметки» ----------
+
+    /** Сколько заметок принимает карточка «Заметки» (то же число — MAX_NOTES в widgets.js). */
+    const val NOTE_NAV_MAX = 24
+
+    /** Заметки карточки «Заметки»: в порядке добавления в виджет, не больше [NOTE_NAV_MAX]; нет галочки — пусто. */
+    fun noteList(cfg: Cfg): List<Card> = if (!cfg.notes) emptyList() else cfg.noteCards.take(NOTE_NAV_MAX)
+
+    /**
+     * Заметки: элемент — одна заметка. «В своё время» — выбрано время суток заметки и сейчас оно ([scheduledNow]; «все время» — всегда) — [SCORE_CYCLE]: заметка встаёт в круг равных
+     * и по очереди с календарём и привычками поднимается наверх (при «Переключении по релевантности»). Заметка без времени суток — 0: в круг не входит, листается краями.
+     * По умолчанию показана первая заметка «в своё время», иначе первая в ряду.
+     */
+    private fun noteGroup(cfg: Cfg, s: Snapshot): Group? {
+        val list = noteList(cfg)
+        if (list.isEmpty()) return null
+        val due = list.map { scheduledNow(it, s.cal) }
+        val scores = due.map { if (it) SCORE_CYCLE else 0 }
+        val reasons = list.indices.map { if (due[it]) "Сейчас время заметки" + windowName(list[it], s.cal) else "" }
+        val def = due.indexOfFirst { it }.let { if (it < 0) 0 else it }
+        return Group(NOTE_SLOT_KEY, "note", list, scores, reasons, def)
     }
 
     // ---------- карточка «Таймеры» ----------

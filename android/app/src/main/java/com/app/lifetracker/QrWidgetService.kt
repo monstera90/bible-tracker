@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.20 (18.11) — карточка «Заметки» (dyn = "note") в том же разборе нажатий, что и «Книги»: `booktap` несёт id заметки (ключ без «bk_»), приложение открывает заметку. Откат: QrWidgetService.kt 2.19.
 // Версия: 2.19 (17.11) — нажатие по центру и по самой карточке «Книги» открывает показанную книгу на основной закладке: `booktap` несёт id книги (ключ без «bk_»), ScanActivity открывает приложение.
 // Версия: 2.18 (17.11) — карточка «Книги»: у центра и самой карточки теперь всегда есть fill-in intent `booktap`. Без него переиспользованный элемент стопки сохранял нажатие прежней карточки (таймер «Кофе» запускался от нажатия на книгу). Откат: QrWidgetService.kt 2.17.
 // Версия: 2.17 (17.11) — карточка «Книги»: края листают книги (как у других групп), по центру и по самой карточке нажатие ничего не делает. Откат: QrWidgetService.kt 2.16.
@@ -114,8 +115,8 @@ class QrWidgetService : RemoteViewsService() {
                 rv.setOnClickFillInIntent(R.id.ev_left, Intent().putExtra("habnav", -1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("habnav", 1).putExtra("wid", widgetId).putExtra("slot", c.key))
                 val item = groupViews[c.key]?.card
-                if (c.dyn == "book" || item?.dyn == "book") {
-                    // у книг нажатия по центру нет, но fill-in intent задаётся ВСЕГДА: элемент списка переиспользуется, и без него у книги оставалось нажатие
+                if (c.dyn == "book" || item?.dyn == "book" || c.dyn == "note" || item?.dyn == "note") {
+                    // у книг и заметок нажатия по центру нет (нажатие открывает книгу или заметку в приложении), но fill-in intent задаётся ВСЕГДА: элемент списка переиспользуется, и без него у книги оставалось нажатие
                     // прежней карточки в этом же элементе (таймер «Кофе» запускался от нажатия на книгу). ScanActivity по `booktap` открывает книгу в приложении.
                     val noop = Intent().putExtra("booktap", (item?.key ?: "").removePrefix(QrPriority.BOOK_SLOT_PREFIX))
                     rv.setOnClickFillInIntent(R.id.ev_center, noop)

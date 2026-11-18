@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.3 (18.11) — «Заметки-карточки»: время суток приоритета заметки (`getNoteCardTime`/`setNoteCardTime`, state `__noteTime:<id заметки>` = {c: "v1:m|d|e|a" (пусто после «v1:» — не выбрано), t}, ездит через облако и архив); значения утро/обед/вечер/целый день — те же `WINDOWS` из widgets.js (`timeWindows`). В `widgetNotesList` у заметки поле `time`; в `LTNoteCards` — `getTime`, `setTime`, `timeOptions`. Откат: my.js 151.2.
    Версия: 151.2 (18.11) — «Заметки-карточки»: цвет карточки заметки (`getNoteCardColor`/`setNoteCardColor`, state `__noteColor:<id заметки>` = {c: "v1:#rrggbb", t}, ездит через облако и архив) и показ заметки в виджете (`openNoteWidgetPicker` — тот же выбор виджета, что у книг; заметка лежит в карточке «Книги», id `nt_…`, `noteWidgetId`). Для виджетов — `widgetNotesList` (деп `listNotes`); нажатие на заметку в виджете открывает её (`openNoteFromWidget` через `__ltOpenBook`). Всё это для mdeditor.js — через `window.LTNoteCards`. Палитра формы — та же, что у карточек QR (`ItemCards.colorPalette`). Откат: my.js 151.1.
    Версия: 151.1 (18.11) — `initFabRowSlider`: отступ кнопок от края окна `EDGE` 8 (был 6), запас полосы жеста `STRIP_PAD` 16, запасной размер кнопки 30 (нижний ряд 30×30 с отступом 8px, modals.css 22.1).
    Версия: 151.0 (18.11)
@@ -10446,7 +10447,7 @@
         getItemCards: ensureItemCards,
         listBooks: widgetBooksList, // книги пользователя для карточки «Книги» виджета: Promise<[{id, name, hash}]>
         bookCover: widgetBookCover, // обложка книги: Promise<{url, pos}|null>
-        listNotes: widgetNotesList, // заметки-карточки в карточке «Книги»: [{id (с приставкой nt_), name, color}] или null, пока заметки не загружены
+        listNotes: widgetNotesList, // заметки-карточки в карточке «Заметки»: [{id (с приставкой nt_), name, color, time}] или null, пока заметки не загружены
         // задачи и события календаря для карточек стопки (галочки «Показывать задачи» / «Показывать события календаря»)
         getCalendarFeed: function(from, to){
           try{
@@ -13984,6 +13985,33 @@
     resyncWidgetsSoon(); // лицо заметки в виджете перерисуется новым цветом
     return true;
   }
+  // Время суток приоритета заметки — тоже по записи на заметку: state `__noteTime:<id заметки>` = {c: "v1:m" | "v1:d" | "v1:e" | "v1:a" (пусто после «v1:» — не выбрано), t}; ездит через облако и архив (слияние по последнему t).
+  // m — утро, d — обед, e — вечер, a — все время (интервалы часов — WINDOWS в widgets.js и QrPriority.WINDOWS в оболочке); в виджете заметка в своё время встаёт в круг равных (при «Переключении по релевантности»).
+  var NOTE_TIME_PREFIX = "__noteTime:";
+  function normNoteTime(v){ v = String(v || ""); return (v === "m" || v === "d" || v === "e" || v === "a") ? v : ""; }
+  function getNoteCardTime(noteId){
+    var rec = noteColorKeyOk(noteId) ? state[NOTE_TIME_PREFIX + noteId] : null;
+    if(!rec || typeof rec.c !== "string" || rec.c.indexOf("v1:") !== 0) return "";
+    return normNoteTime(rec.c.slice(3));
+  }
+  function setNoteCardTime(noteId, k){
+    if(!noteColorKeyOk(noteId)) return false;
+    var t = normNoteTime(k);
+    if(t === getNoteCardTime(noteId)) return true;
+    state[NOTE_TIME_PREFIX + noteId] = {c: "v1:" + t, t: Date.now()};
+    saveLocalStateNow();
+    scheduleCloudPush();
+    resyncWidgetsSoon(); // в виджете заметка получит новое время суток
+    return true;
+  }
+  // варианты выбора времени суток для формы заметки: «Не выбрано» + утро/обед/вечер/все время (подписи и часы — как в конструкторе виджетов); [{k, label, hint}]
+  function noteTimeOptions(){
+    var out = [{k: "", label: "Не выбрано", hint: ""}], W = null;
+    try{ W = ensureWidgets(); }catch(e){ W = null; }
+    var ws = (W && typeof W.timeWindows === "function") ? W.timeWindows() : [{k: "m", label: "Утро", hint: "5–11"}, {k: "d", label: "Обед", hint: "11–15"}, {k: "e", label: "Вечер", hint: "17–23"}, {k: "a", label: "Целый день", hint: "0–24"}];
+    ws.forEach(function(x){ out.push({k: x.k, label: x.k === "a" ? "Все время" : x.label, hint: x.hint}); });
+    return out;
+  }
   // цвет заливки и выступа снизу для карточки заметки: тот же расчёт выступа, что у карточек QR (itemcards.js cardShade); без цвета — null (карточка как по умолчанию)
   function getNoteCardLook(noteId){
     var c = getNoteCardColor(noteId);
@@ -14000,14 +14028,14 @@
     for(var i = 0; i < id.length; i++) x = ((x * 33) ^ id.charCodeAt(i)) >>> 0;
     return "nt_" + x.toString(16);
   }
-  // заметки для лиц в виджете: [{id (виджета), noteId, name, color}]; null — заметки ещё не загружены (виджет не трогает заметки, пока список не прочитан)
+  // заметки для лиц в виджете: [{id (виджета), noteId, name, color, time}]; null — заметки ещё не загружены (виджет не трогает заметки, пока список не прочитан)
   function widgetNotesList(){
     if(!MdEditor || typeof MdEditor.isNotesReady !== "function" || !MdEditor.isNotesReady() || typeof MdEditor.getSearchableNotes !== "function") return null;
     return MdEditor.getSearchableNotes().map(function(n){
-      return { id: noteWidgetId(n.id), noteId: n.id, name: n.name, color: getNoteCardColor(n.id) };
+      return { id: noteWidgetId(n.id), noteId: n.id, name: n.name, color: getNoteCardColor(n.id), time: getNoteCardTime(n.id) };
     });
   }
-  // плашка со списком виджетов (как у книг): выбор добавляет заметку в карточку «Книги» этого виджета, повторный выбор убирает
+  // плашка со списком виджетов (как у книг): выбор добавляет заметку в карточку «Заметки» этого виджета, повторный выбор убирает
   function openNoteWidgetPicker(noteId, name, anchorBtn){
     var W = ensureWidgets();
     if(!W || typeof W.widgetsForBook !== "function") return;
@@ -14043,6 +14071,9 @@
     getColor: getNoteCardColor,
     setColor: setNoteCardColor,
     getLook: getNoteCardLook,
+    getTime: getNoteCardTime,
+    setTime: setNoteCardTime,
+    timeOptions: noteTimeOptions,
     pickWidget: openNoteWidgetPicker,
     // палитра — ровно та же, что в формах карточек QR и в конструкторе виджетов (itemcards.js CARD_PALETTE_COLS): правка палитры там меняет и эту форму
     paletteHtml: function(){ var ic = ensureItemCards(); return ic && typeof ic.colorPalette === "function" ? ic.colorPalette("notecard", "noteCardColors") : ""; },

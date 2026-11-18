@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.11 (18.11) — экран «Карточка заметки»: чипы времени суток приоритета над палитрой (`.note-card-form-sec`, `.note-card-form-hint`, `.note-time-chips`, `.note-time-chip`). Откат: components.css 26.10.
    Версия: 26.10 (18.11) — «Заметки-карточки»: у карточки заметки меню долгого удержания в `.note-card-actions` (2×2: виджет, настройки карточки, закладка, удаление); цвет карточки — `--note-bg` / `--note-shade` (ставит mdeditor.js), без них прежний #7f00ff; кнопки `.mdeditor-notecard-btn` («Настройки карточки») и экран `.note-card-form`. Откат: components.css 26.9.
    Версия: 26.9 (18.11) — нижний ряд кнопок 30×30, отступы 8px (см. modals.css 22.1): `.ipkd-swap-fab`, попап «Аа», нижний ряд кнопок настроения, ряд «Начать/Скачать», плашки периода «Обзор» берут отступ из `--fab-gap`, высоту удлинённых кнопок — из `--fab-size`. Откат: components.css 26.8
    Версия: 26.8 (18.11)
@@ -5167,3 +5168,10 @@ html[data-theme="14"] .pdf-hl{
 .note-card-form-name{ font-weight:700; word-break:break-word; }
 .note-card-form-preview{ width:110px; --item-card-w:110px; padding-bottom:calc(110px * 0.04); }
 .note-card-form-preview .note-card.mdeditor-row{ cursor:default; }
+/* выбор времени суток приоритета заметки над палитрой цвета (экран «Карточка заметки»): чипы — как в конструкторе виджетов (.wg-chip) */
+.note-card-form-sec{ font-weight:700; margin-bottom:-6px; }
+.note-card-form-hint{ font-size:13px; opacity:.75; margin-top:-8px; }
+.note-time-chips{ display:flex; flex-wrap:wrap; }
+.note-time-chip{ margin:0 8px 8px 0; padding:8px 14px; border-radius:18px; background:var(--gold-light); color:var(--ink); font-size:15px; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.note-time-chip.on{ background:var(--wood); color:#fff; }
+.note-time-chip small{ opacity:.7; margin-left:4px; font-size:11px; }

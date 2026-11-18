@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
+// Версия: 16.3 (18.11) — галочка «Отображать заметки» (`notes`, список `nts`: ключ, название и `times` — время суток заметки): карточка-группа «Заметки» ([QrPriority.NOTE_SLOT_KEY]) отдельно от карточки «Книги»; лицо заметки — картинка `<ключ>.png` от страницы; заметка «в своё время» встаёт в круг равных ([QrPriority.noteList]). Откат: QrWidgets.kt 16.2.
 // Версия: 16.2 (17.11) — галочка «Отображать книги» (`books`, список `bks`: ключ и название): карточка-группа «Книги» ([QrPriority.BOOK_SLOT_KEY]) с книгами виджета; лицо книги — картинка `<ключ>.png`, присланная страницей (обложка с выступом), нет её — запасная с названием; листание краями и точки — как у других групп, нажатие по центру ничего не делает. Откат: QrWidgets.kt 16.1.
 // Версия: 16.1 (17.11) — таймер в виджете больше не отстаёт после блокировки телефона: пока экран погашен, обработчик минутной перерисовки ([armCycle]) стоит на часах uptime, которые во сне не идут, и ничего не рисует; после разблокировки кольцо показывало старое число до ближайшего срока. Теперь включение экрана и разблокировка ([onScreenOn], [onUserPresent]) сразу перерисовывают виджеты с таймерами ([refreshTimerFaces]) и заново взводят точный срок по настенным часам. Откат: QrWidgets.kt 16.0.
 // Версия: 16.0 (17.11) — единый диспетчер движения стопки (ТЗ TZ_motion_dispatcher.md, [QrPriority.Motion]): слайд-шоу, круг равных/смена верха и возврат наверх больше не двигают стопку сами, а проходят через одно решение ([motionDecide]) — пока пользователь работает с карточками (нажатие: 60 с, смахивание: 120 с после последнего касания, каждое новое касание обнуляет срок), стопка стоит на месте, а порядок карточек замораживается ([order] + [freeze]), так что под рукой ничего не меняется; отложенное движение исполняется по сроку или при включении экрана. Действия самого пользователя (двойное нажатие, край группы, настройка виджета) и постановка виджета паузу обходят. Откат: QrWidgets.kt 15.3.
@@ -255,7 +256,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "", val sec: Int = 0, val hid: Boolean = false)
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2, val books: Boolean = false, val bookCards: List<Card> = emptyList()) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2, val books: Boolean = false, val bookCards: List<Card> = emptyList(), val notes: Boolean = false, val noteCards: List<Card> = emptyList()) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -424,6 +425,21 @@ object QrWidgets {
                         if (bookList.size >= QrPriority.BOOK_NAV_MAX) break
                     }
                 }
+                val notesOn = o.optBoolean("notes", false)
+                val nts = o.optJSONArray("nts")
+                val noteList = ArrayList<Card>()
+                if (nts != null && notesOn) {
+                    for (j in 0 until nts.length()) {
+                        val d = nts.optJSONObject(j) ?: continue
+                        val key = d.optString("key", "")
+                        if (!KEY_RE.matches(key) || noteList.any { it.key == key }) continue
+                        val nTimes = HashSet<String>()
+                        val nta = d.optJSONArray("times")
+                        if (nta != null) for (x in 0 until nta.length()) nta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) nTimes.add(it) }
+                        noteList.add(Card(key, "", d.optString("title", ""), emptyList(), nTimes, emptySet(), "none", QrBattery.DEFAULT_FACE, "note")) // лицо — картинка `<ключ>.png` от страницы; время суток заметки — `times`
+                        if (noteList.size >= QrPriority.NOTE_NAV_MAX) break
+                    }
+                }
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
                 if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none", batColor)) // карточка заряда — последняя в стопке
@@ -433,7 +449,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList, books = booksOn, bookCards = bookList,
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList, books = booksOn, bookCards = bookList, notes = notesOn, noteCards = noteList,
                         eventsDays = o.optInt("eventsDays", 2).coerceIn(1, QrPriority.EVENTS_DAYS_MAX) // нет числа (страница старой версии) — как было: сегодня и завтра
                     )
                 )
@@ -593,7 +609,7 @@ object QrWidgets {
         if (text.isNullOrEmpty()) return ""
         return try {
             val root = JSONObject(text)
-            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.let { it.remove("dyn"); it.remove("alm"); it.remove("hab"); it.remove("tmr"); it.remove("bks") } }
+            root.optJSONArray("widgets")?.let { ws -> for (i in 0 until ws.length()) ws.optJSONObject(i)?.let { it.remove("dyn"); it.remove("alm"); it.remove("hab"); it.remove("tmr"); it.remove("bks"); it.remove("nts") } }
             root.toString()
         } catch (e: Exception) {
             text
@@ -789,7 +805,7 @@ object QrWidgets {
         if (cfg.moodAsk) at = Math.min(at, QrMood.nextChangeAt(now)) // 20:30 — «Как настроение?» появится, полночь — уйдёт
         if (cfg.events) eventResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // пролистанный ряд событий вернётся к первому
         if (cfg.tasks) rowResetAt(ctx, K_TKIDX, cfg.id, now)?.let { at = Math.min(at, it) } // то же для ряда задач
-        if (cfg.habits || cfg.alarms || cfg.timers || cfg.books) groupResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для выбранных нажатием элементов карточек-групп (привычки, будильники, таймеры)
+        if (cfg.habits || cfg.alarms || cfg.timers || cfg.books || cfg.notes) groupResetAt(ctx, cfg.id, now)?.let { at = Math.min(at, it) } // и для выбранных нажатием элементов карточек-групп (привычки, будильники, таймеры)
         return at
     }
 
@@ -909,7 +925,7 @@ object QrWidgets {
 
     /** Ключ карточки-группы → элемент, который она показывает (пусто, если групп нет: нет галочек или нет элементов). */
     fun groupViews(ctx: Context, cfg: Cfg): Map<String, GroupView> {
-        if (!cfg.habits && !cfg.alarms && !cfg.timers && !cfg.books) return emptyMap()
+        if (!cfg.habits && !cfg.alarms && !cfg.timers && !cfg.books && !cfg.notes) return emptyMap()
         val app = ctx.applicationContext
         return groupViewsOf(app, cfg, snapshot(app, cfg))
     }
@@ -1708,7 +1724,7 @@ object QrWidgets {
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
-            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits || cfg.alarms || cfg.timers || cfg.books)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
+            if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits || cfg.alarms || cfg.timers || cfg.books || cfg.notes)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
                     cancelRotate(app, id)

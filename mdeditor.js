@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.4 (18.11) — экран «Карточка заметки» (`openNoteCardForm`): над палитрой цвета выбор времени суток приоритета заметки — «Не выбрано», «Утро», «Обед», «Вечер», «Все время» (`timeChipsHtml`, `LTNoteCards.getTime/setTime/timeOptions`); выбор сохраняется сразу. Откат: mdeditor.js 25.3.
    Версия: 25.3 (18.11) — «Заметки-карточки»: долгое удержание заметки показывает четыре кнопки (2×2): «Показывать в виджете» (`LTNoteCards.pickWidget` — выбор виджета, как у книг-карточек), «Настройки карточки» (экран `openNoteCardForm` с палитрой цвета — той же, что у карточек QR, через `LTNoteCards.paletteHtml`), закладка и удаление. Цвет заметки (`LTNoteCards.getColor/setColor`, хранится в облаке) красит карточку (`--note-bg`/`--note-shade`) и её лицо в виджете. `isNotesReady` — для виджетов. Откат: mdeditor.js 25.2.
    Версия: 25.2 (18.11)
    Версия: 25.1 (17.11)
@@ -3592,6 +3593,14 @@ window.initMdEditorModule = function(deps){
       cardEl.style.removeProperty("--card-shade");
     }
   }
+  // чипы выбора времени суток приоритета заметки: «Не выбрано», утро, обед, вечер, все время (LTNoteCards.timeOptions — часы те же, что в конструкторе виджетов)
+  function timeChipsHtml(api){
+    var opts = [];
+    try{ opts = api && api.timeOptions ? api.timeOptions() : []; }catch(e){ opts = []; }
+    return opts.map(function(o){
+      return '<div class="note-time-chip" data-k="' + o.k + '">' + o.label + (o.hint ? '<small>' + o.hint + ' ч</small>' : '') + '</div>';
+    }).join("");
+  }
   // Экран «Карточка заметки»: образец карточки и палитра цвета — ровно та же, что в формах карточек QR и в конструкторе виджетов
   // (itemcards.js CARD_PALETTE_COLS, разметка — LTNoteCards.paletteHtml): правка палитры там меняет и этот экран. Выбор сохраняется сразу.
   // Подменяет #settingsTabContent целиком; «назад» и «домик» возвращают к списку заметок.
@@ -3608,6 +3617,9 @@ window.initMdEditorModule = function(deps){
         '<div class="note-card-form-preview"><div class="mdeditor-row item-card note-card" id="noteCardFormPreview">' +
           '<div class="item-card-front"><div class="item-card-icon">' + FILE_ICON_SVG + '</div><div class="item-card-title" id="noteCardFormPreviewTitle"></div></div>' +
         '</div></div>' +
+        '<div class="note-card-form-sec">Время приоритета</div>' +
+        '<div class="note-time-chips" id="noteCardTimes">' + timeChipsHtml(api) + '</div>' +
+        '<div class="note-card-form-hint">Когда заметка встаёт наверх стопки в виджете (при «Переключении по релевантности»).</div>' +
         api.paletteHtml() +
         '<div class="mdeditor-fab-row">' +
           '<button type="button" class="mdeditor-fab-btn" id="noteCardFormHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>' +
@@ -3619,6 +3631,19 @@ window.initMdEditorModule = function(deps){
     var colorsEl = document.getElementById("noteCardColors");
     // что выбрано: свой цвет заметки, а без него — тот, которым карточка рисуется по умолчанию (фиолетовый #7f00ff из палитры)
     function shownColor(){ return api.getColor(it.id) || "#7f00ff"; }
+    var timesEl = document.getElementById("noteCardTimes");
+    function refreshTimes(){
+      if(!timesEl) return;
+      var cur = api.getTime(it.id) || "", cs = timesEl.querySelectorAll(".note-time-chip");
+      for(var i = 0; i < cs.length; i++) cs[i].classList.toggle("on", (cs[i].getAttribute("data-k") || "") === cur);
+    }
+    refreshTimes();
+    if(timesEl) timesEl.addEventListener("click", function(e){
+      var c = e.target.closest(".note-time-chip");
+      if(!c) return;
+      api.setTime(it.id, c.getAttribute("data-k") || ""); // «Не выбрано» — пусто
+      refreshTimes();
+    });
     function refresh(){
       applyNoteCardColor(preview, it.id);
       if(!colorsEl) return;
