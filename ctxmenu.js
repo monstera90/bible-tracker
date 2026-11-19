@@ -1,5 +1,6 @@
 /* ===========================================================================
    ctxmenu.js
+   Версия: 2.3 (19.11) — центральная кнопка круга стала больше (радиус 27 вместо 22: внутренний радиус колец 30 вместо 25, соседние сектора отдали ей место) и теперь «Переслать в задачи» (стрелка); ластик перешёл на её прежнее место — четвёртый сектор. Действия `fwd`/`erase` те же. Откат: ctxmenu.js 2.2.
    Версия: 2.2 (17.11) — `toast(msg, ms)`: необязательная длительность (по умолчанию 1,9 с). Откат: ctxmenu.js 2.1.
    Версия: 2.1 (11.11)
    Круговое контекстное меню выделения текста и история скопированных в приложении фрагментов.
@@ -123,7 +124,7 @@
     { act: "copy",  title: "Копировать" },
     { act: "paste", title: "Вставить" },
     { act: "cut",   title: "Вырезать" },
-    { act: "fwd",   title: "Переслать в задачи" },
+    { act: "erase", title: "" }, // название подставляет menuSvg (у книги — своё)
     { act: "hist",  title: "Последние скопированные" }
   ];
 
@@ -138,22 +139,22 @@
   }
 
   function menuSvg(en, eraseTitle){
-    var c = SIZE / 2, R = c - 4, r = 25, n = SECTORS.length, step = 360 / n;
+    var c = SIZE / 2, R = c - 4, r = 30, n = SECTORS.length, step = 360 / n;
     var html = '<svg viewBox="0 0 ' + SIZE + ' ' + SIZE + '" xmlns="http://www.w3.org/2000/svg">';
     for(var i = 0; i < n; i++){
       var a0 = -90 - step / 2 + step * i + 1, a1 = a0 + step - 2, mid = a0 + (step - 2) / 2;
       var mp = pt(c, c, (R + r) / 2, mid).split(" ");
       var sec = SECTORS[i];
       html += '<g class="lt-ctx-sec' + (en[sec.act] ? '' : ' lt-ctx-dis') + '" data-act="' + sec.act + '">' +
-        '<title>' + sec.title + '</title>' +
+        '<title>' + (sec.act === "erase" ? eraseTitle : sec.title) + '</title>' +
         '<path class="lt-ctx-bg" d="' + sectorPath(c, c, R, r, a0, a1) + '"></path>' +
         '<g class="lt-ctx-ico" transform="translate(' + (parseFloat(mp[0]) - 12).toFixed(2) + ' ' + (parseFloat(mp[1]) - 12).toFixed(2) + ')">' + ICONS[sec.act] + '</g>' +
         '</g>';
     }
-    // центр — ластик (удалить выделенное; в книге — снять подчёркивание)
-    html += '<g class="lt-ctx-hubg' + (en.erase ? '' : ' lt-ctx-dis') + '" data-act="erase"><title>' + eraseTitle + '</title>' +
+    // центр — «Переслать в задачи» (крупная кнопка); ластик — четвёртый сектор
+    html += '<g class="lt-ctx-hubg' + (en.fwd ? '' : ' lt-ctx-dis') + '" data-act="fwd"><title>Переслать в задачи</title>' +
       '<circle class="lt-ctx-hub" cx="' + c + '" cy="' + c + '" r="' + (r - 3) + '"></circle>' +
-      '<g class="lt-ctx-ico" transform="translate(' + (c - 12) + ' ' + (c - 12) + ')">' + ICONS.erase + '</g></g>';
+      '<g class="lt-ctx-ico" transform="translate(' + (c - 12) + ' ' + (c - 12) + ')">' + ICONS.fwd + '</g></g>';
     return html + '</svg>';
   }
 

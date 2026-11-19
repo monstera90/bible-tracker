@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (19.11) — круг: центральная кнопка крупнее (радиус 27, внутренний радиус колец 30; было 22 и 25 — соседние сектора отдали ей место) и теперь «Переслать в задачи»; ластик — на её прежнем месте, четвёртым сектором (как в ctxmenu.js 2.3). Откат: SiteSelectionMenu.kt 1.2.
 // Версия: 1.2 (16.11) — табличка «Переслать в задачи» больше не закрывается сама при касании: пока она на экране, снятие выделения сайта (сайт теряет фокус от нажатия на табличку), сдвиг и прокрутка круг/табличку не убирают; сама табличка не берёт фокус. Раньше табличка пропадала до клика и текст в задачу не уходил.
 // Версия: 1.1 (16.11) — «Переслать в задачи» открывает табличку выбора списка задач (как в заметках), а не окно быстрой задачи; без `window.LTSiteTask` страницы (старая веб-часть) — прежнее окно быстрой задачи.
 // Версия: 1.0 (11.11)
@@ -40,18 +41,18 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-// номера частей круга: 0..4 — сектора по часовой стрелке от верхнего, 5 — ластик в центре
+// номера частей круга: 0..4 — сектора по часовой стрелке от верхнего (копировать, вставить, вырезать, ластик, история), 5 — «Переслать в задачи» в центре
 private const val ACT_COPY = 0
 private const val ACT_PASTE = 1
 private const val ACT_CUT = 2
-private const val ACT_FWD = 3
+private const val ACT_ERASE = 3
 private const val ACT_HIST = 4
-private const val ACT_ERASE = 5
+private const val ACT_FWD = 5
 
 /**
  * Круговое меню выделения текста на страницах вкладок-сайтов и вкладки «Claude» — то же, что `ctxmenu.js` в странице
  * приложения (сайты лежат отдельными WebView поверх неё, DOM страницы приложения над ними рисовать не может).
- * Пять секторов (копировать, вставить, вырезать, переслать в задачи, последние 10 скопированных) и ластик в центре:
+ * Пять секторов (копировать, вставить, вырезать, ластик, последние 10 скопированных) и «Переслать в задачи» в центре:
  * ластик удаляет выделенный текст, если его можно менять (поле ввода, contenteditable); у обычного текста страницы
  * неактивен — как остальные недоступные кнопки.
  *
@@ -282,7 +283,7 @@ return ok?1:0;
         }
         if (top.isNaN()) top = max(topLimit, (botLimit - size) / 2f)
 
-        val en = booleanArrayOf(s.has, s.editable, s.editable && s.has, s.has, s.editable, s.editable && s.has)
+        val en = booleanArrayOf(s.has, s.editable, s.editable && s.has, s.editable && s.has, s.editable, s.has) // порядок — номера ACT_*: 3 — ластик, 5 — переслать (центр)
         val cv = CircleView(activity, size, pad, en, QuickTaskStore.palette(activity.applicationContext)) { idx -> onAct(idx) }
         val lp = FrameLayout.LayoutParams(size + 2 * pad, size + 2 * pad)
         lp.leftMargin = (left - pad).roundToInt()
@@ -642,9 +643,9 @@ return ok?1:0;
     // ---------------------------------------------------------------- круг
 
     /**
-     * Круг 156×156 условных единиц (как SVG в ctxmenu.js): кольцо R=74 / r=25 из пяти секторов по 72° (первый — вверху по
-     * центру), в середине — кнопка-ластик радиусом 22. Рисуется в пикселях (тень — setShadowLayer, поэтому программный слой).
-     * [enabled]: 0..4 — сектора, 5 — ластик; недоступные рисуются полупрозрачными и не нажимаются.
+     * Круг 156×156 условных единиц (как SVG в ctxmenu.js): кольцо R=74 / r=30 из пяти секторов по 72° (первый — вверху по
+     * центру), в середине — кнопка «Переслать в задачи» радиусом 27. Рисуется в пикселях (тень — setShadowLayer, поэтому программный слой).
+     * [enabled]: 0..4 — сектора (3 — ластик), 5 — центральная «Переслать»; недоступные рисуются полупрозрачными и не нажимаются.
      */
     private class CircleView(
         ctx: Context,
@@ -659,13 +660,13 @@ return ok?1:0;
         private val k = size / 156f
         private val c = 78f
         private val outerR = 74f
-        private val innerR = 25f
-        private val hubR = 22f
+        private val innerR = 30f
+        private val hubR = 27f
 
         private val sectors = ArrayList<Path>()
         private val icons = ArrayList<Path>()
-        private val eraserFill: Path
-        private val eraserStroke: Path
+        private val eraserFill: Path = PathParser.createPathFromPathData("M9.132,6.404 L16.095,1.528 L21.831,9.72 L14.868,14.596 Z") // заливка ластика-сектора; переносится в сектор в init
+        private val hubIcon: Path // стрелка «переслать» в центре
         private val hub = RectF()
 
         private val iconColor = ColorUtils.blendARGB(pal.accent, 0xFF000000.toInt(), 0.25f)
@@ -725,16 +726,11 @@ return ok?1:0;
                 val ip = iconPath(i)
                 ip.transform(iconMatrix(mp[0] - 12f, mp[1] - 12f))
                 icons.add(ip)
+                if (i == ACT_ERASE) eraserFill.transform(iconMatrix(mp[0] - 12f, mp[1] - 12f))
             }
-            // ластик — рисунок 24×24 из res (vector), центр круга
-            val hm = iconMatrix(c - 12f, c - 12f)
-            eraserFill = PathParser.createPathFromPathData("M9.132,6.404 L16.095,1.528 L21.831,9.72 L14.868,14.596 Z")
-            eraserFill.transform(hm)
-            eraserStroke = Path()
-            eraserStroke.addPath(PathParser.createPathFromPathData("M2.169,11.28 L16.095,1.528 L21.831,9.72 L7.905,19.472 Z"))
-            eraserStroke.addPath(PathParser.createPathFromPathData("M9.132,6.404 L14.868,14.596"))
-            eraserStroke.addPath(PathParser.createPathFromPathData("M5,22 H19"))
-            eraserStroke.transform(hm)
+            // «Переслать в задачи» — стрелка 24×24 в центре круга
+            hubIcon = iconPath(ACT_FWD)
+            hubIcon.transform(iconMatrix(c - 12f, c - 12f))
             hub.set(pad + (c - hubR) * k, pad + (c - hubR) * k, pad + (c + hubR) * k, pad + (c + hubR) * k)
         }
 
@@ -774,6 +770,11 @@ return ok?1:0;
                     p.addPath(parse("M5 12h13"))
                     p.addPath(parse("M13 6l6 6-6 6"))
                 }
+                ACT_ERASE -> {
+                    p.addPath(parse("M2.169,11.28 L16.095,1.528 L21.831,9.72 L7.905,19.472 Z"))
+                    p.addPath(parse("M9.132,6.404 L14.868,14.596"))
+                    p.addPath(parse("M5,22 H19"))
+                }
                 else -> {
                     p.addPath(parse("M3.5 12a8.5 8.5 0 1 0 2.6-6.1"))
                     p.addPath(parse("M3.5 4v4.5H8"))
@@ -790,25 +791,29 @@ return ok?1:0;
                 fill.color = if (on && pressed == i) pressedColor else cardColor
                 canvas.drawPath(sectors[i], fill)
                 canvas.drawPath(sectors[i], edge)
-                canvas.drawPath(icons[i], ico)
+                if (i == ACT_ERASE) { // ластик: бледная заливка резинки и штрих чуть тоньше остальных значков
+                    canvas.drawPath(eraserFill, icoFill)
+                    canvas.drawPath(icons[i], icoEraser)
+                } else {
+                    canvas.drawPath(icons[i], ico)
+                }
                 canvas.restoreToCount(save)
             }
-            val onHub = enabled[ACT_ERASE]
+            val onHub = enabled[ACT_FWD]
             val save = if (onHub) canvas.save() else canvas.saveLayerAlpha(0f, 0f, width.toFloat(), height.toFloat(), 97)
-            fill.color = if (onHub && pressed == ACT_ERASE) pressedColor else hubColor
+            fill.color = if (onHub && pressed == ACT_FWD) pressedColor else hubColor
             canvas.drawCircle(hub.centerX(), hub.centerY(), hub.width() / 2f, fill)
             canvas.drawCircle(hub.centerX(), hub.centerY(), hub.width() / 2f, edge)
-            canvas.drawPath(eraserFill, icoFill)
-            canvas.drawPath(eraserStroke, icoEraser)
+            canvas.drawPath(hubIcon, ico)
             canvas.restoreToCount(save)
         }
 
-        /** Номер нажатой части: 0..4 — сектор, 5 — ластик, -1 — мимо (нажатие уходит странице под кругом). */
+        /** Номер нажатой части: 0..4 — сектор (3 — ластик), 5 — центральная «Переслать», -1 — мимо (нажатие уходит странице под кругом). */
         private fun hit(x: Float, y: Float): Int {
             val gx = (x - pad) / k - c
             val gy = (y - pad) / k - c
             val dist = hypot(gx, gy)
-            if (dist <= hubR + 2f) return ACT_ERASE
+            if (dist <= hubR + 2f) return ACT_FWD
             if (dist < innerR || dist > outerR) return -1
             var a = Math.toDegrees(atan2(gy, gx).toDouble()).toFloat()
             a = ((a + 126f) % 360f + 360f) % 360f
