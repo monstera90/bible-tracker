@@ -3,6 +3,7 @@ package com.app.lifetracker
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
 // Версия: 16.3 (18.11) — галочка «Отображать заметки» (`notes`, список `nts`: ключ, название и `times` — время суток заметки): карточка-группа «Заметки» ([QrPriority.NOTE_SLOT_KEY]) отдельно от карточки «Книги»; лицо заметки — картинка `<ключ>.png` от страницы; заметка «в своё время» встаёт в круг равных ([QrPriority.noteList]). Откат: QrWidgets.kt 16.2.
 // Версия: 16.2 (17.11) — галочка «Отображать книги» (`books`, список `bks`: ключ и название): карточка-группа «Книги» ([QrPriority.BOOK_SLOT_KEY]) с книгами виджета; лицо книги — картинка `<ключ>.png`, присланная страницей (обложка с выступом), нет её — запасная с названием; листание краями и точки — как у других групп, нажатие по центру ничего не делает. Откат: QrWidgets.kt 16.1.
+// Версия: 16.2 (19.11) — один таймер на всех виджетах: обычная карточка-таймер стопки (не группа «Таймеры») рисует кольцо с минутами ([QrTimerFace]), пока её таймер идёт или на паузе — запущен ли он в этом виджете, в другом или в приложении (общее хранилище [CardTimers], оба id карточки — [timerStateOf]); не запущен — прежнее лицо. Поля `tsec`/`tcol`/`thid` в `cards` (widgets.js 7.8); [isTimerCard] / [hasTimerCards] включают такие виджеты в перерисовку при старте/остановке ([onActivityChanged]), минутное обновление ([armCycle], [nextTimerFlip]) и пересчёт после сна ([refreshTimerFaces]). Откат: QrWidgets.kt 16.1.
 // Версия: 16.1 (17.11) — таймер в виджете больше не отстаёт после блокировки телефона: пока экран погашен, обработчик минутной перерисовки ([armCycle]) стоит на часах uptime, которые во сне не идут, и ничего не рисует; после разблокировки кольцо показывало старое число до ближайшего срока. Теперь включение экрана и разблокировка ([onScreenOn], [onUserPresent]) сразу перерисовывают виджеты с таймерами ([refreshTimerFaces]) и заново взводят точный срок по настенным часам. Откат: QrWidgets.kt 16.0.
 // Версия: 16.0 (17.11) — единый диспетчер движения стопки (ТЗ TZ_motion_dispatcher.md, [QrPriority.Motion]): слайд-шоу, круг равных/смена верха и возврат наверх больше не двигают стопку сами, а проходят через одно решение ([motionDecide]) — пока пользователь работает с карточками (нажатие: 60 с, смахивание: 120 с после последнего касания, каждое новое касание обнуляет срок), стопка стоит на месте, а порядок карточек замораживается ([order] + [freeze]), так что под рукой ничего не меняется; отложенное движение исполняется по сроку или при включении экрана. Действия самого пользователя (двойное нажатие, край группы, настройка виджета) и постановка виджета паузу обходят. Откат: QrWidgets.kt 15.3.
 // Версия: 15.3 (17.11) — нажатие у края карточки-группы («Привычки», «Будильники», «Таймеры»; [groupNav]) пересоздаёт адаптер стопки и закрепляет её на этой же карточке ([pinSlot]), а не только перезагружает данные: после листания привычек (2-я, 3-я) обратное смахивание к календарю оставляло StackView сдвинутым (карточка «Будильник» съезжала). Откат: QrWidgets.kt 15.2.
@@ -330,7 +331,8 @@ object QrWidgets {
                         val da = c.optJSONArray("days")
                         if (da != null) for (x in 0 until da.length()) da.optInt(x).let { if (it in 1..7) days.add(it) }
                         val after = c.optString("after", "none").let { if (it == "hide" || it == "end") it else "none" }
-                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40), alarmSpec = parseAlarmSpec(c.optJSONObject("alarmSpec")), prio = QrPriority.normPrio(c.optString("prio", "normal"))))
+                        val tsec = c.optInt("tsec", 0).coerceIn(0, 359_999) // обычная карточка-таймер: заданное время, цвет и «скрытый» — для кольца, пока таймер идёт (в любом виджете)
+                        cards.add(Card(key, c.optString("code", ""), c.optString("title", ""), live, times, days, after, color = if (tsec > 0) parseColor(c.optString("tcol", ""), QrTimerFace.COLOR) else QrBattery.DEFAULT_FACE, sec = tsec, hid = tsec > 0 && c.optBoolean("thid", false), habit = c.optBoolean("habit", false), alarmId = c.optString("alarm", "").take(40), alarmSpec = parseAlarmSpec(c.optJSONObject("alarmSpec")), prio = QrPriority.normPrio(c.optString("prio", "normal"))))
                         if (cards.size >= MAX_CARDS) break
                     }
                 }
@@ -636,6 +638,7 @@ object QrWidgets {
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
         if (c.dyn == "timer") return QrTimerFace.render(c.title, timerStateOf(ctx, c), c.sec, c.color) // таймер рисует оболочка: кольцо и минуты меняются сами
+        if (isTimerCard(c)) timerStateOf(ctx, c)?.let { return QrTimerFace.render(c.title, it, c.sec, c.color) } // обычная карточка-таймер: пока таймер идёт (запущен хоть в каком виджете, хоть в приложении) — кольцо, иначе прежнее лицо
         if (c.dyn == "event" || c.dyn == "task") dynBitmap(ctx, c)?.let { return it }
         if (c.alarmId.isNotEmpty() && CardAlarms.isArmed(ctx, c.alarmId)) { // будильник заведён — лицо с надписью «Заведён» (`<ключ>_on.png`)
             val on = File(imgDir(ctx), c.key + "_on.png")
@@ -664,6 +667,12 @@ object QrWidgets {
      * Состояние таймера карточки-таймера [c]: идущий важнее приостановленного, из двух идущих — тот, что кончится раньше. У таймера может быть два id в оболочке
      * (запущенный кнопкой карточки и запущенный по коду, [Card.live]). null — таймер не запущен.
      */
+    /** Обычная карточка-таймер стопки (не группа «Таймеры»): у неё есть заданное время и id таймера в оболочке. Идущий таймер рисуется кольцом на любом виджете, где она есть. */
+    fun isTimerCard(c: Card): Boolean = c.sec > 0 && c.dyn.isEmpty() && c.live.any { it.k == "timer" && it.id.isNotEmpty() }
+
+    /** В виджете есть обычные карточки-таймеры — ему нужны перерисовка при старте/остановке таймера и минутное обновление кольца. */
+    fun hasTimerCards(cfg: Cfg): Boolean = cfg.cards.any { isTimerCard(it) }
+
     fun timerStateOf(ctx: Context, c: Card): CardTimers.Face? {
         var best: CardTimers.Face? = null
         for (l in c.live) {
@@ -1636,7 +1645,7 @@ object QrWidgets {
         main.removeCallbacksAndMessages(refreshToken)
         main.postAtTime({
             try {
-                if (configs(app).any { it.relevance || it.timers }) refreshAll(app)
+                if (configs(app).any { it.relevance || it.timers || hasTimerCards(it) }) refreshAll(app)
             } catch (e: Exception) {
                 // обновление виджета не должно ронять приложение
             }
@@ -1761,7 +1770,7 @@ object QrWidgets {
      */
     private fun nextTimerFlip(app: Context, cfg: Cfg): Long {
         var at = Long.MAX_VALUE
-        for (c in QrPriority.timerList(cfg)) for (l in c.live) {
+        for (c in QrPriority.timerList(cfg) + cfg.cards.filter { isTimerCard(it) }) for (l in c.live) {
             if (l.k != "timer" || l.id.isEmpty()) continue
             val f = CardTimers.faceOf(app, l.id) ?: continue
             if (!f.running || f.leftMs <= 0L) continue
@@ -1782,11 +1791,11 @@ object QrWidgets {
         var at = Long.MAX_VALUE
         for (id in ids) {
             val cfg = cfgFor(app, id) ?: continue
-            if (!cfg.relevance && !cfg.timers) continue
+            if (!cfg.relevance && !cfg.timers && !hasTimerCards(cfg)) continue
             val res = plan(app, cfg)
             if (cfg.relevance) at = Math.min(at, res.cycleAt)
             at = Math.min(at, res.minuteAt) // пока идёт таймер, раз в минуту перерисовываем кольцо (при любом режиме)
-            if (cfg.timers) at = Math.min(at, nextTimerFlip(app, cfg)) // и точно в момент, когда у идущего таймера меняется число минут
+            if (cfg.timers || hasTimerCards(cfg)) at = Math.min(at, nextTimerFlip(app, cfg)) // и точно в момент, когда у идущего таймера меняется число минут
         }
         main.removeCallbacksAndMessages(cycleToken)
         if (at == Long.MAX_VALUE) return
@@ -2036,7 +2045,7 @@ object QrWidgets {
         for (id in ids) {
             if (id in skip) continue
             try {
-                if (cfgFor(app, id)?.timers == true) update(app, mgr, id)
+                if (cfgFor(app, id)?.let { it.timers || hasTimerCards(it) } == true) update(app, mgr, id)
             } catch (e: Exception) {
                 Log.e("QrMotion", "refreshTimerFaces: " + e)
             }
