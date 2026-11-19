@@ -1902,6 +1902,22 @@
   .reminder-bubble-repeat .rb-repeat-days{ font-size:calc(var(--rb, 32px) * .42); }
   .reminder-bubble-repeat svg{ width:calc(var(--rb, 32px) * .5); height:calc(var(--rb, 32px) * .5); }
   .reminder-bubble-date{ width:var(--rb, 32px); border-radius:50%; }
+  /* выбор виджета для книги/заметки (openAppBubbleGrid с opts.column): подпись сверху, под ней столбик вытянутых плашек с названием */
+  .app-confirm-bar.app-reminder-bar.app-bubble-list{
+    flex-direction:column;
+    align-items:stretch;
+    gap:8px;
+    max-width:calc(100vw - 16px);
+  }
+  .app-bubble-list .app-confirm-bar-text{ padding-left:0; text-align:left; }
+  .reminder-bubble-wide{
+    width:100%;
+    min-width:calc(var(--rb, 32px) * 3.2);
+    padding:0 calc(var(--rb, 32px) * .5);
+    border-radius:calc(var(--rb, 32px) / 2);
+    white-space:nowrap;
+    font-size:calc(var(--rb, 32px) * .42);
+  }
   .reminder-bubble-time{ min-width:calc(var(--rb, 32px) * 1.9); padding:0 calc(var(--rb, 32px) * .35); border-radius:calc(var(--rb, 32px) / 2); }
   .reminder-bubble.is-set{
     background:var(--wood);

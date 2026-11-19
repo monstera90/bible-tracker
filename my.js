@@ -14105,20 +14105,27 @@
     return getBookCoverUrl(hash).then(function(url){ return url ? { url: url, pos: getBookCoverPos(hash) } : null; });
   }
   function resyncWidgetsSoon(){ try{ if(window.WidgetsTab && window.WidgetsTab.scheduleSync) window.WidgetsTab.scheduleSync(2000); }catch(e){} }
+  // имя виджета на вытянутой плашке выбора: длиннее WG_PILL_MAX знаков — обрезается и ставится «...» (полное имя остаётся в title/aria-label)
+  var WG_PILL_MAX = 18;
+  function wgPillText(name){
+    var t = String(name || "");
+    return t.length > WG_PILL_MAX ? t.slice(0, WG_PILL_MAX).replace(/\s+$/, "") + "..." : t;
+  }
   function openBookWidgetPicker(it, anchorBtn){
     var W = ensureWidgets();
     if(!W || typeof W.widgetsForBook !== "function") return;
     var id = bookWidgetId(it), rows = W.widgetsForBook(id);
     if(!rows.length){ W.toast(W.noWidgetsText, 4200); return; }
     var items = rows.map(function(r){
+      var full = r.name || ("Виджет " + r.n);
       return {
         key: r.id,
-        svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
-        title: (r.name || ("Виджет " + r.n)) + (r.has ? " — книга уже здесь" : ""),
+        text: wgPillText(full),
+        title: full + (r.has ? " — книга уже здесь" : ""),
         current: r.has
       };
     });
-    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, it.name); }, { label: "Выберите виджет", text: "Виджет:" });
+    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, it.name); }, { label: "Выберите виджет", text: "Виджет:", column: true });
   }
 
   // ---------- «Заметки-карточки»: цвет карточки и показ заметки в виджете (кнопки долгого удержания, mdeditor.js) ----------
@@ -14198,14 +14205,15 @@
     var id = noteWidgetId(noteId), rows = W.widgetsForBook(id);
     if(!rows.length){ W.toast(W.noWidgetsText, 4200); return; }
     var items = rows.map(function(r){
+      var full = r.name || ("Виджет " + r.n);
       return {
         key: r.id,
-        svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
-        title: (r.name || ("Виджет " + r.n)) + (r.has ? " — заметка уже здесь" : ""),
+        text: wgPillText(full),
+        title: full + (r.has ? " — заметка уже здесь" : ""),
         current: r.has
       };
     });
-    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, name, "note"); }, { label: "Выберите виджет", text: "Виджет:" });
+    openAppBubbleGrid(anchorBtn, items, function(wid){ W.toggleBook(wid, id, name, "note"); }, { label: "Выберите виджет", text: "Виджет:", column: true });
   }
   // нажатие на карточку-заметку в виджете: заметка открывается в «Моих заметках»; заметки на холодном старте могут быть ещё не готовы — повторяем (до ~8 с)
   function openNoteFromWidget(widgetId){
@@ -26380,12 +26388,20 @@
     // размер пузыря — тот же замер, что у плашки удаления (до перехода в режим сетки)
     var bubblePx = measureFabBubblePx(box);
     if(bubblePx > 0) box.style.setProperty("--rb", bubblePx + "px");
+    // opts.column — столбик вытянутых плашек: одна строка = одна плашка с текстом it.text (вместо круглого пузыря с пиктограммой)
     var bubblesHtml = items.map(function(it){
       var t = escapeHtml(it.title || "");
+      if(opts.column){
+        return '<button type="button" class="reminder-bubble reminder-bubble-wide' + (it.current ? ' is-set' : '') +
+          '" data-key="' + escapeHtml(it.key) + '" title="' + t + '" aria-label="' + t + '">' + escapeHtml(it.text || "") + '</button>';
+      }
       return '<button type="button" class="reminder-bubble reminder-bubble-date' + (it.current ? ' is-set' : '') +
         '" data-key="' + escapeHtml(it.key) + '" title="' + t + '" aria-label="' + t + '">' + it.svg + '</button>';
     }).join("");
-    if(opts.text){
+    if(opts.column){
+      box.classList.add("app-bubble-list");
+      box.innerHTML = (opts.text ? '<span class="app-confirm-bar-text">' + escapeHtml(opts.text) + '</span>' : '') + bubblesHtml;
+    }else if(opts.text){
       box.innerHTML = '<span class="app-confirm-bar-text">' + escapeHtml(opts.text) + '</span><span class="app-confirm-bar-btns">' + bubblesHtml + '</span>';
     }else{
       box.classList.add("app-bubble-grid");
