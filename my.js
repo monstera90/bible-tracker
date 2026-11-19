@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.6 (19.11) — (1) `window.LTFullscreen` (`btnHtml`/`bind`): общая кнопка полноэкранного режима для модулей без деп-ов; кнопка слева от «домика» в нижнем ряду списка книг (все три режима), календаря, карточек, списка заметок; (2) режим «Ваши книги» переименован в «Мои книги» (кнопка режима, заголовок, справка). Откат: my.js 151.5.
    Версия: 151.5 (19.11) — (1) календарь: скрытые мероприятия, цвета, «показывать скрытые», «видимые поверх скрытых» и кнопка трекеров едут между устройствами (state `calhid:<id>`, `calpref:<имя>`; `calendarStore.prefGet/prefSet/prefImport/hiddenAll/hiddenSet/hiddenImport`, старые локальные значения переносятся один раз с t=1); после слияния с облаком `rerenderAllFromState` обновляет открытый календарь и колонки дня; (2) перенос задачи в «Комментарии» больше не вырезает ссылки на картинки `![[имя]]` — они содержимое. Откат: my.js 151.4.
    Версия: 151.4 (19.11) — скрепка в пустой новой задаче: пока открыт диалог выбора файла, `flushPendingTaskEdits` (его зовёт `flushPendingSyncNow` при сворачивании приложения системным диалогом) больше не удаляет пустую новую задачу (`freshTaskIds`) — раньше она пропадала до вставки и картинка не добавлялась; запасной путь: если строка всё же исчезла из DOM, ссылка `![[имя]]` дописывается в текст задачи. Новое имя виджета в выборе виджета для книги/заметки (`widgetsForBook` → `name`). Откат: my.js 151.3.
    Версия: 151.3 (18.11) — «Заметки-карточки»: время суток приоритета заметки (`getNoteCardTime`/`setNoteCardTime`, state `__noteTime:<id заметки>` = {c: "v1:m|d|e|a" (пусто после «v1:» — не выбрано), t}, ездит через облако и архив); значения утро/обед/вечер/целый день — те же `WINDOWS` из widgets.js (`timeWindows`). В `widgetNotesList` у заметки поле `time`; в `LTNoteCards` — `getTime`, `setTime`, `timeOptions`. Откат: my.js 151.2.
@@ -13652,7 +13653,7 @@
   function booksViewModeBtnInfo(mode){ // кнопка показывает режим, В КОТОРЫЙ переключит клик
     var next = nextBooksViewMode(mode);
     return next === "cards" ? {title: "Книги-карточки", icon: BOOKS_VIEW_CARDS_ICON_SVG}
-      : next === "cover" ? {title: "Ваши книги", icon: BOOKS_VIEW_COVER_ICON_SVG}
+      : next === "cover" ? {title: "Мои книги", icon: BOOKS_VIEW_COVER_ICON_SVG}
       : {title: "Список книг", icon: BOOKS_VIEW_LIST_ICON_SVG};
   }
   var BOOKS_SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
@@ -13682,11 +13683,13 @@
           modeBtn.icon +
         '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="booksBookmarksBtn" title="Закладки">' + READER_BOOKMARK_ICON_SVG + '</button>' +
+        window.LTFullscreen.btnHtml("booksFullscreenBtn") + // полноэкранный режим — сразу слева от «домика»
         '<button type="button" class="mdeditor-fab-btn" id="booksHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
       '</div>'
     );
   }
   function bindBooksFabRow(){
+    window.LTFullscreen.bind("booksFullscreenBtn");
     var bookmarksBtn = document.getElementById("booksBookmarksBtn");
     if(bookmarksBtn){
       bookmarksBtn.addEventListener("click", function(){ switchSettingsTab(BOOKMARKS_TAB_KEY); });
@@ -14241,15 +14244,15 @@
     }
 
     var html = '';
-    html += iconRow(BOOKS_VIEW_CARDS_ICON_SVG, "Переключает показ книг по кругу: «Книги-карточки» (по умолчанию: обложки размером с карточки виджета и QR-кодов, с цветным выступом снизу), «Ваши книги» (обычные обложки) и «Список книг» (имена файлов). Выбранный режим запоминается и переживает перезапуск и переустановку приложения.");
+    html += iconRow(BOOKS_VIEW_CARDS_ICON_SVG, "Переключает показ книг по кругу: «Книги-карточки» (по умолчанию: обложки размером с карточки виджета и QR-кодов, с цветным выступом снизу), «Мои книги» (обычные обложки) и «Список книг» (имена файлов). Выбранный режим запоминается и переживает перезапуск и переустановку приложения.");
     html += iconRow(ipkdDaySvg(), "ИПКД: открывает ежедневное чтение на сегодняшнем дне. На кнопке — сегодняшнее число месяца. Пока сегодня ИПКД не открывали, язычок «Мои книги» внизу залит цветом. Внутри ИПКД «домик» возвращает к списку книг.");
     html += iconRow(BOOKS_UPLOAD_ICON_SVG, "Загружает книгу с устройства — файл .fb2, .epub, .pdf или .zip (архив с книгами внутри). PDF открывается страницами, как в обычном просмотрщике (картинки и оригинальная вёрстка; масштаб — щипком или двойным касанием). Если страницами открыть не удалось, PDF читается как текст — тогда сканы без текстового слоя и зашифрованные файлы не читаются.");
-    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Ваши книги»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
+    html += iconRow(BOOKS_HIDE_TITLES_ICON_SVG, "Только в режимах «Книги-карточки» и «Мои книги»: скрывает подписи с названиями книг под обложками. Повторное нажатие возвращает подписи.");
     html += iconRow(BOOK_NOTE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке): открывает заметку с подчёркиваниями и иллюстрациями этой книги. Если заметка ещё не привязана — предлагает создать новую или выбрать уже существующую.");
     html += iconRow(SHARE_ICON_SVG, "Долгое нажатие на книге (в списке, на обложке или на карточке) раскрывает кнопки действий: «Поделиться» — системное меню Android с файлом книги; «Переименовать»; крестик «Удалить» — совсем, без возможности восстановить.");
     html += iconRow(BOOK_COVER_POS_ICON_SVG, "Только в режиме «Книги-карточки», в тех же раскрывающихся кнопках: «Положение обложки» — обложка книги обычно выше карточки, и здесь пальцем двигается вверх-вниз та часть, что видна в окошке карточки. Рядом — полоска всей обложки с рамкой видимой части; кнопка с прицелом возвращает положение по центру. Положение запоминается для каждой книги.");
     html += iconRow(BOOK_WIDGET_ICON_SVG, "Только в режиме «Книги-карточки», в тех же раскрывающихся кнопках: «Показывать в виджете» — откроется список ваших виджетов (число — номер виджета, закрашены те, где книга уже есть). Выберите виджет — книга появится в его карточке «Книги» (в настройках виджета включится галочка «Отображать книги»). Тот же выбор ещё раз убирает книгу из этого виджета.");
-    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Ваши книги», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
+    html += iconRow(BOOK_COVER_RESET_ICON_SVG, "Только в режимах «Книги-карточки» и «Мои книги», в тех же раскрывающихся кнопках: сбрасывает показ обложки конкретной книги — вместо неё останется заглушка, и приложение больше не будет пытаться подгрузить обложку заново. Повторное нажатие включает показ обложки обратно.");
 
     container.innerHTML =
       '<h3 class="common-tab-title">Книги — кнопки</h3>' +
@@ -14283,7 +14286,7 @@
     var listClass = coverMode ? gridClass : "mdeditor-list";
     if(hideTitlesOn) listClass += " hide-titles";
     var html = '<div class="mdeditor-tab books-list-tab">';
-    html += '<h3 class="common-tab-title">' + (cardsMode ? "Книги-карточки" : coverMode ? "Ваши книги" : "Список книг") + '</h3>';
+    html += '<h3 class="common-tab-title">' + (cardsMode ? "Книги-карточки" : coverMode ? "Мои книги" : "Список книг") + '</h3>';
     html += '<div class="' + listClass + '" id="booksList"></div>';
     html += '<div class="mdeditor-status" id="booksStatus"></div>';
     // Кнопка "Загрузить fb2, epub, pdf или zip книгу" переехала в нижний ряд — здесь остаётся только
@@ -22901,6 +22904,24 @@
   }
   // вход для горячих клавиш (hotkeys.js, Ctrl+F): та же функция, что у кнопки в нижней панели, поэтому из режима, включённого кнопкой, можно выйти клавишей и наоборот
   window.DisplayMode = { toggleFullscreen: handleFullscreenBtnTap, isFullscreen: getHideStatusBarEnabled };
+  // Общая кнопка полноэкранного режима для модулей, которым my.js не передаёт деп-ы (calendar.js, itemcards.js, mdeditor.js:
+  // списки): `btnHtml(id)` — разметка кнопки (ставится сразу слева от «домика»), `bind(id)` — после вставки разметки в DOM:
+  // иконка и подсказка по текущему состоянию, тап — тот же `handleFullscreenBtnTap`, что у остальных. Иконку при смене режима
+  // обновляет `applyReadingModeVisual` (все `.fullscreen-mode-btn`). Нет объекта (scan.html без приложения) — кнопки нет.
+  window.LTFullscreen = {
+    btnHtml: function(id){
+      return '<button type="button" class="mdeditor-fab-btn fullscreen-mode-btn" id="' + id + '" title="Полноэкранный режим"></button>';
+    },
+    bind: function(id){
+      var b = document.getElementById(id);
+      if(!b) return;
+      var on = getHideStatusBarEnabled();
+      b.innerHTML = on ? FULLSCREEN_MODE_ON_ICON_SVG : FULLSCREEN_MODE_ICON_SVG;
+      b.title = on ? "Выйти из полноэкранного режима" : "Полноэкранный режим";
+      b.addEventListener("mousedown", function(ev){ ev.preventDefault(); });
+      bindTapOrHold(b, handleFullscreenBtnTap, function(){});
+    }
+  };
   function setTaskText(id, text){
     var task = getTaskById(id);
     if(!task) return;

@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.6 (19.11) — в нижнем ряду слева от «домика» кнопка полноэкранного режима (`#itemCardsFullscreenBtn`, `window.LTFullscreen` из my.js; на странице scan.html без приложения её нет). Откат: itemcards.js 49.5.
    Версия: 49.5 (18.11) — подсказка палитры `colorPaletteHtml` для типа `notecard` (форма «Заметки-карточки», mdeditor.js: `LTNoteCards.paletteHtml` → `colorPalette("notecard", "noteCardColors")`): палитра та же, `CARD_PALETTE_COLS`. Откат: itemcards.js 49.4.
    Версия: 49.4 (18.11)
    Версия: 49.3 (17.11) — в нижнем ряду слева от воронки кнопка «Конструктор виджетов» (`#itemCardsWidgetsBtn`, `WIDGETS_ICON_SVG`, `deps.openWidgetsEditor`): конструктор больше не вкладка колеса. Откат: itemcards.js 49.2.
@@ -1107,6 +1108,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       (showPdf ? '<button type="button" class="mdeditor-fab-btn" id="itemCardsPdfBtn" title="PDF с QR-кодами для печати">' + PDF_ICON_SVG + '</button>' : '') +
       '<button type="button" class="mdeditor-fab-btn' + (dragMode ? ' pressed' : '') + '" id="itemCardsDragBtn" title="' + (dragMode ? 'Перетягивание включено: удерживайте карточку и перетащите на место другой (нажмите, чтобы выключить)' : 'Менять карточки местами') + '">' + DRAG_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsSizeBtn" title="Размер карточек">' + SIZE_ICON_SVG + '</button>' +
+      (window.LTFullscreen ? window.LTFullscreen.btnHtml("itemCardsFullscreenBtn") : '') + // полноэкранный режим — сразу слева от «домика» (в scan.html без приложения кнопки нет)
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHomeStub" tabindex="-1" aria-disabled="true">' + READER_HOME_ICON_SVG + '</button>' +
     '</div>';
     html += '<div class="fontsize-bar" id="itemCardsSizeBar">' +
@@ -1750,6 +1752,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     var range = document.getElementById("itemCardsSizeRange");
     var val = document.getElementById("itemCardsSizeVal");
     function showVal(){ val.textContent = Math.round(getScale() * 100) + "%"; }
+    if(window.LTFullscreen) window.LTFullscreen.bind("itemCardsFullscreenBtn");
     document.getElementById("itemCardsSizeBtn").addEventListener("click", function(){
       closeTypeMenu();
       var open = !bar.classList.contains("open");

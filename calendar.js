@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.6 (19.11) — в нижнем ряду («Список» и «Неделя») слева от «домика» кнопка полноэкранного режима (`#calendarFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: calendar.js 18.5.
    Версия: 18.5 (19.11) — настройки календаря (скрытые, цвета, переключатели) синхронизируются между устройствами через хранилище my.js (`prefGet/prefSet/hiddenAll/hiddenSet`, `importPrefs`, `refreshDayCols`); задачу в календаре можно сохранить с одной картинкой без названия (`IMG_ONLY_TITLE`). Откат: calendar.js 18.4.
    Версия: 18.4 (19.11) — скрытие повторяющегося мероприятия (поле «Отображение» в форме) спрашивает «Только это» / «Это и все последующие», как правка и удаление; признак по-прежнему только на устройстве и серию не меняет: `isHidden(id, at)`, `setHidden(id, on, at, following)` (запись {b, r} с правилами по дням/«с этого дня»; старый вид {id:1} читается как раньше), `hideOccurrence`; список/неделя/виджет проверяют скрытие по каждому повторению. Откат: calendar.js 18.3.
    Версия: 18.3 (16.11) — `CalendarTab.openTask(taskId)`: форма задачи календаря по id задачи (одно нажатие на карточку задачи в виджете, my.js `__ltOpenTaskForm`). Откат: calendar.js 18.2.
@@ -707,10 +708,12 @@
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarSettingsBtn" title="Настройки календаря">' + GEAR_ICON_SVG + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarAddBtn" title="Новое мероприятие">' + PLUS_ICON_SVG + '</button>' +
+      (window.LTFullscreen ? window.LTFullscreen.btnHtml("calendarFullscreenBtn") : '') + // полноэкранный режим — сразу слева от «домика»
       '<button type="button" class="mdeditor-fab-btn" id="calendarHomeBtn" title="Сегодня">' + HOME_ICON_SVG + '</button>' +
     '</div>';
   }
   function bindFab(){
+    if(window.LTFullscreen) window.LTFullscreen.bind("calendarFullscreenBtn");
     document.getElementById("calendarAddBtn").addEventListener("click", function(){ weekRememberScroll(); openForm(null); });
     document.getElementById("calendarColorBtn").addEventListener("click", function(){ weekRememberScroll(); openColors(); });
     document.getElementById("calendarSettingsBtn").addEventListener("click", function(){ weekRememberScroll(); openSettings(); });

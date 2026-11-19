@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.5 (19.11) — в нижнем ряду списка заметок (оба режима) слева от «домика» кнопка полноэкранного режима (`#mdNotesFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: mdeditor.js 25.4.
    Версия: 25.4 (18.11) — экран «Карточка заметки» (`openNoteCardForm`): над палитрой цвета выбор времени суток приоритета заметки — «Не выбрано», «Утро», «Обед», «Вечер», «Все время» (`timeChipsHtml`, `LTNoteCards.getTime/setTime/timeOptions`); выбор сохраняется сразу. Откат: mdeditor.js 25.3.
    Версия: 25.3 (18.11) — «Заметки-карточки»: долгое удержание заметки показывает четыре кнопки (2×2): «Показывать в виджете» (`LTNoteCards.pickWidget` — выбор виджета, как у книг-карточек), «Настройки карточки» (экран `openNoteCardForm` с палитрой цвета — той же, что у карточек QR, через `LTNoteCards.paletteHtml`), закладка и удаление. Цвет заметки (`LTNoteCards.getColor/setColor`, хранится в облаке) красит карточку (`--note-bg`/`--note-shade`) и её лицо в виджете. `isNotesReady` — для виджетов. Откат: mdeditor.js 25.2.
    Версия: 25.2 (18.11)
@@ -3742,6 +3743,7 @@ window.initMdEditorModule = function(deps){
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
     // «Закладки» — сразу слева от «домика» (экран со списком закладок заметок и книг)
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorBookmarksBtn" title="Закладки">' + BOOKMARK_ICON_SVG + '</button>';
+    if(window.LTFullscreen) html += window.LTFullscreen.btnHtml("mdNotesFullscreenBtn"); // полноэкранный режим — сразу слева от «домика»
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorHomeBtn" title="К списку заметок">' + HOME_ICON_SVG + '</button>';
     html += '</div>';
     if(cardsMode){
@@ -3755,6 +3757,7 @@ window.initMdEditorModule = function(deps){
     html += '</div>';
     container.innerHTML = html;
 
+    if(window.LTFullscreen) window.LTFullscreen.bind("mdNotesFullscreenBtn");
     var viewModeBtn = document.getElementById("mdNotesViewModeBtn");
     if(viewModeBtn){
       viewModeBtn.addEventListener("click", function(){
