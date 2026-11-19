@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.5 (19.11) — (1) календарь: скрытые мероприятия, цвета, «показывать скрытые», «видимые поверх скрытых» и кнопка трекеров едут между устройствами (state `calhid:<id>`, `calpref:<имя>`; `calendarStore.prefGet/prefSet/prefImport/hiddenAll/hiddenSet/hiddenImport`, старые локальные значения переносятся один раз с t=1); после слияния с облаком `rerenderAllFromState` обновляет открытый календарь и колонки дня; (2) перенос задачи в «Комментарии» больше не вырезает ссылки на картинки `![[имя]]` — они содержимое. Откат: my.js 151.4.
    Версия: 151.4 (19.11) — скрепка в пустой новой задаче: пока открыт диалог выбора файла, `flushPendingTaskEdits` (его зовёт `flushPendingSyncNow` при сворачивании приложения системным диалогом) больше не удаляет пустую новую задачу (`freshTaskIds`) — раньше она пропадала до вставки и картинка не добавлялась; запасной путь: если строка всё же исчезла из DOM, ссылка `![[имя]]` дописывается в текст задачи. Новое имя виджета в выборе виджета для книги/заметки (`widgetsForBook` → `name`). Откат: my.js 151.3.
    Версия: 151.3 (18.11) — «Заметки-карточки»: время суток приоритета заметки (`getNoteCardTime`/`setNoteCardTime`, state `__noteTime:<id заметки>` = {c: "v1:m|d|e|a" (пусто после «v1:» — не выбрано), t}, ездит через облако и архив); значения утро/обед/вечер/целый день — те же `WINDOWS` из widgets.js (`timeWindows`). В `widgetNotesList` у заметки поле `time`; в `LTNoteCards` — `getTime`, `setTime`, `timeOptions`. Откат: my.js 151.2.
    Версия: 151.2 (18.11) — «Заметки-карточки»: цвет карточки заметки (`getNoteCardColor`/`setNoteCardColor`, state `__noteColor:<id заметки>` = {c: "v1:#rrggbb", t}, ездит через облако и архив) и показ заметки в виджете (`openNoteWidgetPicker` — тот же выбор виджета, что у книг; заметка лежит в карточке «Книги», id `nt_…`, `noteWidgetId`). Для виджетов — `widgetNotesList` (деп `listNotes`); нажатие на заметку в виджете открывает её (`openNoteFromWidget` через `__ltOpenBook`). Всё это для mdeditor.js — через `window.LTNoteCards`. Палитра формы — та же, что у карточек QR (`ItemCards.colorPalette`). Откат: my.js 151.1.
@@ -3437,6 +3438,9 @@
       if(activeProjectPickerRerender) activeProjectPickerRerender();
       else if(TASK_TAB_IDS.hasOwnProperty(currentSettingsTab)) renderSettingsTabTask(currentSettingsTab);
     }
+    // календарь: чужие мероприятия и настройки (скрытые, цвета) пришли вместе с state — обновить открытый календарь и колонки дня в заметках
+    try{ rerenderCalendarIfOpen(); }catch(e){}
+    try{ if(window.CalendarTab && window.CalendarTab.refreshDayCols) window.CalendarTab.refreshDayCols(); }catch(e){}
   }
 
   // ===================== СБРОС ПРОГРЕССА =====================
@@ -10554,6 +10558,8 @@
   // • Цикл обмена с группой — внутри refreshJointTasksData (открытие приложения/вкладки, «online»): после общих задач
   //   вызывается refreshGroupEvents; вкладка «Календарь» зовёт его же при открытии. Чужие правки → handleGroupEventsRemoteChange.
   var CAL_EVENT_KEY_PREFIX = "ev:";
+  var CAL_PREF_PREFIX = "calpref:";   // настройки календаря (цвета, переключатели) — см. calendarStore.prefGet
+  var CAL_HIDDEN_PREFIX = "calhid:";  // скрытые мероприятия, по записи на мероприятие
   var GROUP_EVENTS_CACHE_KEY_PREFIX = "bibleGroupEventsCache_v1_";
   var groupEventsState = {};       // id -> {c, t}, расшифровано
   var groupEventsLoadedFor = null; // groupId, под который сейчас загружен кэш выше
@@ -10736,6 +10742,51 @@
       delete data.id;
       data.cal = data.cal === "shared" ? "shared" : "personal";
       calStatePut(ev.id, data);
+    },
+    // настройки календаря (calendar.js): "calpref:<имя>" = {c, t}; скрытые мероприятия — по записи на мероприятие "calhid:<id>" (c:null — показано).
+    // Едут через облако вместе с state; перенос старых локальных значений пишется с t=1, чтобы любая настоящая правка была главнее.
+    prefGet: function(name){
+      var r = state[CAL_PREF_PREFIX + name];
+      return (r && r.c !== undefined && r.c !== null) ? calEventClone(r.c) : undefined;
+    },
+    prefSet: function(name, value){
+      var key = CAL_PREF_PREFIX + name, prev = state[key];
+      if(prev && prev.c !== undefined && JSON.stringify(prev.c) === JSON.stringify(value)) return;
+      state[key] = {c: calEventClone(value), t: calNextT(prev)};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    prefImport: function(name, value){
+      var key = CAL_PREF_PREFIX + name;
+      if(state[key]) return;
+      state[key] = {c: calEventClone(value), t: 1};
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    hiddenAll: function(){
+      var out = {};
+      Object.keys(state).forEach(function(k){
+        if(k.indexOf(CAL_HIDDEN_PREFIX) !== 0) return;
+        var r = state[k];
+        if(!r || r.c === null || r.c === undefined) return;
+        out[k.slice(CAL_HIDDEN_PREFIX.length)] = calEventClone(r.c);
+      });
+      return out;
+    },
+    hiddenSet: function(id, val){
+      var key = CAL_HIDDEN_PREFIX + id, prev = state[key], had = !!(prev && prev.c !== null && prev.c !== undefined);
+      if(val === null || val === undefined){
+        if(!had) return;
+        state[key] = {c: null, t: calNextT(prev)};
+      } else {
+        if(had && JSON.stringify(prev.c) === JSON.stringify(val)) return;
+        state[key] = {c: calEventClone(val), t: calNextT(prev)};
+      }
+      saveLocalStateNow(); scheduleCloudPush();
+    },
+    hiddenImport: function(id, val){
+      var key = CAL_HIDDEN_PREFIX + id;
+      if(state[key]) return;
+      state[key] = {c: calEventClone(val), t: 1};
+      saveLocalStateNow(); scheduleCloudPush();
     }
   };
   // метка записи: строго больше прежней (часы устройств, правка в ту же миллисекунду)
@@ -23692,7 +23743,7 @@
   function convertTaskToComment(taskId){
     var task = getTaskById(taskId);
     if(!task) return;
-    var text = (task.c.text || "").replace(TASK_TO_COMMENT_IMG_RE, "").trim();
+    var text = (task.c.text || "").trim(); // ссылки на картинки «![[имя]]» — тоже содержимое: остаются в комментарии (файл не удаляется, пока на него есть ссылка)
     var id = createComment();
     setCommentText(id, text);
     deleteTaskPermanently(taskId);

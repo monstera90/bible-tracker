@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.5 (19.11) — настройки календаря (скрытые, цвета, переключатели) синхронизируются между устройствами через хранилище my.js (`prefGet/prefSet/hiddenAll/hiddenSet`, `importPrefs`, `refreshDayCols`); задачу в календаре можно сохранить с одной картинкой без названия (`IMG_ONLY_TITLE`). Откат: calendar.js 18.4.
    Версия: 18.4 (19.11) — скрытие повторяющегося мероприятия (поле «Отображение» в форме) спрашивает «Только это» / «Это и все последующие», как правка и удаление; признак по-прежнему только на устройстве и серию не меняет: `isHidden(id, at)`, `setHidden(id, on, at, following)` (запись {b, r} с правилами по дням/«с этого дня»; старый вид {id:1} читается как раньше), `hideOccurrence`; список/неделя/виджет проверяют скрытие по каждому повторению. Откат: calendar.js 18.3.
    Версия: 18.3 (16.11) — `CalendarTab.openTask(taskId)`: форма задачи календаря по id задачи (одно нажатие на карточку задачи в виджете, my.js `__ltOpenTaskForm`). Откат: calendar.js 18.2.
    Версия: 18.2 (14.11) — `CalendarTab.openEvent(id, at)`: форма конкретного мероприятия по нажатию на карточку события в виджете (my.js `__ltOpenCalendarEvent`).
@@ -178,6 +179,54 @@
   // Новый трекер = ещё один элемент TRACKER_SOURCES: get() отдаёт [{start, end, sub}] (мс), label — название занятия.
   var TRK_KEY = "calendarTrackers_v1";
   var trackersOn = false;
+  // ---------- настройки календаря: едут между устройствами вместе с мероприятиями ----------
+  // Скрытие мероприятий, цвета, «показывать скрытые», «видимые поверх скрытых» и кнопка трекеров занятий лежат в хранилище my.js
+  // (state: "calhid:<id>" и "calpref:<имя>" = {c, t}; last-write-wins, в облако уходят тем же doCloudSync). Без хранилища — localStorage.
+  // localStorage остаётся зеркалом на устройстве и источником разового переноса прежних настроек (importPrefs).
+  // Режим «Список/Неделя», масштаб часа и календарь последнего мероприятия — вид самого экрана, они остаются на устройстве.
+  var PREFS_IMPORTED_KEY = "calendarPrefsImported_v1";
+  var IMG_ONLY_TITLE = "Картинка"; // название записи календаря у задачи, в тексте которой только картинка
+  function prefStoreGet(name){
+    if(!STORE || !STORE.prefGet) return undefined;
+    try{ return STORE.prefGet(name); }catch(e){ return undefined; }
+  }
+  function prefStoreSet(name, value){
+    if(!STORE || !STORE.prefSet) return;
+    try{ STORE.prefSet(name, value); }catch(e){}
+  }
+  function flagGet(name, lsKey){
+    var v = prefStoreGet(name);
+    if(v === 0 || v === 1) return v === 1;
+    try{ return localStorage.getItem(lsKey) === "1"; }catch(e){ return false; }
+  }
+  function flagSet(name, lsKey, on){
+    try{ localStorage.setItem(lsKey, on ? "1" : "0"); }catch(e){}
+    prefStoreSet(name, on ? 1 : 0);
+  }
+  // прежние настройки этого устройства — в общее хранилище, один раз; запись переноса самая «старая» (t=1), любая настоящая правка с другого устройства главнее
+  function importPrefs(){
+    if(!STORE || !STORE.prefImport) return;
+    try{ if(localStorage.getItem(PREFS_IMPORTED_KEY)) return; }catch(e){ return; }
+    try{
+      var h = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "null");
+      if(h && typeof h === "object" && !Array.isArray(h) && STORE.hiddenImport) Object.keys(h).forEach(function(id){ STORE.hiddenImport(id, h[id]); });
+      var col = JSON.parse(localStorage.getItem(COLORS_KEY) || "null");
+      if(col && typeof col === "object" && !Array.isArray(col)) STORE.prefImport("colors", col);
+      [["showHidden", SHOW_HIDDEN_KEY], ["visOver", VIS_OVER_KEY], ["trackers", TRK_KEY]].forEach(function(p){
+        var v = localStorage.getItem(p[1]);
+        if(v === "1" || v === "0") STORE.prefImport(p[0], v === "1" ? 1 : 0);
+      });
+    }catch(e){}
+    try{ localStorage.setItem(PREFS_IMPORTED_KEY, "1"); }catch(e){}
+  }
+  // подпись настроек из хранилища: чужие правки (пришли с облака) видны по её смене
+  function prefsSig(){
+    if(!STORE || !STORE.prefGet) return "";
+    var o = { c: prefStoreGet("colors"), s: prefStoreGet("showHidden"), v: prefStoreGet("visOver"), t: prefStoreGet("trackers"), h: null };
+    try{ o.h = STORE.hiddenAll ? STORE.hiddenAll() : null; }catch(e){}
+    return JSON.stringify(o);
+  }
+  function reloadPrefs(){ hiddenIds = null; loadTrackersOn(); loadColors(); applyUserColors(); }
   var POMO_CAL_MIN_MS = 20 * 60 * 1000; // рабочие отрезки помодоро короче 20 минут в календарь не попадают (в «Истории» и трекере экранов они остаются)
   var WORKOUT_KIND_LABELS = { run: "Бег", walk: "Ходьба", bike: "Велосипед" };
   var TRACKER_SOURCES = [
@@ -211,19 +260,26 @@
       });
     } }
   ];
-  function loadTrackersOn(){ try{ trackersOn = localStorage.getItem(TRK_KEY) === "1"; }catch(e){ trackersOn = false; } }
-  function saveTrackersOn(){ try{ localStorage.setItem(TRK_KEY, trackersOn ? "1" : "0"); }catch(e){} }
-  // ---------- цвета календарей (личный, общий, трекеры занятий): выбор пользователя, на устройстве ----------
+  function loadTrackersOn(){ trackersOn = flagGet("trackers", TRK_KEY); }
+  function saveTrackersOn(){ flagSet("trackers", TRK_KEY, trackersOn); }
+  // ---------- цвета календарей (личный, общий, трекеры занятий): выбор пользователя, общий для устройств ----------
   var COLORS_KEY = "calendarColors_v1";
-  // ---------- скрытые мероприятия: только на этом устройстве ----------
+  // ---------- скрытые мероприятия: общие для устройств (state "calhid:<id>", у каждого мероприятия своя запись) ----------
   var HIDDEN_KEY = "calendarHiddenIds_v1";
   var SHOW_HIDDEN_KEY = "calendarShowHidden_v1";
   var hiddenIds = null;
+  var hiddenSnap = {}; // что сейчас лежит в хранилище: saveHidden отдаёт ему только отличия
   function loadHidden(){
     if(hiddenIds) return hiddenIds;
     var o = null;
-    try{ o = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "null"); }catch(e){ o = null; }
+    if(STORE && STORE.hiddenAll){
+      try{ o = STORE.hiddenAll(); }catch(e){ o = null; }
+    }
+    if(!o){
+      try{ o = JSON.parse(localStorage.getItem(HIDDEN_KEY) || "null"); }catch(e){ o = null; }
+    }
     hiddenIds = (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    hiddenSnap = JSON.parse(JSON.stringify(hiddenIds));
     return hiddenIds;
   }
   // Признак скрытия: 1 — вся серия (или обычное мероприятие); {b, r} — серия с исключениями: b — состояние по умолчанию (0/1), r — правила
@@ -242,7 +298,20 @@
     }
     return v;
   }
-  function saveHidden(){ try{ localStorage.setItem(HIDDEN_KEY, JSON.stringify(loadHidden())); }catch(e){} }
+  function saveHidden(){
+    var cur = loadHidden();
+    try{ localStorage.setItem(HIDDEN_KEY, JSON.stringify(cur)); }catch(e){}
+    if(!STORE || !STORE.hiddenSet) return;
+    var ids = {};
+    Object.keys(cur).forEach(function(k){ ids[k] = 1; });
+    Object.keys(hiddenSnap).forEach(function(k){ ids[k] = 1; });
+    Object.keys(ids).forEach(function(id){
+      var has = Object.prototype.hasOwnProperty.call(cur, id), had = Object.prototype.hasOwnProperty.call(hiddenSnap, id);
+      if(has && had && JSON.stringify(cur[id]) === JSON.stringify(hiddenSnap[id])) return;
+      try{ STORE.hiddenSet(id, has ? cur[id] : null); }catch(e){}
+    });
+    hiddenSnap = JSON.parse(JSON.stringify(cur));
+  }
   // без `at` — всё мероприятие целиком (как раньше); с `at` — только это повторение (following=false) или это и все последующие (following=true)
   function setHidden(id, on, at, following){
     var h = loadHidden();
@@ -274,16 +343,16 @@
     if(following && at <= ev.start) setHidden(ev.id, on);
     else setHidden(ev.id, on, at, following);
   }
-  function showHidden(){ try{ return localStorage.getItem(SHOW_HIDDEN_KEY) === "1"; }catch(e){ return false; } }
-  function saveShowHidden(v){ try{ localStorage.setItem(SHOW_HIDDEN_KEY, v ? "1" : "0"); }catch(e){} }
+  function showHidden(){ return flagGet("showHidden", SHOW_HIDDEN_KEY); }
+  function saveShowHidden(v){ flagSet("showHidden", SHOW_HIDDEN_KEY, v); }
   // видно ли мероприятие в списке/неделе
   function visibleEv(ev, at){ if(isTask(ev) && taskStateOf(ev) !== "open") return false; return showHidden() || !isHidden(ev.id, at); }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
-  // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): на устройстве ----------
+  // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): общие для устройств ----------
   var VIS_OVER_KEY = "calendarVisOverHidden_v1";
-  function visOverHidden(){ try{ return localStorage.getItem(VIS_OVER_KEY) === "1"; }catch(e){ return false; } }
-  function saveVisOverHidden(v){ try{ localStorage.setItem(VIS_OVER_KEY, v ? "1" : "0"); }catch(e){} }
+  function visOverHidden(){ return flagGet("visOver", VIS_OVER_KEY); }
+  function saveVisOverHidden(v){ flagSet("visOver", VIS_OVER_KEY, v); }
   var GEAR_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<circle cx="12" cy="12" r="3"></circle>' +
@@ -305,14 +374,20 @@
   var COLORS_PASTEL = ["", "#ffcba4", "#fff3a3", "#9cdb4e", "#40d5b5", "#a9ccf4", "#d4b8f0", "#f8bbd9"];
   var userColors = { personal: "", shared: "", task: "", trk: "", hid: "", past: "" };
   function loadColors(){
-    var o = null;
-    try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
+    var o = prefStoreGet("colors");
+    if(!o || typeof o !== "object"){
+      o = null;
+      try{ o = JSON.parse(localStorage.getItem(COLORS_KEY) || "null"); }catch(e){ o = null; }
+    }
     COLOR_ITEMS.forEach(function(it){
       var v = o && typeof o[it.key] === "string" ? o[it.key] : "";
       userColors[it.key] = /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : "";
     });
   }
-  function saveColors(){ try{ localStorage.setItem(COLORS_KEY, JSON.stringify(userColors)); }catch(e){} }
+  function saveColors(){
+    try{ localStorage.setItem(COLORS_KEY, JSON.stringify(userColors)); }catch(e){}
+    prefStoreSet("colors", JSON.parse(JSON.stringify(userColors)));
+  }
   function applyUserColors(){
     var root = document.documentElement;
     if(!root || !root.style) return;
@@ -373,6 +448,8 @@
   }
 
   var weekRenderedAt = 0;      // когда нарисована неделя: от этого дня считается красная линия «сейчас»
+  var dayColSig = null;         // то же для колонок дня в заметках (refreshDayCols)
+  function sigNow(){ return JSON.stringify(load()) + "|" + prefsSig(); }
   var lastSig = null;          // подпись списка при последней отрисовке/обновлении (refresh не перерисовывает без перемен)
   // задачи календаря: провайдер от my.js (setTasks): add(title)→id, state(id)→"open"|"done"|"gone", rename(id,title), remove(id)
   var TASKS = null;
@@ -430,6 +507,7 @@
   // Старые мероприятия из localStorage — в провайдер, один раз (без перезаписи уже существующих id)
   function importLegacy(){
     if(!STORE) return;
+    importPrefs();
     try{ if(localStorage.getItem(IMPORTED_KEY)) return; }catch(e){ return; }
     var old = legacyLoad();
     if(old.length){
@@ -609,6 +687,7 @@
   // ---------- нижний ряд и режимы ----------
   function clampHour(v){ return Math.max(HOUR_MIN, Math.min(HOUR_MAX, v)); }
   function loadMode(){
+    hiddenIds = null; // скрытые могли прийти с другого устройства
     loadTrackersOn();
     loadColors();
     applyUserColors();
@@ -1072,7 +1151,7 @@
     if(!host) return null;
     opts = opts || {};
     try{ if(window.__ltEnsureCalendarStore) window.__ltEnsureCalendarStore(); }catch(e){} // хранилище и трекеры готовит my.js (до открытия вкладки «Календарь» их нет)
-    importLegacy(); loadTrackersOn(); loadColors(); applyUserColors(); loadZoom();
+    importLegacy(); hiddenIds = null; loadTrackersOn(); loadColors(); applyUserColors(); loadZoom(); dayColSig = sigNow();
     var stale = host.querySelector(".cal-daycol");
     if(stale && stale.parentNode) stale.parentNode.removeChild(stale);
     var day = startOfDay(opts.day || Date.now());
@@ -1460,7 +1539,7 @@
     if(ev && isTask(ev) && TASKS && TASKS.get){ try{ taskInfo = TASKS.get(ev.taskId); }catch(e){ taskInfo = null; } }
     if(taskInfo){
       imgs = taskInfo.images.slice();
-      if(taskInfo.title) titleEl.value = taskInfo.title; // название берётся из самой задачи (его могли поправить на вкладке задач)
+      titleEl.value = taskInfo.title || ""; // название берётся из самой задачи (его могли поправить на вкладке задач)
     }
     var imgsStart = imgs.join("\n");
     var canAttach = !!(TASKS && TASKS.pickImage) && !readOnly;
@@ -1535,13 +1614,13 @@
       var hideNow = visEl.value === "hide";
       if(taskMode && !readOnly){
         var ttl = titleEl.value.replace(/^\s+|\s+$/g, "");
-        if(!ttl) return fail("Введите название задачи");
+        if(!ttl && !imgs.length) return fail("Введите название или прикрепите картинку"); // ссылка на картинку — тоже содержимое задачи
         var ts = parseLocal(sd.value, st.value);
         if(isNaN(ts)) return fail("Укажите дату и время");
         if(!TASKS) return fail("Задачи недоступны");
         var tl = load(), trec;
         if(ev){
-          trec = { id: ev.id, title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: ev.taskId, updatedAt: Date.now() };
+          trec = { id: ev.id, title: ttl || IMG_ONLY_TITLE, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: ev.taskId, updatedAt: Date.now() };
           var curTitle = taskInfo ? taskInfo.title : ev.title;
           if(ttl !== curTitle || imgs.join("\n") !== imgsStart){
             try{ if(TASKS.update) TASKS.update(ev.taskId, ttl, imgs); else TASKS.rename(ev.taskId, ttl); }catch(e){}
@@ -1550,7 +1629,7 @@
           var tid = null;
           try{ tid = TASKS.add(ttl, imgs); }catch(e){ tid = null; }
           if(!tid) return fail("Не удалось создать задачу");
-          trec = { id: newId(), title: ttl, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: tid, updatedAt: Date.now() };
+          trec = { id: newId(), title: ttl || IMG_ONLY_TITLE, start: ts, end: ts, repeat: "", cal: "personal", kind: "task", taskId: tid, updatedAt: Date.now() };
         }
         if(!replaceInList(tl, trec)) tl.push(trec);
         save(tl);
@@ -1654,7 +1733,7 @@
     COLOR_ITEMS.forEach(function(it){ draft[it.key] = userColors[it.key]; });
     var html = '<div class="mdeditor-tab item-card-form" id="calendarColorForm">' +
       '<h3 class="common-tab-title">Цвета календаря</h3>' +
-      '<div class="item-form-hint">Цвет каждого календаря и трекеров занятий — необязательно. Пустой квадрат — цвет по умолчанию (у отдельного трекера — общий цвет трекеров). Выбор действует на этом устройстве.</div>';
+      '<div class="item-form-hint">Цвет каждого календаря и трекеров занятий — необязательно. Пустой квадрат — цвет по умолчанию (у отдельного трекера — общий цвет трекеров). Выбор общий для всех ваших устройств.</div>';
     COLOR_ITEMS.forEach(function(it){
       html += '<div class="cal-field"><div class="item-form-hint">' + esc(it.label) + '</div>' + paletteHtml(it.key) + '</div>';
     });
@@ -1702,7 +1781,7 @@
     var html = '<div class="mdeditor-tab item-card-form" id="calendarSettingsForm">' +
       '<h3 class="common-tab-title">Настройки календаря</h3>' +
       '<label style="display:flex;align-items:center;"><input type="checkbox" id="calSetVisOver"' + (visOverHidden() ? ' checked' : '') + ' style="width:22px;height:22px;flex-shrink:0;margin:0 10px 0 0;accent-color:var(--wood);"><span>Видимые мероприятия всегда перекрывают скрытые</span></label>' +
-      '<div class="item-form-hint">Работает в режиме «Неделя», когда показаны скрытые мероприятия: видимые рисуются поверх скрытых, не делят с ними место на колонки и не сужаются. Выбор действует на этом устройстве.</div>' +
+      '<div class="item-form-hint">Работает в режиме «Неделя», когда показаны скрытые мероприятия: видимые рисуются поверх скрытых, не делят с ними место на колонки и не сужаются. Выбор общий для всех ваших устройств.</div>' +
       '<div class="item-form-buttons">' +
         '<button type="button" class="workbooks-run-btn" id="calSetSave">Сохранить</button>' +
         '<button type="button" class="workbooks-run-btn" id="calSetCancel">Отмена</button>' +
@@ -1724,18 +1803,28 @@
     setTasks: function(t){ TASKS = t || null; },
     // my.js отдаёт открытие сегодняшней заметки (тап по сегодняшней дате в шапке недели)
     setOpenToday: function(fn){ OPEN_TODAY = typeof fn === "function" ? fn : null; },
-    render: function(){ if(extForm) closeExtForm(); importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = JSON.stringify(load()); renderMain(); },
+    render: function(){ if(extForm) closeExtForm(); importLegacy(); loadMode(); weekStart = null; weekScrollKeep = null; lastSig = sigNow(); renderMain(); },
     // данные могли измениться снаружи (пришли чужие правки группы): перерисовать текущий экран, если список изменился.
     // Открытую форму не трогаем; прокрутка сохраняется. my.js зовёт только когда вкладка «Календарь» на экране.
     // возврат в приложение (оболочка зовёт из my.js `__ltOnAppResume`): красная линия и прошедшие события — по текущему времени
     tick: function(){ weekNowTick(); dayCols.slice().forEach(function(c){ c.tick(); }); },
+    // данные календаря пришли с другого устройства (my.js после слияния с облаком): перерисовать колонки дня в заметках, если что-то изменилось
+    refreshDayCols: function(){
+      if(!dayCols.length || extForm) return;
+      var sig = sigNow();
+      if(sig === dayColSig) return;
+      dayColSig = sig;
+      reloadPrefs();
+      dayCols.slice().forEach(function(col){ try{ col.refresh(); }catch(e){} });
+    },
     // колонка одного дня (по умолчанию сегодня) внутри host — для ежедневной заметки, см. шапку; возвращает {tick, destroy, refresh}
     mountDayColumn: function(host, opts){ return mountDayColumn(host, opts); },
     refresh: function(){
       if(screen === "form") return;
-      var sig = JSON.stringify(load());
+      var sig = sigNow();
       if(sig === lastSig) return;
       lastSig = sig;
+      reloadPrefs(); // скрытые, цвета и переключатели могли прийти с другого устройства
       var c = container(), top = c ? c.scrollTop : 0;
       if(mode === "week") weekScrollKeep = top;
       renderMain();
