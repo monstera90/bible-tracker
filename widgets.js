@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.7 (19.11) — своё имя виджета: поле под заголовком формы (`wgNameInput`, `name`, до 40 знаков; пусто — «Виджет N»); имя видно в списке виджетов, в выборе виджета для книги/заметки (`widgetsForBook` отдаёт `name`) и уходит оболочке полем `name`. Откат: widgets.js 7.6.
    Версия: 7.6 (19.11) — ТОЛЬКО ДИАГНОСТИКА: кнопка «▶ Виджеты: журнал оболочки» в панели отладки (`diagReport`). Откат: widgets.js 7.5.
    Версия: 7.5 (18.11) — «Отображать книги» и «Отображать заметки» — две отдельные галочки и две отдельные карточки в стопке: у виджета `books`/`bookList` (только книги) и `notes`/`noteList` (только заметки, id с приставкой `nt_`); в оболочку уходят `bks` и `nts` (у заметки — `times`: время суток приоритета, которое задано на экране «Заметки-карточки», `LTNoteCards.getTime`). Старые виджеты, где заметки лежали в `bookList`, при загрузке разносятся по двум спискам (`splitNotes`). Откат: widgets.js 7.4.
    Версия: 7.4 (18.11) — заметки-карточки в карточке «Книги»: заметку можно добавить в виджет с экрана «Заметки-карточки» (долгое нажатие → кнопка с виджетом; `toggleBook(…, "note")`). Заметка лежит в том же списке `bookList`, id с приставкой `nt_` (`isNoteId`), лицо рисует `noteFacePng` (цвет заметки, значок, название); список заметок для лиц — деп `listNotes`. Нажатие на карточку открывает заметку. Откат: widgets.js 7.3.
@@ -43,6 +44,7 @@
   var KEY = "qrWidgets_v1";
   var PICK_FILTER_KEY = "widgetsPickFilter_v1";
   var MAX_CARDS = 50;
+  var WNAME_MAX = 40; // длина своего имени виджета
   var FACE_PX = 480; // ширина картинки лица для оболочки
   var FACE_BODY = 1.02; // высота тела карточки = ширина × FACE_BODY (то же — CARD_ASPECT в itemcards.js и FACE_BODY/FACE_SHADE в QrWidgets.kt)
   var FACE_SHADE = 0.04; // цветной выступ снизу, доля ширины
@@ -132,6 +134,7 @@ var DAY_MS = 86400000;
       o.list.forEach(function(w){
         w.cards = w.cards.filter(function(c){ return c && c.cid; }).slice(0, MAX_CARDS);
         w.cards.forEach(function(c){ c.times = Array.isArray(c.times) ? c.times : []; c.days = Array.isArray(c.days) ? c.days : []; c.after = normAfter(c.after); c.prio = normPrio(c.prio); });
+        w.name = (typeof w.name === "string") ? w.name.replace(/^\s+|\s+$/g, "").slice(0, WNAME_MAX) : "";
         w.rotateMin = Math.max(1, Math.min(720, w.rotateMin | 0 || 5));
         w.rotate = !!w.rotate; w.relevance = !!w.relevance && !w.rotate; w.battery = !!w.battery;
         if(typeof w.batColor !== "string") w.batColor = w.battery ? LEGACY_BAT_COLOR : "";
@@ -212,7 +215,7 @@ var DAY_MS = 86400000;
     function save(){ try{ localStorage.setItem(KEY, JSON.stringify(data)); }catch(e){} }
     function changed(){ save(); scheduleSync(600); }
     function widgetById(id){ for(var i = 0; i < data.list.length; i++) if(data.list[i].id === id) return data.list[i]; return null; }
-    function wname(w){ return "Виджет " + w.n; }
+    function wname(w){ var c = (w && typeof w.name === "string") ? w.name.replace(/^\s+|\s+$/g, "") : ""; return c || ("Виджет " + w.n); } // своё имя (`name`, до WNAME_MAX знаков) или «Виджет N»
     function bridge(){ var b = window.LifeTrackerNative; return (b && typeof b.widgetsSync === "function") ? b : null; }
     function nativeState(){
       var b = bridge(); if(!b) return null;
@@ -666,7 +669,7 @@ var DAY_MS = 86400000;
     }
     // экран «Книги-карточки» (my.js): список виджетов для выбранной книги — [{id, n, has}], has — книга уже в этом виджете
     function widgetsForBook(bookId){
-      return data.list.map(function(w){ return { id: w.id, n: w.n, has: bookIndex(w, bookId) >= 0 }; });
+      return data.list.map(function(w){ return { id: w.id, n: w.n, name: wname(w), has: bookIndex(w, bookId) >= 0 }; });
     }
     // добавить книгу (или заметку) в виджет / убрать из него (повторный выбор того же виджета): включает галочку «Отображать книги» (заметке — «Отображать заметки»); тост — здесь
     function toggleBook(widgetId, bookId, name, kind){
@@ -804,6 +807,8 @@ var DAY_MS = 86400000;
         ".wg-row-ico{flex:0 0 auto;width:42px;height:42px;border-radius:10px;margin-right:12px;}" +
         ".wg-row-txt{flex:1 1 auto;min-width:0;}" +
         ".wg-row-name{font-weight:700;font-size:16px;}" +
+        ".wg-name{margin:0 2px 12px;}" +
+        ".wg-name input{width:100%;box-sizing:border-box;font-size:16px;}" +
         ".wg-row-sub{font-size:13px;color:var(--ink-soft);}" +
         ".wg-empty{text-align:center;color:var(--ink-soft);padding:40px 16px;font-size:15px;}" +
         ".wg-slots{display:flex;flex-wrap:wrap;justify-content:center;margin:0 -6px 8px;}" +
@@ -1147,7 +1152,9 @@ var DAY_MS = 86400000;
       return h + '</div>';
     }
     function formHtml(a){
-      var w = a.w, html = '<h3 class="common-tab-title">' + esc(wname(w)) + '</h3><div class="wg-slots">';
+      var w = a.w, html = '<h3 class="common-tab-title" id="wgFormTitle">' + esc(wname(w)) + '</h3>' +
+        '<div class="wg-name"><input type="text" class="mdeditor-cleanup-input" id="wgNameInput" maxlength="' + WNAME_MAX + '" placeholder="Виджет ' + w.n + '" value="' + esc(w.name || "") + '" autocomplete="off" aria-label="Название виджета" title="Название виджета"></div>' +
+        '<div class="wg-slots">';
       for(var i = 0; i < w.cards.length; i++){
         var c = w.cards[i], f = cardsOf().widgetFace(c.cid);
         if(f){
@@ -1364,6 +1371,18 @@ var DAY_MS = 86400000;
     }
     function bindForm(a){
       var w = a.w;
+      // имя виджета: правится прямо в форме; пусто — снова «Виджет N». Заголовок обновляется сразу, имя уходит оболочке (выбор виджета на рабочем столе) после ввода
+      var nameEl = $("wgNameInput");
+      if(nameEl){
+        var titleEl = $("wgFormTitle");
+        var applyName = function(){
+          w.name = nameEl.value.replace(/^\s+|\s+$/g, "").slice(0, WNAME_MAX);
+          if(titleEl) titleEl.textContent = wname(w);
+        };
+        nameEl.addEventListener("input", function(){ applyName(); save(); });
+        nameEl.addEventListener("change", function(){ applyName(); if(!a.draft) changed(); else save(); });
+        nameEl.addEventListener("keydown", function(ev){ if(ev.key === "Enter" || ev.keyCode === 13){ ev.preventDefault(); nameEl.blur(); } });
+      }
       Array.prototype.forEach.call(rootEl().querySelectorAll(".wg-slot"), function(s){
         s.addEventListener("click", function(){
           if(s.getAttribute("data-habits")){ go("habits", { w: w, form: a }); return; } // карточка привычек: время суток и дни каждой привычки

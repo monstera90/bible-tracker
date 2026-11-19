@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.4 (19.11) — скрытие повторяющегося мероприятия (поле «Отображение» в форме) спрашивает «Только это» / «Это и все последующие», как правка и удаление; признак по-прежнему только на устройстве и серию не меняет: `isHidden(id, at)`, `setHidden(id, on, at, following)` (запись {b, r} с правилами по дням/«с этого дня»; старый вид {id:1} читается как раньше), `hideOccurrence`; список/неделя/виджет проверяют скрытие по каждому повторению. Откат: calendar.js 18.3.
    Версия: 18.3 (16.11) — `CalendarTab.openTask(taskId)`: форма задачи календаря по id задачи (одно нажатие на карточку задачи в виджете, my.js `__ltOpenTaskForm`). Откат: calendar.js 18.2.
    Версия: 18.2 (14.11) — `CalendarTab.openEvent(id, at)`: форма конкретного мероприятия по нажатию на карточку события в виджете (my.js `__ltOpenCalendarEvent`).
    Версия: 8.0 (27.10) — «Неделя»: (1) листание недели как в Google Календаре — соседняя неделя едет следом за пальцем (`slideStart/slideTo/slideFinish` в `renderWeek`), отпустили — доезжает или возвращается; кнопки ‹ › листают так же; неделя по-прежнему Пн–Вс; (2) при открытии вкладки неделя всегда с 7:00 (красная линия может быть за экраном), к красной линии (на 2 часа раньше) — только по кнопке «Сегодня» (`weekScrollToNow`). Откат: calendar.js 7.0.
@@ -225,16 +226,58 @@
     hiddenIds = (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
     return hiddenIds;
   }
-  function isHidden(id){ return !!loadHidden()[id]; }
-  function setHidden(id, on){
+  // Признак скрытия: 1 — вся серия (или обычное мероприятие); {b, r} — серия с исключениями: b — состояние по умолчанию (0/1), r — правила
+  // по порядку создания, позднее главнее: {d:"ГГГГ-ММ-ДД", v} — только повторение этого дня, {t:мс, v} — это повторение и все последующие.
+  // `at` — начало повторения (у обычного мероприятия не нужно). Старые записи вида {id:1} читаются как раньше.
+  function isHidden(id, at){
+    var h = loadHidden()[id];
+    if(!h) return false;
+    if(typeof h !== "object") return true;
+    var v = !!h.b;
+    if(at === undefined || at === null || !isFinite(at)) return v;
+    var key = dateValue(at), r = h.r || [];
+    for(var i = 0; i < r.length; i++){
+      var q = r[i];
+      if(q.d !== undefined ? q.d === key : at >= q.t) v = !!q.v;
+    }
+    return v;
+  }
+  function saveHidden(){ try{ localStorage.setItem(HIDDEN_KEY, JSON.stringify(loadHidden())); }catch(e){} }
+  // без `at` — всё мероприятие целиком (как раньше); с `at` — только это повторение (following=false) или это и все последующие (following=true)
+  function setHidden(id, on, at, following){
     var h = loadHidden();
-    if(on) h[id] = 1; else delete h[id];
-    try{ localStorage.setItem(HIDDEN_KEY, JSON.stringify(h)); }catch(e){}
+    if(at === undefined || at === null){
+      if(on) h[id] = 1; else delete h[id];
+      return saveHidden();
+    }
+    var cur = h[id];
+    var base = (cur && typeof cur === "object") ? (cur.b ? 1 : 0) : (cur ? 1 : 0);
+    var r = (cur && typeof cur === "object" && cur.r) ? cur.r.slice() : [];
+    var key = dateValue(at), v = on ? 1 : 0;
+    if(following){
+      r = r.filter(function(q){ return q.d !== undefined ? q.d < key : q.t < at; });
+      r.push({ t: at, v: v });
+    } else {
+      r = r.filter(function(q){ return q.d !== key; });
+      r.push({ d: key, v: v });
+    }
+    if(r.length > 300) r = r.slice(r.length - 300);
+    var same = true;
+    for(var i = 0; i < r.length; i++) if((r[i].v ? 1 : 0) !== base) same = false;
+    if(same) r = []; // все правила совпали с состоянием по умолчанию — исключений нет
+    if(!r.length){ if(base) h[id] = 1; else delete h[id]; }
+    else h[id] = { b: base, r: r };
+    saveHidden();
+  }
+  // скрыть/показать повторение серии: только его или его и все последующие (если оно первое — это вся серия)
+  function hideOccurrence(ev, at, on, following){
+    if(following && at <= ev.start) setHidden(ev.id, on);
+    else setHidden(ev.id, on, at, following);
   }
   function showHidden(){ try{ return localStorage.getItem(SHOW_HIDDEN_KEY) === "1"; }catch(e){ return false; } }
   function saveShowHidden(v){ try{ localStorage.setItem(SHOW_HIDDEN_KEY, v ? "1" : "0"); }catch(e){} }
   // видно ли мероприятие в списке/неделе
-  function visibleEv(ev){ if(isTask(ev) && taskStateOf(ev) !== "open") return false; return showHidden() || !isHidden(ev.id); }
+  function visibleEv(ev, at){ if(isTask(ev) && taskStateOf(ev) !== "open") return false; return showHidden() || !isHidden(ev.id, at); }
   var EYE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
   var EYE_OFF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg>';
   // ---------- настройки календаря (кнопка-шестерёнка `calendarSettingsBtn`): на устройстве ----------
@@ -447,7 +490,9 @@
   function upcoming(ev, now, n){
     var dur = Math.max(0, ev.end - ev.start);
     var from = now - dur;
-    return occurrenceStarts(ev, from, from + 400 * DAY_MS).slice(0, n);
+    var all = occurrenceStarts(ev, from, from + 400 * DAY_MS);
+    if(!showHidden()) all = all.filter(function(at){ return !isHidden(ev.id, at); }); // скрытые повторения серии не считаются ближайшими
+    return all.slice(0, n);
   }
   function repeatLabel(key){
     for(var i = 0; i < REPEATS.length; i++) if(REPEATS[i].key === key) return REPEATS[i].label.toLowerCase();
@@ -467,7 +512,7 @@
     var to = startOfDay(now) + (LIST_AHEAD_DAYS + 1) * DAY_MS;
     var rows = [];
     load().forEach(function(ev){
-      if(!visibleEv(ev)) return;
+      if(!ev.repeat ? !visibleEv(ev) : (isTask(ev) && taskStateOf(ev) !== "open")) return; // у серии скрытие смотрит по каждому повторению (upcoming)
       var dur = Math.max(0, ev.end - ev.start);
       if(!ev.repeat){
         if(ev.start >= from && ev.start < to) rows.push({ at: ev.start, dur: dur, ev: ev });
@@ -499,8 +544,8 @@
       if(r.series && r.more > 0){
         badge = ' <span class="cal-more">' + (r.open ? '↻ свернуть' : '↻ ещё ' + r.more) + '</span>';
       }
-      html += '<div class="event-row cal-row cal-c-' + (isTask(r.ev) ? 'task' : calOf(r.ev)) + (isHidden(r.ev.id) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
-        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && usePastColor(isHidden(r.ev.id)) ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
+      html += '<div class="event-row cal-row cal-c-' + (isTask(r.ev) ? 'task' : calOf(r.ev)) + (isHidden(r.ev.id, r.at) ? ' cal-hid' : '') + (r.at + r.dur < now ? ' cal-row-past' : '') + (r.series && !r.first ? ' cal-row-exp' : '') +
+        '" data-id="' + esc(r.ev.id) + '" data-at="' + r.at + '"' + (r.at + r.dur < now && usePastColor(isHidden(r.ev.id, r.at)) ? ' style="border-left-color:' + userColors.past + ' !important;"' : '') + '>' +
         '<span class="event-time">' + timeRange(r.at, r.dur) + '</span> ' + (isTask(r.ev) ? taskMark(r.ev) : '') + esc(r.ev.title) +
         (r.ev.repeat ? '<span class="cal-rep"> · ' + repeatLabel(r.ev.repeat) + '</span>' : '') + badge + '</div>';
     });
@@ -640,9 +685,10 @@
     for(var di = 0; di < n; di++) days.push([]);
     var weekEnd = dayStartAt(ws, n);
     load().forEach(function(ev){
-      if(!visibleEv(ev)) return;
+      if(isTask(ev) && taskStateOf(ev) !== "open") return;
       var dur = Math.max(0, ev.end - ev.start);
       occurrenceStarts(ev, ws - dur, weekEnd).forEach(function(at){
+        if(!visibleEv(ev, at)) return; // скрытое повторение серии — только если включён показ скрытых
         var end = at + dur;
         for(var i = 0; i < n; i++){
           var ds = dayStartAt(ws, i), de = dayStartAt(ws, i + 1);
@@ -691,7 +737,7 @@
     if(visOverHidden()){
       // видимые мероприятия (и трекеры) не замечают скрытые: раскладываются отдельно и рисуются после них, то есть поверх
       var hidSegs = [], visSegs = [];
-      segs.forEach(function(sg){ (sg.ev && isHidden(sg.ev.id) ? hidSegs : visSegs).push(sg); });
+      segs.forEach(function(sg){ (sg.ev && isHidden(sg.ev.id, sg.at) ? hidSegs : visSegs).push(sg); });
       packDay(hidSegs); packDay(visSegs);
       segs = hidSegs.concat(visSegs);
     } else packDay(segs);
@@ -708,8 +754,8 @@
           esc(sg.t.label) + '</div>';
         return;
       }
-      blocks += '<div class="cal-wk-ev cal-c-' + (isTask(sg.ev) ? 'task' : calOf(sg.ev)) + (isHidden(sg.ev.id) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
-        ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id)) ? ';' + pastBlockCss() : '') + '">' +
+      blocks += '<div class="cal-wk-ev cal-c-' + (isTask(sg.ev) ? 'task' : calOf(sg.ev)) + (isHidden(sg.ev.id, sg.at) ? ' cal-hid' : '') + (sg.at + sg.dur < now ? ' cal-wk-past' : '') + '" data-id="' + esc(sg.ev.id) + '" data-at="' + sg.at + '" data-e="' + (sg.at + sg.dur) + '"' +
+        ' data-t="' + sg.top + '" data-b="' + sg.bottom + '" style="top:' + top.toFixed(1) + 'px;height:' + h.toFixed(1) + 'px;' + posCss + (sg.at + sg.dur < now && usePastColor(isHidden(sg.ev.id, sg.at)) ? ';' + pastBlockCss() : '') + '">' +
         esc(sg.ev.title) + '</div>';
     });
     var nowLine = isToday ? '<div class="cal-wk-now" data-m="' + minutesOfDay(now) + '" style="top:' + ((minutesOfDay(now) - off) * hourPx / 60).toFixed(1) + 'px"></div>' : '';
@@ -1013,7 +1059,7 @@
   function dayWindowStart(segs, isToday, now){
     var first = -1, firstAny = -1;
     segs.forEach(function(sg){
-      if(!sg.ev || isHidden(sg.ev.id)) return; // трекеры и скрытые мероприятия окно не двигают
+      if(!sg.ev || isHidden(sg.ev.id, sg.at)) return; // трекеры и скрытые мероприятия окно не двигают
       if(firstAny < 0 || sg.top < firstAny) firstAny = sg.top;
       var over = isToday && (sg.at + sg.dur < now); // как пометка .cal-wk-past
       if(!over && (first < 0 || sg.top < first)) first = sg.top;
@@ -1368,7 +1414,7 @@
       ed.value = dateValue(baseE); et.value = timeValue(baseE);
       repEl.value = ev.repeat || "";
       calEl.value = calOf(ev);
-      visEl.value = isHidden(ev.id) ? "hide" : "show";
+      visEl.value = isHidden(ev.id, baseS) ? "hide" : "show";
     } else if(preset){
       sd.value = dateValue(preset); st.value = timeValue(preset);
       ed.value = dateValue(preset + HOUR_MS); et.value = timeValue(preset + HOUR_MS);
@@ -1510,7 +1556,14 @@
         save(tl);
         return renderMain();
       }
-      if(readOnly){ setHidden(ev.id, hideNow); return renderMain(); } // читатель группы меняет только своё отображение
+      if(readOnly){ // читатель группы меняет только своё отображение
+        if(hideNow === isHidden(ev.id, baseS)) return renderMain();
+        if(ev.repeat) return askScope(hideNow ? "Это повторяющееся мероприятие. Скрыть:" : "Это повторяющееся мероприятие. Показать:",
+          function(){ hideOccurrence(ev, baseS, hideNow, false); renderMain(); },
+          function(){ hideOccurrence(ev, baseS, hideNow, true); renderMain(); });
+        setHidden(ev.id, hideNow);
+        return renderMain();
+      }
       var title = titleEl.value.replace(/^\s+|\s+$/g, "");
       if(!title) return fail("Введите название мероприятия");
       var s = parseLocal(sd.value, st.value);
@@ -1527,8 +1580,11 @@
 
       if(ev && ev.repeat){ // правка повторения серии
         if(title === ev.title && s === baseS && e === baseE && r === ev.repeat && calv === calOf(ev)){ // менялось ли только отображение
-          if(hideNow !== isHidden(ev.id)) setHidden(ev.id, hideNow);
-          return renderMain();
+          if(hideNow === isHidden(ev.id, baseS)) return renderMain();
+          // скрыть/показать — как правка и удаление повторения: спрашиваем «только это» или «это и все последующие» (признак на устройстве, серия не трогается)
+          return askScope(hideNow ? "Это повторяющееся мероприятие. Скрыть:" : "Это повторяющееся мероприятие. Показать:",
+            function(){ hideOccurrence(ev, baseS, hideNow, false); renderMain(); },
+            function(){ hideOccurrence(ev, baseS, hideNow, true); renderMain(); });
         }
         var following = function(){ setHidden(applyFollowing(ev, baseS, title, s, e, r, calv), hideNow); rememberCal(calv); renderMain(); }; // не function-объявление в блоке: старый WebView (Android 5)
         if(r !== ev.repeat) return following(); // менялся вид повтора — это всегда «последующие», вопрос не нужен
@@ -1691,7 +1747,7 @@
     widgetFeed: function(from, to){
       var out = [];
       load().forEach(function(ev){
-        if(isHidden(ev.id)) return;
+        if(isTask(ev) && isHidden(ev.id)) return;
         if(isTask(ev)){
           if(taskStateOf(ev) !== "open" || ev.start >= to) return;
           var title = ev.title;
@@ -1699,7 +1755,7 @@
           out.push({ k: "task", id: ev.id, tid: String(ev.taskId), title: String(title || ""), at: ev.start });
           return;
         }
-        occurrenceStarts(ev, from, to).forEach(function(at){ out.push({ k: "event", id: ev.id, title: String(ev.title || ""), at: at }); });
+        occurrenceStarts(ev, from, to).forEach(function(at){ if(!isHidden(ev.id, at)) out.push({ k: "event", id: ev.id, title: String(ev.title || ""), at: at }); });
       });
       out.sort(function(a, b){ return a.at - b.at; });
       return out;

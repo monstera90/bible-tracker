@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.4 (19.11) — скрепка в пустой новой задаче: пока открыт диалог выбора файла, `flushPendingTaskEdits` (его зовёт `flushPendingSyncNow` при сворачивании приложения системным диалогом) больше не удаляет пустую новую задачу (`freshTaskIds`) — раньше она пропадала до вставки и картинка не добавлялась; запасной путь: если строка всё же исчезла из DOM, ссылка `![[имя]]` дописывается в текст задачи. Новое имя виджета в выборе виджета для книги/заметки (`widgetsForBook` → `name`). Откат: my.js 151.3.
    Версия: 151.3 (18.11) — «Заметки-карточки»: время суток приоритета заметки (`getNoteCardTime`/`setNoteCardTime`, state `__noteTime:<id заметки>` = {c: "v1:m|d|e|a" (пусто после «v1:» — не выбрано), t}, ездит через облако и архив); значения утро/обед/вечер/целый день — те же `WINDOWS` из widgets.js (`timeWindows`). В `widgetNotesList` у заметки поле `time`; в `LTNoteCards` — `getTime`, `setTime`, `timeOptions`. Откат: my.js 151.2.
    Версия: 151.2 (18.11) — «Заметки-карточки»: цвет карточки заметки (`getNoteCardColor`/`setNoteCardColor`, state `__noteColor:<id заметки>` = {c: "v1:#rrggbb", t}, ездит через облако и архив) и показ заметки в виджете (`openNoteWidgetPicker` — тот же выбор виджета, что у книг; заметка лежит в карточке «Книги», id `nt_…`, `noteWidgetId`). Для виджетов — `widgetNotesList` (деп `listNotes`); нажатие на заметку в виджете открывает её (`openNoteFromWidget` через `__ltOpenBook`). Всё это для mdeditor.js — через `window.LTNoteCards`. Палитра формы — та же, что у карточек QR (`ItemCards.colorPalette`). Откат: my.js 151.1.
    Версия: 151.1 (18.11) — `initFabRowSlider`: отступ кнопок от края окна `EDGE` 8 (был 6), запас полосы жеста `STRIP_PAD` 16, запасной размер кнопки 30 (нижний ряд 30×30 с отступом 8px, modals.css 22.1).
@@ -8111,7 +8112,7 @@
           var r = sel.getRangeAt(0);
           if(editable.contains(r.commonAncestorContainer)) range = r.cloneRange();
         }
-        taskImageInsertTarget = { editable: editable, range: range };
+        taskImageInsertTarget = { editable: editable, range: range, taskId: editable.getAttribute("data-task-id") || "" };
         // взводим ДО открытия диалога — сам клик по input уже вызывает blur у editable (см.
         // taskAttachDialogOpen выше)
         taskAttachDialogOpen = true;
@@ -8138,6 +8139,16 @@
         MdEditor.prepareImageFile(file).then(function(prep){
           return MdEditor.saveImageBytes(prep.name, prep.bytes, prep.type);
         }).then(function(finalName){
+          if(target.taskId && !document.body.contains(target.editable)){
+            // строка успела перерисоваться/закрыться, пока шёл выбор файла: картинку дописываем в сам текст задачи, а не теряем
+            var tk = getTaskById(target.taskId);
+            if(tk){
+              var prevText = String(tk.c.text || "");
+              setTaskText(target.taskId, (prevText ? prevText + "\n" : "") + "![[" + finalName + "]]");
+              if(window.Debug) window.Debug.log("скрепка: строка задачи " + target.taskId + " исчезла из DOM во время выбора файла — картинка дописана в текст задачи");
+            }
+            return;
+          }
           insertTextIntoTaskEditable(target.editable, target.range, "![[" + finalName + "]]");
         }).catch(function(){
           // не удалось сохранить картинку — хотя бы возвращаем фокус в editable, чтобы
@@ -13958,7 +13969,7 @@
       return {
         key: r.id,
         svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
-        title: "Виджет " + r.n + (r.has ? " — книга уже здесь" : ""),
+        title: (r.name || ("Виджет " + r.n)) + (r.has ? " — книга уже здесь" : ""),
         current: r.has
       };
     });
@@ -14045,7 +14056,7 @@
       return {
         key: r.id,
         svg: '<svg viewBox="0 0 24 24"><text x="12" y="17" text-anchor="middle" font-size="14" font-weight="700" fill="currentColor">' + r.n + '</text></svg>',
-        title: "Виджет " + r.n + (r.has ? " — заметка уже здесь" : ""),
+        title: (r.name || ("Виджет " + r.n)) + (r.has ? " — заметка уже здесь" : ""),
         current: r.has
       };
     });
@@ -21797,6 +21808,10 @@
       if(!taskId) return;
       var saveBtn = editable.querySelector(".task-icon-btn");
       var newText = getEditableNoteText(editable, saveBtn);
+      // Открыт диалог выбора файла для скрепки: система сворачивает приложение (visibilitychange/__ltOnAppPause → flushPendingSyncNow → сюда),
+      // и пустая новая задача по правилу setTaskText удалялась ДО того, как картинке выбрали файл — вставлять становилось некуда.
+      // Пока диалог открыт, пустую новую задачу не трогаем (после вставки текст уже не пуст, при отмене её уберёт обычный выход из правки).
+      if(taskAttachDialogOpen && freshTaskIds[taskId] && !newText.trim()) return;
       setTaskText(taskId, newText.trim());
     });
   }
