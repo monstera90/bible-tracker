@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.0 (19.11)
 // Версия: 4.7 (18.11) — карточка «Заметки» (notes_*): отдельная группа «nt_0»; заметка «в своё время» (утро/обед/вечер/все время) — в круге равных, без времени суток — нет.
 // Версия: 4.6 (17.11) — класс QrMotionTest: единый диспетчер движения стопки (QrPriority.Motion), ТЗ TZ_motion_dispatcher.md, п. 7.
 // Версия: 4.5 (16.11) — время суток «Целый день» (`a`): привычка и карточка «Сегодня» «в своё время» в любой час суток, только в выбранные дни недели, пока не отмечены (habits_allDay_*, allDay_*).
@@ -44,7 +45,7 @@ class QrPriorityTest {
                      done: Set<String> = emptySet(), rpe: Boolean = false, alarms: Map<String, Long> = emptyMap(),
                      ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "", mood: Boolean = false) =
         QrPriority.Snapshot(now = c.timeInMillis, cal = c, workoutActive = workout, pomodoroActive = pomodoro, stopwatchActive = stopwatch,
-            activeTimerIds = timers, alarms = alarms, ringingAlarmIds = ringing, batteryPercent = battery, hiddenKeys = hidden, movedAt = moved,
+            activeTimerIds = timers, alarms = alarms, ringingAlarmIds = ringing, batteryLowest = battery, hiddenKeys = hidden, movedAt = moved,
             doneTaskIds = done, rpePending = rpe, moodPending = mood, lastTopKey = lastTop)
 
     /** Строит порядок и проверяет инварианты. */
@@ -336,14 +337,41 @@ class QrPriorityTest {
 
     @Test fun battery_low_raisesOnlyBatteryCards() {
         val cards = listOf(card("a"), card("b"), card(QrBattery.KEY))
-        val low = run(cfg(cards, true), snap(cal(12), battery = 15))
-        assertEquals(listOf(QrBattery.KEY, "a", "b"), keys(low))
-        assertEquals(QrPriority.SCORE_BATTERY_LOW, scoreOf(low, QrBattery.KEY))
-        assertEquals("Заряд 15 %", low.cards[0].reason)
-        for (p in listOf(16, 80, -1)) assertEquals(listOf("a", "b", QrBattery.KEY), keys(run(cfg(cards, true), snap(cal(12), battery = p))))
-        // заряд второго вида («несколько устройств») — тот же балл; обычная карточка с таким баллом не получает
+        for (rel in listOf(false, true)) { // низкий заряд поднимает карточку при любом режиме
+            val low = run(cfg(cards, rel), snap(cal(12), battery = 29))
+            assertEquals(listOf(QrBattery.KEY, "a", "b"), keys(low))
+            assertEquals("Заряд 29 %", low.cards[0].reason)
+            assertEquals(QrBattery.KEY, low.topKey)
+            assertEquals(QrBattery.KEY, low.anchorKey)
+            for (p in listOf(30, 80, -1)) assertEquals(listOf("a", "b", QrBattery.KEY), keys(run(cfg(cards, rel), snap(cal(12), battery = p))))
+        }
+        // заряд второго вида («несколько устройств») — так же
         val multi = run(cfg(listOf(card("a"), card(QrBattery.KEY2)), true), snap(cal(12), battery = 5))
         assertEquals(listOf(QrBattery.KEY2, "a"), keys(multi))
+        // обе карточки заряда — подряд наверху, в порядке пользователя
+        val both = run(cfg(listOf(card("a"), card(QrBattery.KEY), card("b"), card(QrBattery.KEY2)), true), snap(cal(12), battery = 10))
+        assertEquals(listOf(QrBattery.KEY, QrBattery.KEY2, "a", "b"), keys(both))
+    }
+
+    @Test fun battery_low_aboveRpeAndMood() {
+        val cards = listOf(card("a"), card(QrBattery.KEY))
+        val r = run(cfg(cards, false, rpeAsk = true, moodAsk = true), snap(cal(12), rpe = true, mood = true, battery = 25))
+        assertEquals(listOf(QrBattery.KEY, QrRpe.KEY, QrMood.KEY, "a"), keys(r))
+        assertEquals(QrBattery.KEY, r.topKey)
+        assertEquals(QrBattery.KEY, r.anchorKey)
+        // заряд не низкий — «Как тренировка?» наверху, как прежде
+        val calm = run(cfg(cards, false, rpeAsk = true, moodAsk = true), snap(cal(12), rpe = true, mood = true, battery = 30))
+        assertEquals(listOf(QrRpe.KEY, QrMood.KEY, "a", QrBattery.KEY), keys(calm))
+        assertEquals(QrRpe.KEY, calm.topKey)
+    }
+
+    @Test fun batteryAlertKind_orangeBelow30_redAtOrBelow20() {
+        assertEquals(0, QrPriority.batteryAlertKind(-1))
+        assertEquals(0, QrPriority.batteryAlertKind(30))
+        assertEquals(1, QrPriority.batteryAlertKind(29))
+        assertEquals(1, QrPriority.batteryAlertKind(21))
+        assertEquals(2, QrPriority.batteryAlertKind(20))
+        assertEquals(2, QrPriority.batteryAlertKind(0))
     }
 
     @Test fun battery_withoutReason_staysLast_evenIfListedFirst() {
@@ -366,16 +394,16 @@ class QrPriorityTest {
 
     // ---------- этап 2: устойчивость ----------
 
-    @Test fun hysteresis_diff50_keepsPrev() {
-        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
-        // прежняя верхняя — заряд (450), претендент — «её» время (500): отрыв 50
-        val r = run(cfg(cards, true), snap(cal(12), battery = 10, lastTop = QrBattery.KEY))
-        assertEquals(QrBattery.KEY, r.topKey)
-        assertEquals(listOf(QrBattery.KEY, "sch"), keys(r)) // удержанная — первая, остальной порядок как обычно
-        assertEquals(QrBattery.KEY, r.anchorKey)
-        assertEquals(QrBattery.KEY, r.mainTopKey)
+    @Test fun hysteresis_diff30_keepsPrev() {
+        val cards = listOf(card("sch", times = setOf("d")), card("td", dyn = "task", at = cal(12).timeInMillis + hour, tid = "T"))
+        // прежняя верхняя — задача на сегодня (470), претендент — «её» время (500): отрыв 30
+        val r = run(cfg(cards, true), snap(cal(12), lastTop = "td"))
+        assertEquals("td", r.topKey)
+        assertEquals(listOf("td", "sch"), keys(r)) // удержанная — первая, остальной порядок как обычно
+        assertEquals("td", r.anchorKey)
+        assertEquals("td", r.mainTopKey)
         // без прежней верхней порядок обычный
-        assertEquals("sch", run(cfg(cards, true), snap(cal(12), battery = 10)).topKey)
+        assertEquals("sch", run(cfg(cards, true), snap(cal(12))).topKey)
     }
 
     @Test fun hysteresis_diff150_changes() {
@@ -438,10 +466,10 @@ class QrPriorityTest {
 
     @Test fun hysteresis_stableWhenRepeated() {
         // повторный расчёт с запомненной верхней карточкой даёт тот же порядок
-        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
-        val s1 = snap(cal(12), battery = 10, lastTop = QrBattery.KEY)
+        val cards = listOf(card("sch", times = setOf("d")), card("td", dyn = "task", at = cal(12).timeInMillis + hour, tid = "T"))
+        val s1 = snap(cal(12), lastTop = "td")
         val r1 = run(cfg(cards, true), s1)
-        val r2 = run(cfg(cards, true), snap(cal(12), battery = 10, lastTop = r1.mainTopKey))
+        val r2 = run(cfg(cards, true), snap(cal(12), lastTop = r1.mainTopKey))
         assertEquals(keys(r1), keys(r2))
     }
 
@@ -487,10 +515,10 @@ class QrPriorityTest {
     }
 
     @Test fun check_catchesHysteresisViolation() {
-        val cards = listOf(card("sch", times = setOf("d")), card(QrBattery.KEY))
+        val cards = listOf(card("sch", times = setOf("d")), card("td", dyn = "task", at = cal(12).timeInMillis + hour, tid = "T"))
         val cf = cfg(cards, true)
-        val noPrev = QrPriority.build(cf, snap(cal(12), battery = 10)) // верх — «sch», как без запомненной карточки
-        val s = snap(cal(12), battery = 10, lastTop = QrBattery.KEY) // а прежняя верхняя — заряд, отрыв всего 50
+        val noPrev = QrPriority.build(cf, snap(cal(12))) // верх — «sch», как без запомненной карточки
+        val s = snap(cal(12), lastTop = "td") // а прежняя верхняя — задача на сегодня, отрыв всего 30
         assertTrue(QrPriority.check(noPrev, cf, s).any { it.startsWith("9") })
     }
 

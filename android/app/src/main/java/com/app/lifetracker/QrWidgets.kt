@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.5 (19.11)
 // Версия: 16.4 (19.11) — ТОЛЬКО ДИАГНОСТИКА (поведение не меняется): журнал `QrDiag` пишется ещё и в файл `qrdiag.log` (до ~16 КБ; читается кнопкой «▶ Виджеты: журнал оболочки» в панели отладки, мост `widgetDiagLog`) — компьютер не нужен; ([diag], пишет только при изменении сообщения) — разбор настроек (сколько заметок пришло и принято), приём картинок лиц (ключ, размер), разбор файла лица книги/заметки в [bitmapFor] (размер, декодируется ли, сколько точек непрозрачных), итог [update]. Ищем, почему виджет только с карточкой заметки прозрачный. Откат: QrWidgets.kt 16.3.
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
 // Версия: 16.3 (18.11) — галочка «Отображать заметки» (`notes`, список `nts`: ключ, название и `times` — время суток заметки): карточка-группа «Заметки» ([QrPriority.NOTE_SLOT_KEY]) отдельно от карточки «Книги»; лицо заметки — картинка `<ключ>.png` от страницы; заметка «в своё время» встаёт в круг равных ([QrPriority.noteList]). Откат: QrWidgets.kt 16.2.
@@ -82,6 +83,8 @@ import java.util.UUID
  * [QrBattery.render] (заряд телефона и Bluetooth-наушников), нажатие на неё ничего не делает. Галочка «…(несколько устройств)» (`batteryMulti`) добавляет
  * после неё ещё одну служебную карточку [QrBattery.KEY2] ([QrBattery.renderMulti]): только кольца и значки телефона и до трёх подключённых Bluetooth-устройств. Картинка перерисовывается по будильнику
  * `ACTION_BATTERY` (раз в 5 минут, если заряд изменился), при подключении Bluetooth-устройства (серия проверок через 6, 15, 30, 60 и 120 с, пока заряд не станет известен), при отключении и при вещании о заряде устройств.
+ * Низкий заряд ([QrBattery.lowestLevel] — наименьший среди телефона и подключённых устройств, отдающих заряд, ниже [QrPriority.BATTERY_ALERT_PERCENT]): карточки заряда встают наверх стопки при любом режиме,
+ * выше «Как тренировка?» и «Как настроение?» (под идущим таймером), и рисуются оранжевым, а при [QrPriority.BATTERY_CRITICAL_PERCENT] и ниже — красным ([QrBattery.faceColor]).
  *
  * Галочки «Показывать задачи» (`tasks`) и «Показывать события календаря» (`events`): страница присылает в `dyn` кандидатов — задачи (`k`="task", `at` — время
  * задачи, мс) и ближайшие события (`k`="event") — и до четырёх картинок на каждого: `<ключ>.png` («Сегодня»), `<ключ>_t.png` («Завтра»), `<ключ>_w.png` (день недели — до даты два дня
@@ -116,11 +119,10 @@ import java.util.UUID
  * Порядок карточек (фильтр, «Как тренировка?», «в конец», баллы релевантности, «к чему возвращаться») считает [QrPriority] — чистая функция от
  * [QrPriority.Snapshot]; здесь [snapshot] собирает его из источников ([WorkoutTracker], [PomodoroTimer], [StopwatchTimer], [CardTimers], [firedOf], [doneTaskIds], [QrRpe]),
  * а [order] / [plan] / [visibleCount] / [isAllDone] — тонкие обёртки. В отладочной сборке [plan] проверяет результат ([QrPriority.check]) и пишет нарушения в лог.
- * Для баллов «по релевантности» в [snapshot] читаются ещё будильники карточек ([CardAlarms.nextTimes], [CardAlarms.ringingIds]), заряд телефона ([QrBattery.phoneLevel])
- * и верхняя карточка прошлого расчёта (`lasttop` по id виджета, пишет [plan]): новая верхняя карточка не вытесняет прежнюю без отрыва в [QrPriority.HYSTERESIS] баллов.
+ * Для баллов «по релевантности» в [snapshot] читаются ещё будильники карточек ([CardAlarms.nextTimes], [CardAlarms.ringingIds]), и верхняя карточка прошлого расчёта (`lasttop` по id виджета, пишет [plan]): новая верхняя карточка не вытесняет прежнюю без отрыва в [QrPriority.HYSTERESIS] баллов.
  * Ручной приоритет карточки ([Card.prio], поле `prio` у карточки в настройках: «top» / «normal» / «low») учитывает [QrPriority]; почему сверху именно эта карточка, [plan] запоминает
  * (`why` по id виджета) и отдаёт странице [whyJson] (мост `widgetWhy`, версия 36).
- * Перерисовку без внешнего события ставит [nextDynChange] (минимум из своего значения и [QrPriority.Result.nextChangeAt]); смена заряда через порог 15 %
+ * Перерисовку без внешнего события ставит [nextDynChange] (минимум из своего значения и [QrPriority.Result.nextChangeAt]); смена вида низкого заряда (порог 30 % и 20 %)
  * ([onBatteryChanged]) и будильники ([onAlarmsChanged], в том числе повторный звонок и смахивание) пересчитывают порядок.
  *
  * Галочка «Спрашивать о тренировке» (`rpeAsk` у виджета): пока есть тренировка без оценки нагрузки ([QrRpe.pendingId]), над ВСЕМИ карточками стоит служебная
@@ -635,8 +637,8 @@ object QrWidgets {
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
         if (c.key == QrRpe.KEY) return QrRpe.render(ctx, c.color)
         if (c.key == QrMood.KEY) return QrMood.render(ctx, c.color)
-        if (c.key == QrBattery.KEY) return QrBattery.render(ctx, c.color)
-        if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, c.color)
+        if (c.key == QrBattery.KEY) return QrBattery.render(ctx, QrBattery.faceColor(ctx, c.color)) // низкий заряд — оранжевый / красный вместо выбранного цвета
+        if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, QrBattery.faceColor(ctx, c.color))
         if (c.dyn == "timer") return QrTimerFace.render(c.title, timerStateOf(ctx, c), c.sec, c.color) // таймер рисует оболочка: кольцо и минуты меняются сами
         if (isTimerCard(c)) timerStateOf(ctx, c)?.let { return QrTimerFace.render(c.title, it, c.sec, c.color) } // обычная карточка-таймер: пока таймер идёт (запущен хоть в каком виджете, хоть в приложении) — кольцо, иначе прежнее лицо
         if (c.dyn == "event" || c.dyn == "task") dynBitmap(ctx, c)?.let { return it }
@@ -1311,7 +1313,7 @@ object QrWidgets {
             activeTimerIds = timers,
             alarms = if (hasAlarms) CardAlarms.nextTimes(ctx) else emptyMap(),
             ringingAlarmIds = ringing,
-            batteryPercent = if (rel && cfg.anyBattery) QrBattery.phoneLevel(ctx) else -1,
+            batteryLowest = if (cfg.anyBattery) QrBattery.lowestLevel(ctx) else -1, // низкий заряд поднимает карточки заряда при любом режиме
             lastTopKey = if (rel) jmap(ctx, K_LASTTOP).optString(cfg.id, "") else "",
             hiddenKeys = hiddenKeys(ctx, cfg),
             movedAt = moved,
@@ -1455,7 +1457,7 @@ object QrWidgets {
     // ---------- обновление ----------
 
     /** У виджета есть «верхняя карточка», к которой стопка возвращается: «по релевантности», служебные «Как тренировка?» / «Как настроение?» или идущий таймер карточки «Таймеры». */
-    private fun tracksTop(cfg: Cfg): Boolean = cfg.relevance || cfg.rpeAsk || cfg.moodAsk || cfg.timers
+    private fun tracksTop(cfg: Cfg): Boolean = cfg.relevance || cfg.rpeAsk || cfg.moodAsk || cfg.timers || cfg.anyBattery
 
     fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false, intent: QrPriority.Motion.Kind? = null) {
         val app = ctx.applicationContext
@@ -1814,7 +1816,7 @@ object QrWidgets {
     // ---------- карточка заряда ----------
 
     @Volatile private var lastBatterySig = ""
-    @Volatile private var lastBatteryLow = false
+    @Volatile private var lastBatteryAlert = 0
 
     /** Перерисовать карточку заряда в виджетах, где она включена, но только если заряд телефона или наушников изменился (или [force]). */
     fun onBatteryChanged(ctx: Context, force: Boolean = false) {
@@ -1823,16 +1825,17 @@ object QrWidgets {
         val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java)).filter { cfgFor(app, it)?.anyBattery == true }
         if (ids.isEmpty()) return
         val multi = ids.any { cfgFor(app, it)?.batteryMulti == true }
-        val sig = QrBattery.signature(app) + if (multi) "|" + QrBattery.signatureMulti(app) else ""
+        val lowest = QrBattery.lowestLevel(app)
+        val sig = QrBattery.signature(app) + (if (multi) "|" + QrBattery.signatureMulti(app) else "") + "|" + lowest
         if (!force && sig == lastBatterySig) return
         lastBatterySig = sig
-        // порог «низкий заряд» пересечён: при «релевантности» карточка заряда поднимается (или опускается) — пересчёт порядка и, если сменился верх, возврат стопки
-        val low = QrBattery.phoneLevel(app).let { it in 0..QrPriority.BATTERY_LOW_PERCENT }
-        val lowChanged = low != lastBatteryLow
-        lastBatteryLow = low
+        // порог низкого заряда пересечён (или оранжевый стал красным): карточки заряда поднимаются наверх (или опускаются) и меняют цвет — пересчёт порядка и, если сменился верх, возврат стопки
+        val alert = QrPriority.batteryAlertKind(lowest)
+        val lowChanged = alert != lastBatteryAlert
+        lastBatteryAlert = alert
         for (id in ids) {
             try {
-                if (lowChanged && cfgFor(app, id)?.relevance == true) {
+                if (lowChanged) {
                     update(app, mgr, id)
                     continue
                 }

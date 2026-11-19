@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.0 (19.11)
 // Версия: 5.7 (18.11) — карточка «Заметки» (`Cfg.notes`, `Cfg.noteCards`): пятая карточка-группа «nt_0» ([NOTE_SLOT_KEY]), отдельная от «Книг»; элемент — одна заметка виджета. Заметка, у которой сейчас её время суток (утро/обед/вечер/все время, [Card.times] — выбирается на экране «Заметки-карточки»), имеет балл [SCORE_CYCLE]: встаёт в круг равных наравне с календарём и привычками; заметка без времени суток — балл 0, листается краями. Откат: QrPriority.kt 5.6.
 // Версия: 5.6 (17.11) — карточка «Книги» (`Cfg.books`, `Cfg.bookCards`): четвёртая карточка-группа «bk_0» ([BOOK_SLOT_KEY]), элемент — одна книга виджета; баллов у книг нет (в круг равных и наверх по релевантности карточка не попадает, листается краями). Откат: QrPriority.kt 5.5.
 // Версия: 5.5 (17.11) — единый диспетчер движения стопки [Motion] (ТЗ TZ_motion_dispatcher.md): чистое решение «двигать сейчас / отложить до T / отбросить / только лицо» по намерению ([Motion.Kind]), последнему касанию и состоянию экрана; [Motion.reorderBySlots] — заморозка порядка на время паузы. Порядок карточек ([build]) не менялся. Откат: QrPriority.kt 5.4.
@@ -79,9 +80,13 @@ object QrPriority {
     const val SCORE_CYCLE = SCORE_SCHEDULED
     /** Сколько каждая карточка круга равных остаётся наверху. */
     const val CYCLE_MS = 60_000L
-    /** Заряд телефона не выше [BATTERY_LOW_PERCENT] — только карточки заряда. */
-    const val SCORE_BATTERY_LOW = 450
-    const val BATTERY_LOW_PERCENT = 15
+    /**
+     * Низкий заряд: наименьший заряд среди телефона и подключённых устройств, которые его отдают ([Snapshot.batteryLowest]), ниже [BATTERY_ALERT_PERCENT] —
+     * карточки заряда ([QrBattery.KEY], [QrBattery.KEY2]) встают наверх стопки, выше «Как тренировка?» и «Как настроение?» (под идущим таймером), при любом режиме,
+     * даже без «релевантности». Цвет карточки меняется: оранжевый ниже [BATTERY_ALERT_PERCENT], красный при [BATTERY_CRITICAL_PERCENT] и ниже ([batteryAlertKind]).
+     */
+    const val BATTERY_ALERT_PERCENT = 30
+    const val BATTERY_CRITICAL_PERCENT = 20
     /** Ручной приоритет «наверх»: прибавка к баллу карточки (при любых её сигналах; без сигналов балл = эта прибавка). */
     const val PRIO_TOP_BONUS = 300
     /** Ручной приоритет «вниз»: балл не выше нуля — на единицу ниже обычных карточек без сигналов, чтобы карточка действительно стояла после них. */
@@ -119,7 +124,8 @@ object QrPriority {
         val activeTimerIds: Set<String> = emptySet(),
         val alarms: Map<String, Long> = emptyMap(),
         val ringingAlarmIds: Set<String> = emptySet(),
-        val batteryPercent: Int = -1,
+        /** Наименьший заряд среди телефона и подключённых устройств, которые его отдают, 0..100; -1 — неизвестен или у виджета нет карточки заряда (устройства без заряда не считаются). */
+        val batteryLowest: Int = -1,
         val hiddenKeys: Set<String> = emptySet(),
         val movedAt: Map<String, Long> = emptyMap(),
         val doneTaskIds: Set<String> = emptySet(),
@@ -207,6 +213,13 @@ object QrPriority {
         }
         val faces = HashMap<String, Int>()
         for (g in gs) if (main.any { it.card.key == g.key }) faces[g.key] = faceOf(g, start[g.key], turn)
+        // Низкий заряд: карточки заряда уходят из основной части наверх — выше «Как тренировка?» и «Как настроение?», под идущим таймером; при любом режиме
+        val bat = ArrayList<Scored>()
+        if (batteryAlert(s)) {
+            for (m in main) if (isBattery(m.card.key)) bat.add(Scored(m.card, 0, "Заряд " + s.batteryLowest + " %"))
+            main.removeAll { isBattery(it.card.key) }
+        }
+        val batKey = bat.firstOrNull()?.card?.key ?: ""
         // Идущий таймер: карточка «Таймеры» всегда первая (над служебными тоже), при любом режиме; между идущими таймерами лицо меняется раз в минуту
         val tg = gs.firstOrNull { it.dyn == "timer" }
         var lead: Scored? = null
@@ -224,13 +237,14 @@ object QrPriority {
         }
         val out = ArrayList<Scored>()
         if (lead != null) out.add(lead)
+        out.addAll(bat)
         if (s.rpePending) out.add(Scored(rpeCard(cfg), 0, "Ждёт оценки тренировки"))
         if (s.moodPending) out.add(Scored(moodCard(cfg), 0, "Сегодня настроение ещё не отмечено"))
         out.addAll(main)
         val serviceKey = serviceKeyOf(s)
-        val topKey = if (lead != null) TIMER_SLOT_KEY else if (serviceKey.isNotEmpty()) serviceKey else top
+        val topKey = if (lead != null) TIMER_SLOT_KEY else if (batKey.isNotEmpty()) batKey else if (serviceKey.isNotEmpty()) serviceKey else top
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
-        val topScored: Scored? = if (lead != null || serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
+        val topScored: Scored? = if (lead != null || batKey.isNotEmpty() || serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
         // у группы наверху называем тот элемент, который она на самом деле показывает (а не заголовок слота)
         var topTitle = topScored?.card?.title ?: ""
@@ -242,7 +256,7 @@ object QrPriority {
             if (topGroup.reasons[i].isNotEmpty()) topReason = topGroup.reasons[i]
         }
         val minuteAt = if (lead != null) nextCycleAt(s.now) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top, lead != null), next, top, topTitle, topReason, cycleAt, faces, minuteAt)
+        return Result(out, topKey, anchorOf(cfg, s, main, top, lead != null, batKey), next, top, topTitle, topReason, cycleAt, faces, minuteAt)
     }
 
     /**
@@ -374,6 +388,16 @@ object QrPriority {
     /** Карточка заряда (константы ключей подставляются при сборке — класс QrBattery в JVM-тестах не загружается). */
     private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
 
+    /** Заряд низкий: наименьший заряд устройств ниже [BATTERY_ALERT_PERCENT] — карточки заряда стоят наверху стопки. */
+    fun batteryAlert(s: Snapshot): Boolean = s.batteryLowest in 0 until BATTERY_ALERT_PERCENT
+
+    /** Вид низкого заряда по наименьшему заряду [percent]: 0 — не низкий (цвет выбран пользователем), 1 — ниже [BATTERY_ALERT_PERCENT] (оранжевый), 2 — [BATTERY_CRITICAL_PERCENT] и ниже (красный). */
+    fun batteryAlertKind(percent: Int): Int = when {
+        percent !in 0 until BATTERY_ALERT_PERCENT -> 0
+        percent <= BATTERY_CRITICAL_PERCENT -> 2
+        else -> 1
+    }
+
     /** Ближайший момент, когда порядок меняется сам (без события извне); см. [Result.nextChangeAt]. */
     private fun nextChange(cfg: Cfg, shown: List<Card>, s: Snapshot, rowTaskAt: Long): Long {
         var at = nextBoundary(s.now, s.cal)
@@ -413,11 +437,12 @@ object QrPriority {
     private fun serviceKeyOf(s: Snapshot): String = if (s.rpePending) QrRpe.KEY else if (s.moodPending) QrMood.KEY else ""
 
     /**
-     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
+     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: поднятая карточка заряда ([batteryKey], низкий заряд); «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
      * иначе (только «по релевантности») рекомендованная карточка, а если такой нет — верхняя карточка события или задачи календаря. Пусто — своего места нет.
      */
-    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String, timerLead: Boolean = false): String {
+    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String, timerLead: Boolean = false, batteryKey: String = ""): String {
         if (timerLead) return TIMER_SLOT_KEY // идущий таймер выше всего, в том числе служебных карточек и без «релевантности»
+        if (batteryKey.isNotEmpty()) return batteryKey // низкий заряд: выше «Как тренировка?» и «Как настроение?», при любом режиме
         val service = serviceKeyOf(s)
         if (service.isNotEmpty()) return service
         if (!cfg.relevance) return ""
@@ -728,7 +753,6 @@ object QrPriority {
                 if (at < s.now) cand(SCORE_TASK_OVERDUE, "Задача просрочена")
                 else if (at < dayStart(s.cal, s.now, 1)) cand(SCORE_TASK_TODAY, "Задача на сегодня")
             }
-            if (isBattery(c.key) && s.batteryPercent in 0..BATTERY_LOW_PERCENT) cand(SCORE_BATTERY_LOW, "Заряд " + s.batteryPercent + " %")
             if (scheduledNow(c, s.cal)) cand(SCORE_SCHEDULED, "Сейчас её время" + windowName(c, s.cal))
             if (c.dyn == "event" && best == 0 && c.at - s.now > SOON_MS) best = SCORE_LOW // до события больше 12 часов: время карточки не пришло — ниже карточек без сигналов
         }
@@ -810,26 +834,33 @@ object QrPriority {
         val lead = if (timerLifted) 1 else 0
         if (timerLifted && keys.firstOrNull() != TIMER_SLOT_KEY) bad.add("0: идёт таймер, но карточка «Таймеры» не первая")
 
-        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая (после идущего таймера); «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
+        // 0б. Низкий заряд: все карточки заряда подряд сразу после идущего таймера (над «Как тренировка?» и «Как настроение?»); заряд не низкий — они в основной части
+        val alert = batteryAlert(s)
+        val batAt = keys.indices.filter { isBattery(keys[it]) }
+        if (alert && batAt != (lead until lead + batAt.size).toList()) bad.add("0: заряд низкий, но карточки заряда не наверху")
+        val lead2 = lead + (if (alert) batAt.size else 0) // сколько мест занято выше служебных «Как тренировка?» / «Как настроение?»
+
+        // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая (после идущего таймера и карточек низкого заряда); «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
         val rpeAt = keys.indexOf(QrRpe.KEY)
         if (s.rpePending) {
-            if (rpeAt != lead) bad.add("1: rpePending, но «Как тренировка?» не первая")
+            if (rpeAt != lead2) bad.add("1: rpePending, но «Как тренировка?» не первая")
         } else if (rpeAt >= 0) bad.add("1: «Как тренировка?» есть без rpePending")
         if (keys.count { it == QrRpe.KEY } > 1) bad.add("1: «Как тренировка?» больше одной")
         val moodAt = keys.indexOf(QrMood.KEY)
         if (s.moodPending) {
-            if (moodAt != lead + (if (s.rpePending) 1 else 0)) bad.add("1: moodPending, но «Как настроение?» не на своём месте")
+            if (moodAt != lead2 + (if (s.rpePending) 1 else 0)) bad.add("1: moodPending, но «Как настроение?» не на своём месте")
         } else if (moodAt >= 0) bad.add("1: «Как настроение?» есть без moodPending")
         if (keys.count { it == QrMood.KEY } > 1) bad.add("1: «Как настроение?» больше одной")
-        val main = cards.filter { !isService(it.key) }
+        val body = cards.filter { !isService(it.key) }
+        val main = body.filter { !(alert && isBattery(it.key)) } // без поднятых наверх карточек заряда: у них своё место
 
         // 2. и 6. Нет скрытых, выполненных и вне окна; нет дублей; ничего не потеряно
         val nextEv = nextEventKey(cfg, s)
         val nextTask = nextTaskKey(cfg, s)
-        for (c in main) if (!isShown(c, s, nextEv, nextTask)) bad.add("2: лишняя карточка " + c.key)
+        for (c in body) if (!isShown(c, s, nextEv, nextTask)) bad.add("2: лишняя карточка " + c.key)
         if (keys.toSet().size != keys.size) bad.add("6: дубли ключей")
-        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask) && main.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
-        for (g in groups(cfg, s)) if (main.count { it.key == g.key } != 1) bad.add("6: у группы " + g.key + " не одна карточка") // группа — всегда одна карточка, сколько бы элементов ни было
+        for (c in cfg.cards) if (isShown(c, s, nextEv, nextTask) && body.none { it.key == c.key }) bad.add("6: потеряна карточка " + c.key)
+        for (g in groups(cfg, s)) if (body.count { it.key == g.key } != 1) bad.add("6: у группы " + g.key + " не одна карточка") // группа — всегда одна карточка, сколько бы элементов ни было
 
         // 3. «В конец», перенесённые сегодня, — подряд в самом конце, в порядке переноса
         val movedIdx = main.indices.filter { movedToday(main[it], s) }
@@ -841,7 +872,7 @@ object QrPriority {
         }
 
         // 4. При равном балле событие выше задачи
-        val scored = result.cards.filter { !isService(it.card.key) }
+        val scored = result.cards.filter { !isService(it.card.key) && !(alert && isBattery(it.card.key)) }
         for (i in scored.indices) for (j in i + 1 until scored.size) {
             // исключение: удержанная устойчивостью верхняя карточка стоит первой, даже если рядом событие с тем же баллом
             val held = i == 0 && scored[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey
@@ -855,18 +886,19 @@ object QrPriority {
             val rest = main.filter { it.key in order && !(it.after == "end" && s.movedAt.containsKey(it.key)) } // слоты привычек не из cfg.cards — их место определяет сама стопка
             val pos = rest.map { order.indexOf(it.key) }
             for (i in 1 until pos.size) if (pos[i] < pos[i - 1]) bad.add("5: нарушен порядок пользователя")
-            if (result.topKey.isNotEmpty() && !isService(result.topKey) && !(timerLifted && result.topKey == TIMER_SLOT_KEY)) bad.add("5: topKey не пуст без релевантности")
+            if (result.topKey.isNotEmpty() && !isService(result.topKey) && !(timerLifted && result.topKey == TIMER_SLOT_KEY) && !(alert && isBattery(result.topKey))) bad.add("5: topKey не пуст без релевантности")
         }
 
-        // 7. topKey — первая карточка основной части (или служебная карточка наверху)
-        if (result.topKey.isNotEmpty() && !isService(result.topKey) && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
-        if (result.topKey == QrRpe.KEY && rpeAt != lead) bad.add("7: topKey — rpe, но её нет наверху")
-        if (result.topKey == QrMood.KEY && moodAt != lead) bad.add("7: topKey — настроение, но его нет наверху")
+        // 7. topKey — первая карточка основной части (или служебная карточка наверху, или поднятая карточка заряда)
+        if (result.topKey.isNotEmpty() && !isService(result.topKey) && !(alert && isBattery(result.topKey)) && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
+        if (alert && batAt.isNotEmpty() && !timerLifted && result.topKey != keys[lead]) bad.add("7: заряд низкий, но topKey — не карточка заряда")
+        if (result.topKey == QrRpe.KEY && rpeAt != lead2) bad.add("7: topKey — rpe, но её нет наверху")
+        if (result.topKey == QrMood.KEY && moodAt != lead2) bad.add("7: topKey — настроение, но его нет наверху")
         if (timerLifted && result.topKey != TIMER_SLOT_KEY) bad.add("7: идёт таймер, но topKey — не карточка «Таймеры»")
 
         // 8. При «релевантности» основная часть (без перенесённых) идёт по убыванию баллов; удержанная верхняя карточка — вне счёта
         if (cfg.relevance) {
-            val head = result.cards.filter { !isService(it.card.key) && !movedToday(it.card, s) }
+            val head = result.cards.filter { !isService(it.card.key) && !(alert && isBattery(it.card.key)) && !movedToday(it.card, s) }
             val from = if (head.isNotEmpty() && head[0].card.key == result.mainTopKey && result.mainTopKey == s.lastTopKey) 1 else 0
             for (i in from + 1 until head.size) if (head[i].score > head[i - 1].score) bad.add("8: баллы не по убыванию у " + head[i].card.key)
 

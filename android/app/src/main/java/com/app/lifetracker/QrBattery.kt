@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 4.5 (14.11)
+// Версия: 5.0 (19.11)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -83,6 +83,10 @@ object QrBattery {
     /** Цвет лица, если страница его не прислала: сиреневый, как у карточек без цвета (`DEFAULT_CARD_COLOR` в itemcards.js). */
     const val DEFAULT_FACE = 0xFFB9A1FF.toInt()
 
+    /** Цвета лица при низком заряде ([QrPriority.batteryAlertKind]): самый тёмный оранжевый палитры цвета карточек (`#ef6c00`) и самый тёмный красный (`#ff0000`). */
+    const val ALERT_ORANGE = 0xFFEF6C00.toInt()
+    const val ALERT_RED = 0xFFFF0000.toInt()
+
     @Volatile private var registered = false
 
     // ---------- чтение заряда ----------
@@ -97,6 +101,37 @@ object QrBattery {
         } catch (e: Throwable) {
             -1
         }
+    }
+
+    /**
+     * Наименьший заряд среди телефона и подключённых Bluetooth-устройств, которые его отдают, 0..100; -1 — не удалось узнать ни одного. Устройства без известного заряда
+     * (клавиатура, колонка, наушники с «--%») не считаются. По нему карточки заряда встают наверх стопки и меняют цвет ([QrPriority.BATTERY_ALERT_PERCENT]).
+     */
+    @SuppressLint("MissingPermission")
+    fun lowestLevel(ctx: Context): Int {
+        var low = phoneLevel(ctx)
+        try {
+            val app = ctx.applicationContext
+            if (!btPermitted(app)) return low
+            val adapter = adapterOf(app) ?: return low
+            if (!adapter.isEnabled) return low
+            val (addrs, names) = activeOutputs(app)
+            for (d in adapter.bondedDevices ?: emptySet<BluetoothDevice>()) {
+                if (!isActive(d, addrs, names) && !isConnected(d)) continue
+                val lv = levelOf(app, d)
+                if (lv >= 0 && (low < 0 || lv < low)) low = lv
+            }
+        } catch (e: Throwable) {
+            // остаётся то, что успели узнать
+        }
+        return low
+    }
+
+    /** Цвет лица карточки заряда: при низком заряде ([lowestLevel]) оранжевый или красный, иначе [face] — цвет, выбранный в форме виджета. */
+    fun faceColor(ctx: Context, face: Int): Int = when (QrPriority.batteryAlertKind(lowestLevel(ctx))) {
+        2 -> ALERT_RED
+        1 -> ALERT_ORANGE
+        else -> face
     }
 
     private fun btPermitted(ctx: Context): Boolean =
