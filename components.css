@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.13 (19.11) — фильтр «Заметок-карточек» по цвету (`.note-color-menu`, `.note-color-swatches`, `.note-color-swatch`, `.note-color-empty`): круглые образцы только тех цветов, что есть у заметок; меню — то же, что у воронки «QR-кодов» (`.item-filter-menu`). Откат: components.css 26.12.
    Версия: 26.12 (19.11) — красная строка заметок (`.cm-md-para-start`): `::before` шириной 1ch вместо `text-indent` (ручки выделения на первом слове абзаца). Откат: components.css 26.11.
    Версия: 26.11 (18.11) — экран «Карточка заметки»: чипы времени суток приоритета над палитрой (`.note-card-form-sec`, `.note-card-form-hint`, `.note-time-chips`, `.note-time-chip`). Откат: components.css 26.10.
    Версия: 26.10 (18.11) — «Заметки-карточки»: у карточки заметки меню долгого удержания в `.note-card-actions` (2×2: виджет, настройки карточки, закладка, удаление); цвет карточки — `--note-bg` / `--note-shade` (ставит mdeditor.js), без них прежний #7f00ff; кнопки `.mdeditor-notecard-btn` («Настройки карточки») и экран `.note-card-form`. Откат: components.css 26.9.
@@ -4487,6 +4488,16 @@ body::after{
   pointer-events:auto;
 }
 .item-filter-menu .workbooks-run-btn.selected{ font-weight:700; background:rgba(127,127,127,.18); }
+/* фильтр заметок по цвету: «Все цвета» сверху, под ним круглые образцы цветов (по 5 в ряд) */
+.note-color-menu{ min-width:0; width:max-content; max-width:calc(100vw - 24px); }
+.note-color-swatches{ display:grid; grid-template-columns:repeat(5, 30px); gap:8px; padding:4px 2px 2px; justify-content:center; }
+.note-color-swatch{
+  width:30px; height:30px; padding:0; box-sizing:border-box;
+  border:1px solid rgba(0,0,0,.25); border-radius:50%;
+  cursor:pointer; -webkit-tap-highlight-color:transparent;
+}
+.note-color-swatch.selected{ outline:3px solid var(--ink, #000); outline-offset:2px; }
+.note-color-empty{ padding:6px 8px; font-size:14px; color:var(--ink-soft, inherit); white-space:nowrap; }
 @media (hover:hover) and (pointer:fine){
   .item-type-menu .workbooks-run-btn:hover:not(:disabled){ background:rgba(127,127,127,.18); }
 }

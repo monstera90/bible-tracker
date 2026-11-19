@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.8 (19.11) — «Заметки-карточки»: кнопка-воронка в нижнем ряду (`#mdNotesFilterBtn`, значок тот же, что у воронки вкладки «QR-коды»; сразу слева от кнопки режима) — фильтр заметок по цвету карточки: список раскрывается над кнопкой и показывает только те цвета, которые реально выбраны у заметок текущей папки (`LTNoteCards.getColor`), плюс «Все цвета»; выбранный цвет оставляет в списке только заметки этого цвета (папки остаются), кнопка при этом нажата. Выбор живёт до перезагрузки (`noteColorFilter`); если цвета в этой папке уже нет — фильтр не действует. Откат: mdeditor.js 25.7.
    Версия: 25.7 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
    Версия: 25.6 (19.11) — класс `fab-row-ext` на нижнем ряду, где есть кнопка справа от «домика» (в полноэкранном режиме ряд сдвигается на её ширину, modals.css 22.5). Откат: mdeditor.js 25.5.
    Версия: 25.5 (19.11) — в нижнем ряду списка заметок (оба режима) слева от «домика» кнопка полноэкранного режима (`#mdNotesFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: mdeditor.js 25.4.
@@ -3525,6 +3526,31 @@ window.initMdEditorModule = function(deps){
   var NOTES_VIEW_CARDS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="15" rx="3"></rect><line x1="8" y1="21" x2="16" y2="21"></line></svg>';
   var NOTES_VIEW_LIST_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>';
   var NOTES_SIZE_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="8" height="12" rx="1.5"></rect><rect x="13" y="9" width="8" height="12" rx="1.5"></rect></svg>';
+  var NOTES_FILTER_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8.5V20l-4-2v-4.5L3 5z"></path></svg>'; // воронка — та же, что у фильтра вкладки «QR-коды» (itemcards.js FILTER_ICON_SVG)
+  // фильтр «Заметок-карточек» по цвету карточки: "#rrggbb" (как отдаёт LTNoteCards.getColor) или "" — все цвета; только в памяти, до перезагрузки
+  var noteColorFilter = "";
+  var noteColorMenuBound = false;
+  function noteColorOf(noteId){
+    try{ var api = window.LTNoteCards; return api && typeof api.getColor === "function" ? String(api.getColor(noteId) || "").toLowerCase() : ""; }catch(e){ return ""; }
+  }
+  // порядок цветов в списке фильтра — как радуга: по тону, серые (насыщенность почти нулевая) в конце; при равном тоне — тёмные раньше светлых
+  function noteColorSortKey(hex){
+    var r = parseInt(hex.slice(1, 3), 16) / 255, g = parseInt(hex.slice(3, 5), 16) / 255, b = parseInt(hex.slice(5, 7), 16) / 255;
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, l = (mx + mn) / 2, h = 0;
+    if(d < 0.08) return [1, 0, l];
+    if(mx === r) h = ((g - b) / d + 6) % 6; else if(mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    return [0, h * 60, l];
+  }
+  function noteColorsSorted(list){
+    return list.slice().sort(function(a, b){
+      var x = noteColorSortKey(a), y = noteColorSortKey(b);
+      return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]);
+    });
+  }
+  function closeNoteColorMenu(){
+    var m = document.getElementById("mdNotesColorMenu");
+    if(m) m.style.display = "none";
+  }
   var NOTE_WIDGET_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6h-6z"></path><path d="M14 4h6v6h-6z"></path><path d="M4 14h6v6h-6z"></path><path d="M14 17h6"></path><path d="M17 14v6"></path></svg>'; // как у карточки книги (my.js BOOK_WIDGET_ICON_SVG)
   var NOTE_CARD_SETTINGS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="9" cy="6" r="2" fill="currentColor"></circle><circle cx="15" cy="12" r="2" fill="currentColor"></circle><circle cx="8" cy="18" r="2" fill="currentColor"></circle></svg>'; // «Настройки карточки»: форма с палитрой цвета (позже и другие настройки)
   function getNotesViewMode(){
@@ -3687,6 +3713,21 @@ window.initMdEditorModule = function(deps){
     });
     var items = folderItems.concat(fileItems);
     var cardsMode = getNotesViewMode() === "cards"; // «Заметки-карточки» вместо «Списка моих заметок»
+    // фильтр по цвету: в списке цветов — только те, что выбраны у заметок этой папки; выбранный цвет оставляет только заметки этого цвета (папки остаются)
+    var colorsHere = [], activeColor = "";
+    if(cardsMode){
+      var seenColors = {};
+      fileItems.forEach(function(f){
+        f.color = noteColorOf(f.id);
+        if(f.color && !seenColors[f.color]){ seenColors[f.color] = true; colorsHere.push(f.color); }
+      });
+      colorsHere = noteColorsSorted(colorsHere);
+      if(noteColorFilter && seenColors[noteColorFilter]) activeColor = noteColorFilter;
+      if(activeColor){
+        fileItems = fileItems.filter(function(f){ return f.color === activeColor; });
+        items = folderItems.concat(fileItems);
+      }
+    }
 
     var isRoot = (node === rootTree);
     // Есть ли хоть одна незыделенная заметка ВООБЩЕ (не только в текущей
@@ -3741,6 +3782,20 @@ window.initMdEditorModule = function(deps){
     html += '<div class="mdeditor-fab-row' + (cardsMode ? ' fab-row-ext' : '') + '">';
     // размер карточек — только в режиме «Заметки-карточки»; кнопка режима — сразу слева от «+» и показывает режим, В КОТОРЫЙ переключит клик
     if(cardsMode) html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesSizeBtn" title="Размер карточек">' + NOTES_SIZE_ICON_SVG + '</button>';
+    // воронка — фильтр по цвету карточки; список раскрывается над кнопкой (обёртка и стиль — как у воронки «QR-кодов»)
+    if(cardsMode){
+      html += '<span class="item-filter-wrap"><div class="item-type-menu item-filter-menu note-color-menu" id="mdNotesColorMenu" style="display:none;">';
+      if(colorsHere.length){
+        html += '<button type="button" class="workbooks-run-btn' + (activeColor ? '' : ' selected') + '" data-note-color="">Все цвета</button><div class="note-color-swatches">';
+        colorsHere.forEach(function(c){
+          html += '<button type="button" class="note-color-swatch' + (c === activeColor ? ' selected' : '') + '" data-note-color="' + c + '" style="background:' + c + ';" title="' + c + '" aria-label="Цвет ' + c + '"></button>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div class="note-color-empty">Цвета заметкам ещё не выбраны</div>';
+      }
+      html += '</div><button type="button" class="mdeditor-fab-btn' + (activeColor ? ' pressed' : '') + '" id="mdNotesFilterBtn" title="Фильтр по цвету">' + NOTES_FILTER_ICON_SVG + '</button></span>';
+    }
     html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesViewModeBtn" title="' + (cardsMode ? 'Список моих заметок' : 'Заметки-карточки') + '">' + (cardsMode ? NOTES_VIEW_LIST_ICON_SVG : NOTES_VIEW_CARDS_ICON_SVG) + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdEditorNewNoteBtn" title="Новая заметка">' + PLUS_ICON_SVG + '</button>';
     // «Закладки» — сразу слева от «домика» (экран со списком закладок заметок и книг)
@@ -3767,6 +3822,33 @@ window.initMdEditorModule = function(deps){
         render();
       });
     }
+    var colorFilterBtn = document.getElementById("mdNotesFilterBtn");
+    var colorMenu = document.getElementById("mdNotesColorMenu");
+    if(colorFilterBtn && colorMenu){
+      colorFilterBtn.addEventListener("click", function(){
+        var open = colorMenu.style.display !== "flex";
+        var sb0 = document.getElementById("mdNotesSizeBar");
+        if(sb0) sb0.classList.remove("open");
+        colorMenu.style.display = open ? "flex" : "none";
+      });
+      colorMenu.addEventListener("click", function(e){
+        var b = e.target.closest("[data-note-color]");
+        if(!b) return;
+        var c = b.getAttribute("data-note-color") || "";
+        noteColorFilter = (c && c === noteColorFilter) ? "" : c; // повторное нажатие на выбранный цвет снимает фильтр
+        render();
+      });
+      if(!noteColorMenuBound){
+        noteColorMenuBound = true; // один слушатель на документ: экран перерисовывается часто
+        document.addEventListener("pointerdown", function(e){
+          var m = document.getElementById("mdNotesColorMenu");
+          if(!m || m.style.display !== "flex") return;
+          var t = e.target;
+          if(t && t.closest && t.closest(".item-filter-wrap")) return;
+          m.style.display = "none";
+        }, true);
+      }
+    }
     var sizeBtn = document.getElementById("mdNotesSizeBtn");
     var sizeBar = document.getElementById("mdNotesSizeBar");
     var sizeRange = document.getElementById("mdNotesSizeRange");
@@ -3774,6 +3856,7 @@ window.initMdEditorModule = function(deps){
     if(sizeBtn && sizeBar && sizeRange && sizeVal){
       var showSizeVal = function(){ sizeVal.textContent = Math.round(getNotesCardsScale() * 100) + "%"; };
       sizeBtn.addEventListener("click", function(){
+        closeNoteColorMenu();
         var open = !sizeBar.classList.contains("open");
         sizeBar.classList.toggle("open", open);
         if(open){ sizeRange.value = String(getNotesCardsScale()); showSizeVal(); }
