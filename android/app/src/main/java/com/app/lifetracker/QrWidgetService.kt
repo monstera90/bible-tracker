@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.21 (19.11) — ТОЛЬКО ДИАГНОСТИКА (журнал `QrDiag`, QrWidgets.diag): что собрала фабрика (ключи карточек, группы, размеры картинок), что отдано в getViewAt, запрос заглушки загрузки; исключение в onDataSetChanged больше не проглатывается молча — пишется в журнал (поведение прежнее). Откат: QrWidgetService.kt 2.20.
 // Версия: 2.20 (18.11) — карточка «Заметки» (dyn = "note") в том же разборе нажатий, что и «Книги»: `booktap` несёт id заметки (ключ без «bk_»), приложение открывает заметку. Откат: QrWidgetService.kt 2.19.
 // Версия: 2.19 (17.11) — нажатие по центру и по самой карточке «Книги» открывает показанную книгу на основной закладке: `booktap` несёт id книги (ключ без «bk_»), ScanActivity открывает приложение.
 // Версия: 2.18 (17.11) — карточка «Книги»: у центра и самой карточки теперь всегда есть fill-in intent `booktap`. Без него переиспользованный элемент стопки сохранял нажатие прежней карточки (таймер «Кофе» запускался от нажатия на книгу). Откат: QrWidgetService.kt 2.17.
@@ -68,12 +69,14 @@ class QrWidgetService : RemoteViewsService() {
                         else -> bmp
                     }
                 }
+                QrWidgets.diag("svc-data:" + widgetId, "фабрика wid=" + widgetId + " cfg=" + (cfg?.id ?: "НЕТ") + " карточек=" + list.size + " ключи=" + list.map { it.key + "/" + it.dyn } + " группы=" + gviews.map { it.key + "→" + it.value.card.key + " " + (it.value.index + 1) + "/" + it.value.total } + " картинки=" + fresh.map { it.key + ":" + it.value.width + "x" + it.value.height })
                 cards = list
                 QrWidgets.noteShown(widgetId, list)
                 bitmaps = fresh
                 groupViews = gviews
             } catch (e: Throwable) {
                 // не хватило памяти или сбой данных — остаются прежние карточки
+                QrWidgets.diagErr("фабрика wid=" + widgetId + ": onDataSetChanged УПАЛ, остались прежние карточки (" + cards.size + ")", e)
             }
             quietUntil = SystemClock.uptimeMillis() + QUIET_MS
         }
@@ -88,6 +91,7 @@ class QrWidgetService : RemoteViewsService() {
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
             val n = cards.size
             if (n == 0) {
+                QrWidgets.diag("svc-view:" + widgetId, "getViewAt wid=" + widgetId + " pos=" + position + ": карточек 0 — отдан скелет")
                 rv.setImageViewBitmap(R.id.qr_card_img, QrWidgets.skeletonBitmap())
                 return rv
             }
@@ -95,6 +99,7 @@ class QrWidgetService : RemoteViewsService() {
             // по направлению смахивания; так смахивание, которое раньше вело к последней карточке, теперь ведёт ко второй (и наоборот). Позиция 0 — по-прежнему первая.
             val c = cards[(((-position) % n) + n) % n]
             val bmp = bitmaps[c.key] ?: QrWidgets.bitmapFor(ctx, c)
+            QrWidgets.diag("svc-view:" + widgetId, "getViewAt wid=" + widgetId + " n=" + n + " key=" + c.key + " из кэша=" + (bitmaps[c.key] != null) + " картинка=" + bmp.width + "x" + bmp.height + " переработана=" + bmp.isRecycled)
             rv.setImageViewBitmap(R.id.qr_card_img, bmp)
             // «Как тренировка?»: поверх картинки — десять прозрачных зон-кнопок 1…10, у каждой своё число в fill-in intent (ScanActivity ловит его без окна);
             // у остальных карточек зоны скрыты (видимость задаётся всегда: элемент списка может быть переиспользован)
@@ -164,6 +169,7 @@ class QrWidgetService : RemoteViewsService() {
 
         override fun getLoadingView(): RemoteViews? {
             val rv = RemoteViews(ctx.packageName, R.layout.qr_widget_item)
+            QrWidgets.diag("svc-loading:" + widgetId, "getLoadingView wid=" + widgetId + ": система просит заглушку загрузки (карточек сейчас " + cards.size + ")")
             rv.setImageViewBitmap(R.id.qr_card_img, QrWidgets.skeletonBitmap())
             return rv
         }

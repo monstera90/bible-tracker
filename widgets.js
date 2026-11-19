@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.6 (19.11) — ТОЛЬКО ДИАГНОСТИКА: кнопка «▶ Виджеты: журнал оболочки» в панели отладки (`diagReport`). Откат: widgets.js 7.5.
    Версия: 7.5 (18.11) — «Отображать книги» и «Отображать заметки» — две отдельные галочки и две отдельные карточки в стопке: у виджета `books`/`bookList` (только книги) и `notes`/`noteList` (только заметки, id с приставкой `nt_`); в оболочку уходят `bks` и `nts` (у заметки — `times`: время суток приоритета, которое задано на экране «Заметки-карточки», `LTNoteCards.getTime`). Старые виджеты, где заметки лежали в `bookList`, при загрузке разносятся по двум спискам (`splitNotes`). Откат: widgets.js 7.4.
    Версия: 7.4 (18.11) — заметки-карточки в карточке «Книги»: заметку можно добавить в виджет с экрана «Заметки-карточки» (долгое нажатие → кнопка с виджетом; `toggleBook(…, "note")`). Заметка лежит в том же списке `bookList`, id с приставкой `nt_` (`isNoteId`), лицо рисует `noteFacePng` (цвет заметки, значок, название); список заметок для лиц — деп `listNotes`. Нажатие на карточку открывает заметку. Откат: widgets.js 7.3.
    Версия: 7.3 (17.11) — лицо книги шириной 480 px, как у остальных лиц (было 400): в StackView более узкая картинка не заполняла слот, книга выходила меньше и сдвинутой, а из-за неё выглядывала задняя карточка. Откат: widgets.js 7.2.
@@ -1620,6 +1621,18 @@ var DAY_MS = 86400000;
       migrateHabitCards();
       render();
     }
+
+    // Диагностика (только чтение): кнопка «▶ Виджеты: журнал оболочки» в панели отладки (галочка «Включить режим отладки») — журнал QrDiag оболочки + что страница знает о виджетах
+    function diagReport(){
+      var b = window.LifeTrackerNative, lines = [];
+      lines.push("Виджетов в конструкторе: " + data.list.length);
+      data.list.forEach(function(w){ lines.push("  " + w.id + " (№" + w.n + "): карточек " + w.cards.length + ", книги " + (w.books ? "вкл" : "выкл") + "/" + w.bookList.length + ", заметки " + (w.notes ? "вкл" : "выкл") + "/" + w.noteList.map(function(x){ return x.h; }).join(",") + ", релевантность " + (w.relevance ? "вкл" : "выкл")); });
+      var log = "";
+      try{ log = (b && typeof b.widgetDiagLog === "function") ? String(b.widgetDiagLog() || "") : "(в этой сборке оболочки нет widgetDiagLog — нужна пересборка APK)"; }catch(e){ log = "(ошибка чтения журнала: " + e + ")"; }
+      var text = lines.join("\n") + "\n--- журнал оболочки ---\n" + (log || "(пусто)");
+      return Promise.resolve({ text: text, headline: lines[0] + "; журнал оболочки " + (log ? log.split("\n").length + " строк" : "пуст") });
+    }
+    try{ if(window.Debug && typeof window.Debug.registerAction === "function") window.Debug.registerAction("Виджеты: журнал оболочки", diagReport); }catch(e){}
 
     return { render: renderTab, scheduleSync: scheduleSync, syncNow: syncNow, feedChanged: feedChanged, widgetsForBook: widgetsForBook, toggleBook: toggleBook, toast: say, noWidgetsText: TOAST_NO_WIDGETS, timeWindows: function(){ return WINDOWS.concat([WINDOW_ALL]); }, hasWidgets: function(){ return data.list.length > 0 || !!data.ever; } };
   };

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.4 (19.11) — ТОЛЬКО ДИАГНОСТИКА (поведение не меняется): журнал `QrDiag` пишется ещё и в файл `qrdiag.log` (до ~16 КБ; читается кнопкой «▶ Виджеты: журнал оболочки» в панели отладки, мост `widgetDiagLog`) — компьютер не нужен; ([diag], пишет только при изменении сообщения) — разбор настроек (сколько заметок пришло и принято), приём картинок лиц (ключ, размер), разбор файла лица книги/заметки в [bitmapFor] (размер, декодируется ли, сколько точек непрозрачных), итог [update]. Ищем, почему виджет только с карточкой заметки прозрачный. Откат: QrWidgets.kt 16.3.
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
 // Версия: 16.3 (18.11) — галочка «Отображать заметки» (`notes`, список `nts`: ключ, название и `times` — время суток заметки): карточка-группа «Заметки» ([QrPriority.NOTE_SLOT_KEY]) отдельно от карточки «Книги»; лицо заметки — картинка `<ключ>.png` от страницы; заметка «в своё время» встаёт в круг равных ([QrPriority.noteList]). Откат: QrWidgets.kt 16.2.
 // Версия: 16.2 (17.11) — галочка «Отображать книги» (`books`, список `bks`: ключ и название): карточка-группа «Книги» ([QrPriority.BOOK_SLOT_KEY]) с книгами виджета; лицо книги — картинка `<ключ>.png`, присланная страницей (обложка с выступом), нет её — запасная с названием; листание краями и точки — как у других групп, нажатие по центру ничего не делает. Откат: QrWidgets.kt 16.1.
@@ -440,6 +441,7 @@ object QrWidgets {
                         if (noteList.size >= QrPriority.NOTE_NAV_MAX) break
                     }
                 }
+                if (notesOn || booksOn) diag("parse:" + id, "cfg=" + id + " rel=" + o.optBoolean("relevance", false) + " cards=" + cards.size + " books=" + booksOn + " bks=" + (bks?.length() ?: -1) + "/" + bookList.size + " notes=" + notesOn + " nts=" + (nts?.length() ?: -1) + "/" + noteList.size + " noteKeys=" + noteList.map { it.key + ":" + it.times })
                 val battery = o.optBoolean("battery", false)
                 val batColor = parseColor(o.optString("batColor", ""))
                 if (battery) cards.add(Card(QrBattery.KEY, "", "Заряд", emptyList(), emptySet(), emptySet(), "none", batColor)) // карточка заряда — последняя в стопке
@@ -460,7 +462,10 @@ object QrWidgets {
         }
     }
 
-    fun configs(ctx: Context): List<Cfg> = parse(prefs(ctx).getString(K_CFG, null))
+    fun configs(ctx: Context): List<Cfg> {
+        diagInit(ctx)
+        return parse(prefs(ctx).getString(K_CFG, null))
+    }
 
     private fun jmap(ctx: Context, key: String): JSONObject = try {
         JSONObject(prefs(ctx).getString(key, "{}") ?: "{}")
@@ -571,7 +576,8 @@ object QrWidgets {
                     val raw = images.optString(key, "")
                     val comma = raw.indexOf(',')
                     val bytes = Base64.decode(if (comma >= 0) raw.substring(comma + 1) else raw, Base64.DEFAULT)
-                    if (bytes.isEmpty()) continue
+                    if (bytes.isEmpty()) { diag("img-empty:" + key, "картинка " + key + " пришла пустой"); continue }
+                    if (key.startsWith("bk_")) diag("img:" + key, "принята картинка " + key + " байт=" + bytes.size + " заголовок=" + raw.substring(0, Math.min(raw.length, 30)))
                     val tmp = File(dir, "$key.tmp")
                     tmp.writeBytes(bytes)
                     val dst = File(dir, "$key.png")
@@ -642,6 +648,8 @@ object QrWidgets {
             }
         }
         val f = File(imgDir(ctx), c.key + ".png")
+        diagInit(ctx)
+        if (c.dyn == "book" || c.dyn == "note") diagFace(c, f)
         if (f.exists()) {
             try {
                 BitmapFactory.decodeFile(f.path)?.let { return normalizeFace(it) }
@@ -1499,6 +1507,7 @@ object QrWidgets {
         // все карточки скрыты — полупрозрачная плашка, как папка на телефонах Xiaomi; иначе обычная сиреневая
         rv.setInt(R.id.qr_empty, "setBackgroundResource", if (allDone) R.drawable.qr_widget_done_bg else R.drawable.qr_widget_empty_bg)
         rv.setTextViewTextSize(R.id.qr_empty, android.util.TypedValue.COMPLEX_UNIT_SP, if (allDone) 14f else 12f)
+        diag("update:" + id, "update id=" + id + " cfg=" + (cfg?.id ?: "НЕТ") + " notes=" + (cfg?.notes ?: false) + " noteCards=" + (cfg?.noteCards?.size ?: -1) + " allDone=" + allDone + " rebuild=" + doRebuild + " showAt=" + showAt + " fresh=" + fresh)
         // Вертикальный столбец белых кружков (точки положения в стопке) убран совсем: вид всегда GONE
         rv.setViewVisibility(R.id.qr_dots, android.view.View.GONE)
         val tpl = Intent(app, ScanActivity::class.java)
@@ -2231,6 +2240,73 @@ object QrWidgets {
         p.color = 0x73FFFFFF
         g.drawRoundRect(RectF(0f, 0f, s.toFloat(), body), r, r, p)
         bmp
+    }
+
+    // ---------- диагностика (ничего не меняет) ----------
+
+    private val diagLast = HashMap<String, String>()
+    private val diagFaceSig = HashMap<String, String>()
+
+    /** Пишет в журнал `QrDiag` только когда сообщение для [key] изменилось: без повторов и лишней нагрузки. */
+    internal fun diag(key: String, msg: String) {
+        val same = synchronized(diagLast) { if (diagLast[key] == msg) true else { diagLast[key] = msg; false } }
+        if (!same) diagLine(msg)
+    }
+
+    @Volatile private var diagFile: File? = null
+
+    internal fun diagInit(ctx: Context) {
+        if (diagFile == null) diagFile = File(ctx.applicationContext.filesDir, "qrdiag.log")
+    }
+
+    /** Строка в logcat и в файл `qrdiag.log` (с временем); файл не растёт дальше ~16 КБ — старое отрезается. */
+    internal fun diagLine(msg: String) {
+        Log.i("QrDiag", msg)
+        val f = diagFile ?: return
+        try {
+            val line = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date()) + " " + msg + "\n"
+            synchronized(diagLast) {
+                if (f.exists() && f.length() > 16_000L) {
+                    val keep = f.readText().takeLast(8_000)
+                    f.writeText(keep.substringAfter('\n', keep))
+                }
+                f.appendText(line)
+            }
+        } catch (e: Throwable) {
+            // журнал не должен ничего ломать
+        }
+    }
+
+    /** Исключение одной строкой: тип, текст и первые три кадра стека. */
+    internal fun diagErr(msg: String, e: Throwable) = diagLine(msg + ": " + e + " @ " + e.stackTrace.take(3).joinToString(" < "))
+
+    /** Весь журнал для страницы (мост `widgetDiagLog`); пусто — ещё ничего не писалось. */
+    fun diagText(ctx: Context): String {
+        diagInit(ctx)
+        return try { diagFile?.takeIf { it.exists() }?.readText() ?: "" } catch (e: Throwable) { "" }
+    }
+
+    /** Разбор файла лица книги/заметки; считается только когда файл изменился (длина + время). */
+    private fun diagFace(c: Card, f: File) {
+        val sig = if (f.exists()) f.length().toString() + "/" + f.lastModified() else "нет"
+        val seen = synchronized(diagFaceSig) { if (diagFaceSig[c.key] == sig) true else { diagFaceSig[c.key] = sig; false } }
+        if (seen) return
+        if (!f.exists()) { diagLine("лицо " + c.dyn + " " + c.key + ": ФАЙЛА НЕТ (будет запасная картинка)"); return }
+        try {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(f.path, o)
+            val b = BitmapFactory.decodeFile(f.path)
+            if (b == null) { diagLine("лицо " + c.dyn + " " + c.key + ": файл " + f.length() + " байт, mime=" + o.outMimeType + " — НЕ ДЕКОДИРУЕТСЯ"); return }
+            var opaque = 0
+            var total = 0
+            val w = b.width
+            val h = b.height
+            for (iy in 1..9) for (ix in 1..9) { total++; if (Color.alpha(b.getPixel(w * ix / 10, h * iy / 10)) > 200) opaque++ }
+            val mid = b.getPixel(w / 2, h / 2)
+            diagLine("лицо " + c.dyn + " " + c.key + ": файл " + f.length() + " байт, mime=" + o.outMimeType + ", " + w + "x" + h + ", непрозрачных точек " + opaque + "/" + total + ", центр=#" + Integer.toHexString(mid))
+        } catch (e: Throwable) {
+            diagErr("лицо " + c.key + ": сбой разбора", e)
+        }
     }
 
     /** Картинка-заглушка для карточки, которую система ещё не загрузила (и на случай пустой стопки). */

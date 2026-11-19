@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.1 (19.11) — `widgetDiagLog()`: журнал диагностики виджетов для кнопки панели отладки (версию моста не меняет).
 // Версия: 30.0 (15.11) — мост версии 38: `apkGetState` / `apkCheckNow` / `apkInstall` (обновление самого APK из GitHub Releases, ApkUpdater; вкладка «Проверка обновлений»).
 // Версия: 29.0 (14.11) — мост версии 37: карточка «Как настроение?» в виджетах (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood).
 // Версия: 28.0 (14.11)
@@ -1315,6 +1316,13 @@ class NativeBridge(private val activity: MainActivity) {
         } catch (e: Exception) {
             "{}"
         }
+    }
+
+    /** Журнал диагностики виджетов (QrWidgets.diag, файл qrdiag.log): текст для кнопки отладки; пусто — ничего не писалось. Версию моста не меняет: страница проверяет наличие метода. */
+    @JavascriptInterface
+    fun widgetDiagLog(): String {
+        if (!activity.pageTrusted) return ""
+        return try { QrWidgets.diagText(activity.applicationContext) } catch (e: Exception) { "" }
     }
 
     /** Просит рабочий стол поставить виджет: "requested" | "unsupported" | "missing" | "failed". */
