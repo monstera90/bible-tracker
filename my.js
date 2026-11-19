@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.7 (19.11) — ридер книг: «Аа» (`#bookReaderFontSizeWrap`) стоит справа от «домика» на месте «В библиотеку» и не показывается (`.lib-pending`), пока книга открыта «на лету»; `addTransientBookToLibrary` снимает класс после добавления (modals.css 22.4). Откат: my.js 151.6 / modals.css 22.3.
    Версия: 151.6 (19.11) — (1) `window.LTFullscreen` (`btnHtml`/`bind`): общая кнопка полноэкранного режима для модулей без деп-ов; кнопка слева от «домика» в нижнем ряду списка книг (все три режима), календаря, карточек, списка заметок; (2) режим «Ваши книги» переименован в «Мои книги» (кнопка режима, заголовок, справка). Откат: my.js 151.5.
    Версия: 151.5 (19.11) — (1) календарь: скрытые мероприятия, цвета, «показывать скрытые», «видимые поверх скрытых» и кнопка трекеров едут между устройствами (state `calhid:<id>`, `calpref:<имя>`; `calendarStore.prefGet/prefSet/prefImport/hiddenAll/hiddenSet/hiddenImport`, старые локальные значения переносятся один раз с t=1); после слияния с облаком `rerenderAllFromState` обновляет открытый календарь и колонки дня; (2) перенос задачи в «Комментарии» больше не вырезает ссылки на картинки `![[имя]]` — они содержимое. Откат: my.js 151.4.
    Версия: 151.4 (19.11) — скрепка в пустой новой задаче: пока открыт диалог выбора файла, `flushPendingTaskEdits` (его зовёт `flushPendingSyncNow` при сворачивании приложения системным диалогом) больше не удаляет пустую новую задачу (`freshTaskIds`) — раньше она пропадала до вставки и картинка не добавлялась; запасной путь: если строка всё же исчезла из DOM, ссылка `![[имя]]` дописывается в текст задачи. Новое имя виджета в выборе виджета для книги/заметки (`widgetsForBook` → `name`). Откат: my.js 151.3.
@@ -15428,6 +15429,8 @@
       } else {
         var addBtnGone = document.getElementById("bookReaderAddLibBtn");
         if(addBtnGone && addBtnGone.parentNode) addBtnGone.parentNode.removeChild(addBtnGone);
+        var fsWrapShow = document.getElementById("bookReaderFontSizeWrap"); // «Аа» появляется на месте «В библиотеку»
+        if(fsWrapShow) fsWrapShow.classList.remove("lib-pending");
       }
       var s2 = document.getElementById("bookReaderStatus");
       if(s2) s2.textContent = "";
@@ -15609,7 +15612,7 @@
         // «i» — самая левая кнопка ряда: полноэкранная инструкция по кнопкам ридера (renderBookReaderInfoScreen)
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +
-        '<span class="mdeditor-fontsize-wrap" id="bookReaderFontSizeWrap">' +
+        '<span class="mdeditor-fontsize-wrap' + (bookReaderState && bookReaderState.transient ? ' lib-pending' : '') + '" id="bookReaderFontSizeWrap">' +
           '<div class="mdeditor-fontsize-popup" id="bookReaderFontSizePopup">' +
             '<button type="button" class="mdeditor-fab-btn hyphens-btn" id="bookReaderHyphensBtn" title="Переносы слов"></button>' +
           '</div>' +
