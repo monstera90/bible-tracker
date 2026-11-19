@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 152.0 (19.11) — позиция вкладок задач и «Комментариев» («иногда открывается в самом верху»): прежний слушатель скролла писал в память любой scroll-event, в т.ч. сброс в 0 при перерисовке списка и в `layoutSettingsModal`, а восстановление шло, пока окно ещё скрыто. Теперь: в `tabScrollPercents` пишется только скролл от человека (`tabScrollUserAt`) и позиция, прочитанная ДО замены содержимого (`captureTabScroll`: уход с вкладки, закрытие окна, сворачивание); `restoreTabScroll` ждёт видимости контейнера и доводит место после загрузки картинок (250/800 мс); копия позиций в `state["__tabScroll"]` ({c:{вкладка: 0..1}, t}, пишется редко — `flushTabScrollState`) едет в облако и возвращает место после переустановки; запасная позиция — самый низ. Откат: my.js 151.9.
    Версия: 151.9 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
    Версия: 151.8 (19.11) — класс `fab-row-ext` на нижних рядах, где есть кнопка справа от «домика» (книги-карточки, ридер, PDF-ридер книги «на лету»): в полноэкранном режиме ряд сдвигается на её ширину (modals.css 22.5). Откат: my.js 151.7.
    Версия: 151.7 (19.11) — ридер книг: «Аа» (`#bookReaderFontSizeWrap`) стоит справа от «домика» на месте «В библиотеку» и не показывается (`.lib-pending`), пока книга открыта «на лету»; `addTransientBookToLibrary` снимает класс после добавления (modals.css 22.4). Откат: my.js 151.6 / modals.css 22.3.
@@ -4534,6 +4535,7 @@
   // неё нигде не сохранилась, при следующей чистке корзина сирот совершенно справедливо (с её точки
   // зрения) считала картинку неиспользуемой и удаляла — выглядело как "корзина съедает картинки".
   function flushPendingSyncNow(){
+    try{ if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")) captureTabScroll(currentSettingsTab); flushTabScrollState(); }catch(e){} // позиция вкладки задач — до сброса сохранения и отправки в облако
     if(window.Debug) window.Debug.log("flushPendingSyncNow: старт, saveTimer=" + !!saveTimer + " pushTimer=" + !!pushTimer);
     // Свернули/заблокировали экран/закрыли вкладку в ридере книги — автозакладка и позиция чтения
     // фиксируются ДО сброса сохранения и облачной отправки ниже (см. autoBookmarkOnPageHide).
@@ -10323,6 +10325,8 @@
     updateSettingsCornerPatchHeight();
   }
   function closeSettingsModal(){
+    // позиция вкладки задач/комментариев — пока окно ещё видно (после display:none scrollTop сбрасывается)
+    if(settingsModalOverlay && settingsModalOverlay.classList.contains("open")){ captureTabScroll(currentSettingsTab); flushTabScrollState(); }
     try{ if(window.ClaudeTabMod) window.ClaudeTabMod.hide(); }catch(e){}
     try{ if(window.UserTabsMod) window.UserTabsMod.hide(); }catch(e){}
     closeAppConfirmBar();
@@ -11100,43 +11104,126 @@
       localStorage.setItem(FLAG, "1");
     }catch(e){}
   })();
+  // ПОЗИЦИЯ ВКЛАДОК ЗАДАЧ/КОММЕНТАРИЕВ (переделано): раньше слушатель скролла писал в память ЛЮБОЙ scroll-event контейнера,
+  // в том числе «самопрокрутку» браузера: перерисовка списка (innerHTML) и layoutSettingsModal сбрасывают scrollTop в 0 —
+  // и в tabScrollPercents[вкладка] попадал 0, при следующем заходе вкладка открывалась НАВЕРХУ. Плюс восстановление шло,
+  // пока окно ещё скрыто (clientHeight=0 → max<=0 → scrollTop=0). Теперь:
+  //  1) в память пишется только скролл от пальца/колеса/клавиатуры (флаг tabScrollUserAt) + позиция при уходе с вкладки,
+  //     при закрытии окна и сворачивании приложения (captureTabScroll — читает реальный scrollTop, пока вкладка на экране);
+  //  2) восстановление ждёт, пока контейнер станет видимым и прокручиваемым, и доводит позицию после загрузки картинок;
+  //  3) копия позиций лежит в state["__tabScroll"] (уходит в облако вместе с остальными настройками) — после переустановки
+  //     (allowBackup=false стирает localStorage) позиции возвращаются с облаком; localStorage остаётся первичным;
+  //  4) запасная позиция — самый низ (для всех вкладок задач, кроме «Архива», и для «Комментариев»).
+  var TAB_SCROLL_STATE_REC = "__tabScroll";
+  var tabScrollUserAt = 0;       // момент последнего ввода пальцем/колесом/клавишей в контейнере
+  var tabScrollAcceptedAt = 0;   // момент последнего принятого scroll-события (цепочка для инерции после отпускания пальца)
+  var tabScrollRestorePending = false; // пока true — позицию не читаем (контент ещё не выставлен)
+  var tabScrollRestoreToken = 0;
+  function tabScrollIsTracked(tab){
+    return !!tab && TAB_SCROLL_AUTO_TABS.indexOf(tab) !== -1;
+  }
+  function tabScrollFromState(tab){
+    var r = state && state[TAB_SCROLL_STATE_REC];
+    var v = r && r.c && typeof r.c === "object" ? r.c[tab] : null;
+    return (typeof v === "number" && isFinite(v)) ? Math.max(0, Math.min(1, v)) : null;
+  }
+  function getTabScrollPct(tab){
+    var v = tabScrollPercents[tab];
+    if(typeof v === "number" && isFinite(v)) return Math.max(0, Math.min(1, v));
+    return tabScrollFromState(tab); // после переустановки localStorage пуст — берём копию из state/облака
+  }
+  // Копия позиций в state (редкая запись: только при уходе с вкладки / сворачивании, и только если что-то реально сдвинулось)
+  function flushTabScrollState(){
+    try{
+      if(tabScrollSaveTimer){ clearTimeout(tabScrollSaveTimer); tabScrollSaveTimer = null; }
+      try{ localStorage.setItem(TAB_SCROLL_STATE_KEY, JSON.stringify(tabScrollPercents)); }catch(e){}
+      var rec = state[TAB_SCROLL_STATE_REC];
+      var cur = (rec && rec.c && typeof rec.c === "object") ? rec.c : {};
+      var next = {}, changed = false;
+      Object.keys(cur).forEach(function(k){ next[k] = cur[k]; });
+      TAB_SCROLL_AUTO_TABS.forEach(function(k){
+        if(k === "set2s_7") return;
+        var v = tabScrollPercents[k];
+        if(typeof v !== "number" || !isFinite(v)) return;
+        v = Math.round(v * 1000) / 1000;
+        if(typeof next[k] !== "number" || Math.abs(next[k] - v) > 0.01){ next[k] = v; changed = true; }
+      });
+      if(!changed) return;
+      state[TAB_SCROLL_STATE_REC] = {c: next, t: Date.now()};
+      saveLocalStateNow();
+      scheduleCloudPush();
+    }catch(e){}
+  }
+  // Читает реальное положение вкладки, пока она ещё на экране (вызывать ДО замены содержимого контейнера)
+  function captureTabScroll(tab){
+    if(!tabScrollIsTracked(tab) || tabScrollRestorePending) return;
+    if(tab === "projects" && activeProjectPickerId) return; // там свой контейнер и своя память
+    var c = document.getElementById("settingsTabContent");
+    if(!c || !c.clientHeight || !c.getClientRects().length) return; // окно скрыто — scrollTop там ничего не значит
+    var max = c.scrollHeight - c.clientHeight;
+    if(max <= 0) return; // нечего прокручивать (или контент ещё не построен) — прежнее значение не трогаем
+    tabScrollPercents[tab] = Math.max(0, Math.min(1, c.scrollTop / max));
+  }
   function initTabScrollTracking(){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
+    var mark = function(){ tabScrollUserAt = Date.now(); };
+    ["touchstart", "touchmove", "wheel", "pointerdown", "mousedown", "keydown"].forEach(function(ev){
+      container.addEventListener(ev, mark, { passive: true, capture: true });
+    });
     container.addEventListener("scroll", function(){
+      var now = Date.now();
+      // принимаем только прокрутку от человека: недавний ввод или продолжение уже принятой цепочки (инерция)
+      if(!(now - tabScrollUserAt < 700 || (tabScrollAcceptedAt && now - tabScrollAcceptedAt < 200))) return;
+      if(tabScrollRestorePending) return;
+      var tab = currentSettingsTab;
+      if(!tabScrollIsTracked(tab)) return;
+      if(tab === "projects" && activeProjectPickerId) return;
       var max = container.scrollHeight - container.clientHeight;
-      var pct = max > 0 ? Math.max(0, Math.min(1, container.scrollTop / max)) : 0;
-      tabScrollPercents[currentSettingsTab] = pct;
+      if(!container.clientHeight || max <= 0) return;
+      tabScrollAcceptedAt = now;
+      tabScrollPercents[tab] = Math.max(0, Math.min(1, container.scrollTop / max));
       scheduleTabScrollSave();
     }, { passive: true });
   }
   // Восстанавливает сохранённую позицию скролла вкладки. Для синхронно рендерящихся вкладок (все
-  // вкладки задач) достаточно вызвать сразу после рендера — читаем scrollHeight внутри
-  // requestAnimationFrame, чтобы браузер успел применить свежую разметку. Для АСИНХРОННО
-  // дорисовывающихся вкладок (например, список книг, читается из OPFS) этого недостаточно — там
-  // нужен отдельный вызов из места, где содержимое реально появилось в DOM (см.
-  // renderSettingsTabBooks).
+  // вкладки задач) достаточно вызвать сразу после рендера. Для АСИНХРОННО дорисовывающихся вкладок
+  // (например, список книг, читается из OPFS) нужен отдельный вызов из места, где содержимое реально
+  // появилось в DOM (см. renderSettingsTabBooks).
   function restoreTabScroll(tab){
     var container = document.getElementById("settingsTabContent");
     if(!container) return;
-    var pct = tabScrollPercents[tab];
+    var pct = getTabScrollPct(tab);
     var defaultBottom = (pct == null) && ((TASK_TAB_IDS.hasOwnProperty(tab) && tab !== "archive") || tab === "extra2");
-    requestAnimationFrame(function(){
+    var token = ++tabScrollRestoreToken;
+    tabScrollRestorePending = true;
+    var tries = 0;
+    function target(){
       var max = container.scrollHeight - container.clientHeight;
-      if(defaultBottom){
-        container.scrollTop = max > 0 ? max : 0;
-        // картинки задач подгружаются чуть позже и меняют высоту — если пользователь ещё ничего не
-        // листал, доводим до нового низа
-        var setTo = container.scrollTop;
+      if(defaultBottom) return max > 0 ? max : 0;
+      return (pct && max > 0) ? pct * max : 0;
+    }
+    function step(){
+      if(token !== tabScrollRestoreToken) return; // уже запущено более новое восстановление
+      // окно ещё скрыто (открытие окна настроек: switchSettingsTab идёт до показа) — ждём кадр-другой
+      if((!container.clientHeight || !container.getClientRects().length) && tries++ < 40){ requestAnimationFrame(step); return; }
+      var userBefore = tabScrollUserAt;
+      container.scrollTop = target();
+      var setTo = container.scrollTop;
+      tabScrollRestorePending = false;
+      // картинки задач и перерисовка окна (layoutSettingsModal) чуть позже меняют высоту — если человек ничего не листал,
+      // доводим до нужного места ещё дважды
+      [250, 800].forEach(function(ms){
         setTimeout(function(){
-          if(Math.abs(container.scrollTop - setTo) > 1) return;
-          var max2 = container.scrollHeight - container.clientHeight;
-          if(max2 > setTo) container.scrollTop = max2;
-        }, 250);
-        return;
-      }
-      container.scrollTop = (pct && max > 0) ? pct * max : 0;
-    });
+          if(token !== tabScrollRestoreToken || tabScrollUserAt !== userBefore) return;
+          if(currentSettingsTab !== tab) return;
+          if(Math.abs(container.scrollTop - setTo) > 1.5) return; // сдвинули не мы (и не человек) — не мешаем
+          var t = target();
+          if(Math.abs(t - container.scrollTop) > 1){ container.scrollTop = t; setTo = container.scrollTop; }
+        }, ms);
+      });
+    }
+    requestAnimationFrame(step);
   }
 
   function switchSettingsTab(tab){
@@ -11166,6 +11253,7 @@
       settingsModalOverlay.classList.contains("open");
     var prevTab = currentSettingsTab;
     var isRealSwitch = settingsWasOpen && prevTab !== tab && !suppressNavPush;
+    if(prevTab !== tab){ captureTabScroll(prevTab); flushTabScrollState(); } // место на уходящей вкладке — ДО замены содержимого контейнера
 
     currentSettingsTab = tab;
     closeAppConfirmBar();
