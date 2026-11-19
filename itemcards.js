@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.7 (19.11) — класс `fab-row-ext` на нижнем ряду, где есть кнопка справа от «домика» (в режиме чтения ряд сдвигается на её ширину, modals.css 22.5). Откат: itemcards.js 49.6.
    Версия: 49.6 (19.11) — в нижнем ряду слева от «домика» кнопка полноэкранного режима (`#itemCardsFullscreenBtn`, `window.LTFullscreen` из my.js; на странице scan.html без приложения её нет). Откат: itemcards.js 49.5.
    Версия: 49.5 (18.11) — подсказка палитры `colorPaletteHtml` для типа `notecard` (форма «Заметки-карточки», mdeditor.js: `LTNoteCards.paletteHtml` → `colorPalette("notecard", "noteCardColors")`): палитра та же, `CARD_PALETTE_COLS`. Откат: itemcards.js 49.4.
    Версия: 49.4 (18.11)
@@ -1092,7 +1093,7 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     var curFilter = getFilter();
     var showAll = getShowHidden();
-    html += '<div class="mdeditor-fab-row">' +
+    html += '<div class="mdeditor-fab-row fab-row-ext">' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsHiddenBtn"' + (curFilter === "fav" ? ' style="display:none;"' : '') + ' title="' + (showAll ? 'Показаны все карточки (нажмите, чтобы скрыть скрытые)' : 'Скрытые карточки не показаны (нажмите, чтобы показать все)') + '">' + (showAll ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="itemCardsWidgetsBtn" title="Конструктор виджетов">' + WIDGETS_ICON_SVG + '</button>' +
       '<span class="item-filter-wrap">' +

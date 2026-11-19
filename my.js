@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 151.8 (19.11) — класс `fab-row-ext` на нижних рядах, где есть кнопка справа от «домика» (книги-карточки, ридер, PDF-ридер книги «на лету»): в режиме чтения ряд сдвигается на её ширину (modals.css 22.5). Откат: my.js 151.7.
    Версия: 151.7 (19.11) — ридер книг: «Аа» (`#bookReaderFontSizeWrap`) стоит справа от «домика» на месте «В библиотеку» и не показывается (`.lib-pending`), пока книга открыта «на лету»; `addTransientBookToLibrary` снимает класс после добавления (modals.css 22.4). Откат: my.js 151.6 / modals.css 22.3.
    Версия: 151.6 (19.11) — (1) `window.LTFullscreen` (`btnHtml`/`bind`): общая кнопка полноэкранного режима для модулей без деп-ов; кнопка слева от «домика» в нижнем ряду списка книг (все три режима), календаря, карточек, списка заметок; (2) режим «Ваши книги» переименован в «Мои книги» (кнопка режима, заголовок, справка). Откат: my.js 151.5.
    Версия: 151.5 (19.11) — (1) календарь: скрытые мероприятия, цвета, «показывать скрытые», «видимые поверх скрытых» и кнопка трекеров едут между устройствами (state `calhid:<id>`, `calpref:<имя>`; `calendarStore.prefGet/prefSet/prefImport/hiddenAll/hiddenSet/hiddenImport`, старые локальные значения переносятся один раз с t=1); после слияния с облаком `rerenderAllFromState` обновляет открытый календарь и колонки дня; (2) перенос задачи в «Комментарии» больше не вырезает ссылки на картинки `![[имя]]` — они содержимое. Откат: my.js 151.4.
@@ -13672,7 +13673,7 @@
     var modeBtn = booksViewModeBtnInfo(mode);
     var hideTitlesOn = getBooksHideTitles();
     return (
-      '<div class="mdeditor-fab-row">' +
+      '<div class="mdeditor-fab-row' + (mode === "cards" ? ' fab-row-ext' : '') + '">' +
         (coverMode ?
           '<button type="button" class="mdeditor-fab-btn" id="booksHideTitlesBtn" title="' + (hideTitlesOn ? "Показать заглавия" : "Скрыть заглавия") + '">' + booksHideTitlesButtonIconSvg(hideTitlesOn) + '</button>'
           : "") +
@@ -15522,7 +15523,7 @@
     var txt = "mdeditor-fab-btn mdeditor-fab-btn-text";
     return (
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
-      '<div class="mdeditor-fab-row">' +
+      '<div class="mdeditor-fab-row' + (bookReaderState && bookReaderState.transient ? ' fab-row-ext' : '') + '">' +
         '<button type="button" class="' + txt + '" id="pdfPageBtn" title="Перейти на страницу" style="width:auto;min-width:var(--fab-size,30px);padding:0 8px;font-size:13px;"></button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomOutBtn" title="Уменьшить">−</button>' +
         '<button type="button" class="' + txt + '" id="pdfZoomInBtn" title="Увеличить">+</button>' +
@@ -15608,7 +15609,7 @@
     var chaptersMode = bookReaderState.mode === "chapters";
     return (
       '<div class="mdeditor-status" id="bookReaderStatus"></div>' +
-      '<div class="mdeditor-fab-row">' +
+      '<div class="mdeditor-fab-row fab-row-ext">' +
         // «i» — самая левая кнопка ряда: полноэкранная инструкция по кнопкам ридера (renderBookReaderInfoScreen)
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderInfoBtn" title="Информация">' + INFO_ICON_SVG + '</button>' +
         '<button type="button" class="mdeditor-fab-btn" id="bookReaderFlibustaBtn" title="Flibusta">' + READER_FLIBUSTA_ICON_SVG + '</button>' +

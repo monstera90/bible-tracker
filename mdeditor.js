@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.6 (19.11) — класс `fab-row-ext` на нижнем ряду, где есть кнопка справа от «домика» (в режиме чтения ряд сдвигается на её ширину, modals.css 22.5). Откат: mdeditor.js 25.5.
    Версия: 25.5 (19.11) — в нижнем ряду списка заметок (оба режима) слева от «домика» кнопка полноэкранного режима (`#mdNotesFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: mdeditor.js 25.4.
    Версия: 25.4 (18.11) — экран «Карточка заметки» (`openNoteCardForm`): над палитрой цвета выбор времени суток приоритета заметки — «Не выбрано», «Утро», «Обед», «Вечер», «Все время» (`timeChipsHtml`, `LTNoteCards.getTime/setTime/timeOptions`); выбор сохраняется сразу. Откат: mdeditor.js 25.3.
    Версия: 25.3 (18.11) — «Заметки-карточки»: долгое удержание заметки показывает четыре кнопки (2×2): «Показывать в виджете» (`LTNoteCards.pickWidget` — выбор виджета, как у книг-карточек), «Настройки карточки» (экран `openNoteCardForm` с палитрой цвета — той же, что у карточек QR, через `LTNoteCards.paletteHtml`), закладка и удаление. Цвет заметки (`LTNoteCards.getColor/setColor`, хранится в облаке) красит карточку (`--note-bg`/`--note-shade`) и её лицо в виджете. `isNotesReady` — для виджетов. Откат: mdeditor.js 25.2.
@@ -3736,7 +3737,7 @@ window.initMdEditorModule = function(deps){
     html += '</div>';
     html += '<input type="file" accept=".md,.zip,text/markdown,application/zip" id="mdEditorImportInput" style="display:none;">';
     html += '<input type="file" accept=".zip,application/zip" id="mdEditorImportImagesZipInput" style="display:none;">';
-    html += '<div class="mdeditor-fab-row">';
+    html += '<div class="mdeditor-fab-row' + (cardsMode ? ' fab-row-ext' : '') + '">';
     // размер карточек — только в режиме «Заметки-карточки»; кнопка режима — сразу слева от «+» и показывает режим, В КОТОРЫЙ переключит клик
     if(cardsMode) html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesSizeBtn" title="Размер карточек">' + NOTES_SIZE_ICON_SVG + '</button>';
     html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesViewModeBtn" title="' + (cardsMode ? 'Список моих заметок' : 'Заметки-карточки') + '">' + (cardsMode ? NOTES_VIEW_LIST_ICON_SVG : NOTES_VIEW_CARDS_ICON_SVG) + '</button>';
@@ -4761,7 +4762,7 @@ window.initMdEditorModule = function(deps){
         '<div class="mdeditor-status" id="mdEditorStatus"></div>' +
         '<div class="mdeditor-editor-host" id="mdEditorHost"></div>' +
         '<input type="file" accept="image/*" id="mdEditorImageInput" style="display:none;">' +
-        '<div class="mdeditor-fab-row">' +
+        '<div class="mdeditor-fab-row fab-row-ext">' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorInfoBtn" title="Как работает форматирование">' + INFO_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorDownloadBtn" title="Скачать .md">' + DOWNLOAD_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-bold" id="mdEditorFmtBoldBtn" title="Жирный">Ж</button>' +
