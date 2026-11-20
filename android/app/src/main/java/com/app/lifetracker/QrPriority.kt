@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 6.1 (19.11) — служебная карточка «Заряд телефона достиг 80 %» ([QrCharge.KEY], `Cfg.chargeDone`, [Snapshot.chargeLevel]): пока телефон на зарядке и заряд не ниже [CHARGE_DONE_PERCENT], стоит наверху стопки при любом режиме — ниже идущего таймера и карточек низкого заряда, выше «Как тренировка?» и «Как настроение?». Откат: QrPriority.kt 6.0.
 // Версия: 6.0 (19.11)
 // Версия: 5.7 (18.11) — карточка «Заметки» (`Cfg.notes`, `Cfg.noteCards`): пятая карточка-группа «nt_0» ([NOTE_SLOT_KEY]), отдельная от «Книг»; элемент — одна заметка виджета. Заметка, у которой сейчас её время суток (утро/обед/вечер/все время, [Card.times] — выбирается на экране «Заметки-карточки»), имеет балл [SCORE_CYCLE]: встаёт в круг равных наравне с календарём и привычками; заметка без времени суток — балл 0, листается краями. Откат: QrPriority.kt 5.6.
 // Версия: 5.6 (17.11) — карточка «Книги» (`Cfg.books`, `Cfg.bookCards`): четвёртая карточка-группа «bk_0» ([BOOK_SLOT_KEY]), элемент — одна книга виджета; баллов у книг нет (в круг равных и наверх по релевантности карточка не попадает, листается краями). Откат: QrPriority.kt 5.5.
@@ -27,7 +28,7 @@ import java.util.Calendar
  * Порядок карточек стопки виджета «Стопка QR-карточек» и ответ на вопрос «что сейчас должно лежать сверху» (ТЗ TZ_card_priority.md).
  *
  * Чистая функция: без Android, SharedPreferences и часов — всё нужное приходит в [Snapshot] (его собирает [QrWidgets.snapshot]).
- * Слои стопки сверху вниз: 1) служебные «Как тренировка?» ([QrRpe.KEY]) и под ней «Как настроение?» ([QrMood.KEY]) — каждая, пока ждёт ответа; 2) основная часть — отфильтрованные карточки, при «релевантности»
+ * Слои стопки сверху вниз: 0) идущий таймер, карточки низкого заряда и под ними «Заряд телефона достиг 80 %» ([QrCharge.KEY], пока телефон на зарядке и заряд не ниже [CHARGE_DONE_PERCENT]); 1) служебные «Как тренировка?» ([QrRpe.KEY]) и под ней «Как настроение?» ([QrMood.KEY]) — каждая, пока ждёт ответа; 2) основная часть — отфильтрованные карточки, при «релевантности»
  * по баллам, иначе в порядке пользователя; 3) хвост — карточки «после срабатывания: в конец», перенесённые сегодня, в порядке переноса.
  * Фильтр (карточки нет в стопке вообще): скрытые сегодня, выполненные задачи, события и задачи вне окна [DYN_DAYS].
  * [check] проверяет инварианты результата; значения баллов — в таблице констант ниже.
@@ -87,6 +88,11 @@ object QrPriority {
      */
     const val BATTERY_ALERT_PERCENT = 30
     const val BATTERY_CRITICAL_PERCENT = 20
+    /**
+     * Заряд достиг порога: телефон на зарядке ([Snapshot.chargeLevel] не ниже этого числа) — при галочке «Показывать карточку о том, что заряд телефона достиг 80%» (`Cfg.chargeDone`)
+     * наверху стопки стоит служебная карточка [QrCharge.KEY] «можно отключать от зарядки»: под карточками низкого заряда, над «Как тренировка?» и «Как настроение?»; при любом режиме, даже без «релевантности».
+     */
+    const val CHARGE_DONE_PERCENT = 80
     /** Ручной приоритет «наверх»: прибавка к баллу карточки (при любых её сигналах; без сигналов балл = эта прибавка). */
     const val PRIO_TOP_BONUS = 300
     /** Ручной приоритет «вниз»: балл не выше нуля — на единицу ниже обычных карточек без сигналов, чтобы карточка действительно стояла после них. */
@@ -138,7 +144,9 @@ object QrPriority {
         /** Какая по счёту из ближайших задач показана на единственной карточке задач (0 — первая; нажатие у края листает, без зацикливания). */
         val taskIndex: Int = 0,
         /** Звонит какой-нибудь из будильников карточки «Будильники» (карточка при этом не отдаёт верх устойчивостью, как звонящий будильник обычной карточки). */
-        val alarmRowRinging: Boolean = false
+        val alarmRowRinging: Boolean = false,
+        /** Заряд телефона, 0..100, пока он подключён к питанию; -1 — не на зарядке, не удалось узнать или у виджета нет галочки «Показывать карточку о том, что заряд телефона достиг 80%» (читает [QrCharge.chargingLevel]). */
+        val chargeLevel: Int = -1
     )
 
     class Scored(val card: Card, val score: Int, val reason: String)
@@ -220,6 +228,8 @@ object QrPriority {
             main.removeAll { isBattery(it.card.key) }
         }
         val batKey = bat.firstOrNull()?.card?.key ?: ""
+        // Телефон на зарядке и заряд достиг порога: «Заряд телефона достиг 80 %» — под карточками низкого заряда, над «Как тренировка?» и «Как настроение?», при любом режиме
+        val chargeKey = if (chargeReady(cfg, s)) QrCharge.KEY else ""
         // Идущий таймер: карточка «Таймеры» всегда первая (над служебными тоже), при любом режиме; между идущими таймерами лицо меняется раз в минуту
         val tg = gs.firstOrNull { it.dyn == "timer" }
         var lead: Scored? = null
@@ -238,13 +248,14 @@ object QrPriority {
         val out = ArrayList<Scored>()
         if (lead != null) out.add(lead)
         out.addAll(bat)
+        if (chargeKey.isNotEmpty()) out.add(Scored(chargeCard(cfg), 0, "Заряд телефона " + s.chargeLevel + " %, можно отключать от зарядки"))
         if (s.rpePending) out.add(Scored(rpeCard(cfg), 0, "Ждёт оценки тренировки"))
         if (s.moodPending) out.add(Scored(moodCard(cfg), 0, "Сегодня настроение ещё не отмечено"))
         out.addAll(main)
         val serviceKey = serviceKeyOf(s)
-        val topKey = if (lead != null) TIMER_SLOT_KEY else if (batKey.isNotEmpty()) batKey else if (serviceKey.isNotEmpty()) serviceKey else top
+        val topKey = if (lead != null) TIMER_SLOT_KEY else if (batKey.isNotEmpty()) batKey else if (chargeKey.isNotEmpty()) chargeKey else if (serviceKey.isNotEmpty()) serviceKey else top
         val next = if (cfg.relevance) nextChange(cfg, base, s, rowTaskAt) else Long.MAX_VALUE
-        val topScored: Scored? = if (lead != null || batKey.isNotEmpty() || serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
+        val topScored: Scored? = if (lead != null || batKey.isNotEmpty() || chargeKey.isNotEmpty() || serviceKey.isNotEmpty()) out.firstOrNull() else if (top.isNotEmpty()) main.firstOrNull() else null
         val cycleAt = if (cfg.relevance && cyc) nextCycleAt(s.now) else Long.MAX_VALUE
         // у группы наверху называем тот элемент, который она на самом деле показывает (а не заголовок слота)
         var topTitle = topScored?.card?.title ?: ""
@@ -256,7 +267,7 @@ object QrPriority {
             if (topGroup.reasons[i].isNotEmpty()) topReason = topGroup.reasons[i]
         }
         val minuteAt = if (lead != null) nextCycleAt(s.now) else Long.MAX_VALUE
-        return Result(out, topKey, anchorOf(cfg, s, main, top, lead != null, batKey), next, top, topTitle, topReason, cycleAt, faces, minuteAt)
+        return Result(out, topKey, anchorOf(cfg, s, main, top, lead != null, batKey, chargeKey), next, top, topTitle, topReason, cycleAt, faces, minuteAt)
     }
 
     /**
@@ -421,8 +432,8 @@ object QrPriority {
         return at
     }
 
-    /** Сколько карточек сейчас в стопке (со служебными «Как тренировка?» и «Как настроение?»): для isAllDone и точек. */
-    fun visibleCount(cfg: Cfg, s: Snapshot): Int = visible(cfg, s).size + (if (s.rpePending) 1 else 0) + (if (s.moodPending) 1 else 0)
+    /** Сколько карточек сейчас в стопке (со служебными «Заряд телефона достиг 80 %», «Как тренировка?» и «Как настроение?»): для isAllDone и точек. */
+    fun visibleCount(cfg: Cfg, s: Snapshot): Int = visible(cfg, s).size + (if (s.rpePending) 1 else 0) + (if (s.moodPending) 1 else 0) + (if (chargeReady(cfg, s)) 1 else 0)
 
     /** Карточка «Как тренировка?» — служебная, над всеми. */
     private fun rpeCard(cfg: Cfg): Card = Card(QrRpe.KEY, "", "Как тренировка?", emptyList(), emptySet(), emptySet(), "none", cfg.rpeColor)
@@ -430,19 +441,26 @@ object QrPriority {
     /** Карточка «Как настроение?» — служебная, над всеми обычными, под «Как тренировка?». */
     private fun moodCard(cfg: Cfg): Card = Card(QrMood.KEY, "", "Как настроение?", emptyList(), emptySet(), emptySet(), "none", cfg.moodColor)
 
-    /** Служебная карточка стопки («Как тренировка?» / «Как настроение?»), а не настоящая. */
-    private fun isService(key: String): Boolean = key == QrRpe.KEY || key == QrMood.KEY
+    /** Карточка «Заряд телефона достиг 80 %» — служебная, под карточками низкого заряда, над «Как тренировка?». Цвет — из формы виджета ([Cfg.chargeColor]). */
+    private fun chargeCard(cfg: Cfg): Card = Card(QrCharge.KEY, "", "Заряд телефона", emptyList(), emptySet(), emptySet(), "none", cfg.chargeColor)
+
+    /** Карточка «Заряд телефона достиг 80 %» сейчас в стопке: у виджета есть галочка, телефон на зарядке и заряд не ниже [CHARGE_DONE_PERCENT]. */
+    fun chargeReady(cfg: Cfg, s: Snapshot): Boolean = cfg.chargeDone && s.chargeLevel in CHARGE_DONE_PERCENT..100
+
+    /** Служебная карточка стопки («Заряд телефона достиг 80 %» / «Как тренировка?» / «Как настроение?»), а не настоящая. */
+    private fun isService(key: String): Boolean = key == QrRpe.KEY || key == QrMood.KEY || key == QrCharge.KEY
 
     /** Ключ служебной карточки, что стоит наверху (у «Как тренировка?» приоритет выше); пусто — служебных карточек нет. */
     private fun serviceKeyOf(s: Snapshot): String = if (s.rpePending) QrRpe.KEY else if (s.moodPending) QrMood.KEY else ""
 
     /**
-     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: поднятая карточка заряда ([batteryKey], низкий заряд); «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
+     * Ключ карточки, на которую стопка возвращается и от смены которой встаёт наверх: поднятая карточка заряда ([batteryKey], низкий заряд); карточка «Заряд телефона достиг 80 %» ([chargeKey]); «Как тренировка?», а если её нет — «Как настроение?» (у любого виджета с этими галочками);
      * иначе (только «по релевантности») рекомендованная карточка, а если такой нет — верхняя карточка события или задачи календаря. Пусто — своего места нет.
      */
-    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String, timerLead: Boolean = false, batteryKey: String = ""): String {
+    private fun anchorOf(cfg: Cfg, s: Snapshot, main: List<Scored>, top: String, timerLead: Boolean = false, batteryKey: String = "", chargeKey: String = ""): String {
         if (timerLead) return TIMER_SLOT_KEY // идущий таймер выше всего, в том числе служебных карточек и без «релевантности»
         if (batteryKey.isNotEmpty()) return batteryKey // низкий заряд: выше «Как тренировка?» и «Как настроение?», при любом режиме
+        if (chargeKey.isNotEmpty()) return chargeKey // заряд телефона достиг порога: под низким зарядом, выше «Как тренировка?», при любом режиме
         val service = serviceKeyOf(s)
         if (service.isNotEmpty()) return service
         if (!cfg.relevance) return ""
@@ -838,7 +856,16 @@ object QrPriority {
         val alert = batteryAlert(s)
         val batAt = keys.indices.filter { isBattery(keys[it]) }
         if (alert && batAt != (lead until lead + batAt.size).toList()) bad.add("0: заряд низкий, но карточки заряда не наверху")
-        val lead2 = lead + (if (alert) batAt.size else 0) // сколько мест занято выше служебных «Как тренировка?» / «Как настроение?»
+        val lead1 = lead + (if (alert) batAt.size else 0)
+
+        // 0в. «Заряд телефона достиг 80 %» — только если телефон на зарядке и заряд не ниже порога, и тогда сразу после карточек низкого заряда (над «Как тренировка?»)
+        val chargeOn = chargeReady(cfg, s)
+        val chargeAt = keys.indexOf(QrCharge.KEY)
+        if (chargeOn) {
+            if (chargeAt != lead1) bad.add("0: заряд достиг порога, но «Заряд телефона достиг 80 %» не на своём месте")
+        } else if (chargeAt >= 0) bad.add("0: «Заряд телефона достиг 80 %» есть без зарядки")
+        if (keys.count { it == QrCharge.KEY } > 1) bad.add("0: «Заряд телефона достиг 80 %» больше одной")
+        val lead2 = lead1 + (if (chargeOn) 1 else 0) // сколько мест занято выше служебных «Как тренировка?» / «Как настроение?»
 
         // 1. «Как тренировка?» — только если ждёт оценки, и тогда первая (после идущего таймера и карточек низкого заряда); «Как настроение?» — только если ждёт отметки, и тогда сразу под ней (или первая)
         val rpeAt = keys.indexOf(QrRpe.KEY)
@@ -892,6 +919,8 @@ object QrPriority {
         // 7. topKey — первая карточка основной части (или служебная карточка наверху, или поднятая карточка заряда)
         if (result.topKey.isNotEmpty() && !isService(result.topKey) && !(alert && isBattery(result.topKey)) && main.firstOrNull()?.key != result.topKey) bad.add("7: topKey не первая карточка основной части")
         if (alert && batAt.isNotEmpty() && !timerLifted && result.topKey != keys[lead]) bad.add("7: заряд низкий, но topKey — не карточка заряда")
+        if (chargeOn && !timerLifted && !alert && result.topKey != QrCharge.KEY) bad.add("7: заряд достиг порога, но topKey — не карточка заряда телефона")
+        if (result.topKey == QrCharge.KEY && chargeAt != lead1) bad.add("7: topKey — заряд телефона, но её нет на своём месте")
         if (result.topKey == QrRpe.KEY && rpeAt != lead2) bad.add("7: topKey — rpe, но её нет наверху")
         if (result.topKey == QrMood.KEY && moodAt != lead2) bad.add("7: topKey — настроение, но его нет наверху")
         if (timerLifted && result.topKey != TIMER_SLOT_KEY) bad.add("7: идёт таймер, но topKey — не карточка «Таймеры»")

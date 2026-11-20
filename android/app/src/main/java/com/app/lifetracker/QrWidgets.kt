@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.6 (19.11) — галочка «Показывать карточку о том, что заряд телефона достиг 80%» (`chargeDone`, цвет `chargeColor`): служебная карточка [QrCharge.KEY] («Заряд телефона … % — можно отключать от зарядки») стоит наверху, пока телефон на зарядке и заряд не ниже [QrPriority.CHARGE_DONE_PERCENT]: под идущим таймером и карточками низкого заряда, над «Как тренировка?»; перерисовку ведёт [onChargeChanged] (приёмник [QrCharge.register] и пятиминутный будильник заряда). Откат: QrWidgets.kt 16.5.
 // Версия: 16.6 (20.11) — карточки «Книги» и «Заметки» запоминают, какой элемент (книга/заметка) пользователь открыл последним нажатием на карточку ([groupOpened], хранит [K_LASTOPEN]): когда нет ни выбора краем (60 с), ни круга равных, показывается он, а не первый. Заметка «в своё время» (есть заметка, чьё время суток сейчас) главнее; заметка со своим временем суток запоминанию не подлежит. Откат: QrWidgets.kt 16.5.
 // Версия: 16.5 (19.11)
 // Версия: 16.4 (19.11) — ТОЛЬКО ДИАГНОСТИКА (поведение не меняется): журнал `QrDiag` пишется ещё и в файл `qrdiag.log` (до ~16 КБ; читается кнопкой «▶ Виджеты: журнал оболочки» в панели отладки, мост `widgetDiagLog`) — компьютер не нужен; ([diag], пишет только при изменении сообщения) — разбор настроек (сколько заметок пришло и принято), приём картинок лиц (ключ, размер), разбор файла лица книги/заметки в [bitmapFor] (размер, декодируется ли, сколько точек непрозрачных), итог [update]. Ищем, почему виджет только с карточкой заметки прозрачный. Откат: QrWidgets.kt 16.3.
@@ -134,6 +135,11 @@ import java.util.UUID
  * карточка [QrMood.KEY] «Как настроение?» с восемью эмодзи-кнопками; приоритет тот же, что у «Как тренировка?» (выше календаря), а если ждут обе — «Как тренировка?» выше. Ответ ложится в очередь
  * [QrMood.answer], карточка сразу исчезает; в полночь уходит, не дожидаясь ответа. Верх, возврат наверх и остановка слайд-шоу — как у «Как тренировка?».
  *
+ * Галочка «Показывать карточку о том, что заряд телефона достиг 80%» (`chargeDone` у виджета, цвет `chargeColor`): пока телефон подключён к питанию и его заряд не ниже [QrPriority.CHARGE_DONE_PERCENT] (80, 81 … 100 %),
+ * наверху стопки стоит служебная карточка [QrCharge.KEY] «Заряд телефона … % — можно отключать от зарядки» ([QrCharge.render]; нажатия на ней нет). Приоритет: ниже идущего таймера и карточек низкого заряда
+ * (ниже [QrPriority.BATTERY_ALERT_PERCENT] %), выше «Как тренировка?» и «Как настроение?»; при любом режиме, даже без «релевантности». Ушла она, когда телефон отключили от питания. Перерисовку ведёт [onChargeChanged]
+ * (приёмник [QrCharge.register], пока жив процесс, и пятиминутный будильник заряда [onBatteryTick]); возврат наверх — как у низкого заряда ([QrPriority.Result.anchorKey]).
+ *
  * Возврат наверх («по релевантности», [armReturn]/[fireReturn]): если пользователь смахнул стопку, а наверху лежит рекомендованная
  * карточка (идёт занятие или сейчас «её» время суток — [Ordered.topKey]) либо карточка события/задачи календаря ([QrPriority.Result.anchorKey]), то через минуту
  * после последнего смахивания стопка снова показывает верхнюю карточку порядка [order]. Данные от страницы (`sync`), не менявшие настройки
@@ -262,7 +268,7 @@ object QrWidgets {
     class AlarmSpec(val hour: Int, val minute: Int, val every: Int, val times: Int, val title: String)
     /** [dyn] — "task" / "event" у карточек задач и событий календаря ([at] — их время, мс), иначе пусто. */
     class Card(val key: String, val code: String, val title: String, val live: List<Live>, val times: Set<String>, val days: Set<Int>, val after: String = "none", val color: Int = QrBattery.DEFAULT_FACE, val dyn: String = "", val at: Long = 0L, val habit: Boolean = false, val tid: String = "", val eid: String = "", val alarmId: String = "", val alarmSpec: AlarmSpec? = null, val prio: String = "normal", val doneDay: Int = 0, val cycleN: Int = 1, val gscore: Int = 0, val greason: String = "", val sec: Int = 0, val hid: Boolean = false)
-    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2, val books: Boolean = false, val bookCards: List<Card> = emptyList(), val notes: Boolean = false, val noteCards: List<Card> = emptyList()) {
+    class Cfg(val id: String, val name: String, val rotate: Boolean, val rotateMin: Int, val relevance: Boolean, val cards: List<Card>, val battery: Boolean = false, val batteryMulti: Boolean = false, val tasks: Boolean = false, val events: Boolean = false, val rpeAsk: Boolean = false, val alarms: Boolean = false, val moodAsk: Boolean = false, val rpeColor: Int = QrRpe.DEFAULT_COLOR, val moodColor: Int = QrMood.DEFAULT_COLOR, val habits: Boolean = false, val habitCards: List<Card> = emptyList(), val eventsSoon: Boolean = false, val timers: Boolean = false, val timerCards: List<Card> = emptyList(), val eventsDays: Int = 2, val books: Boolean = false, val bookCards: List<Card> = emptyList(), val notes: Boolean = false, val noteCards: List<Card> = emptyList(), val chargeDone: Boolean = false, val chargeColor: Int = QrCharge.DEFAULT_COLOR) {
         /** Включена ли хоть одна карточка заряда (обычная или «несколько устройств»). */
         val anyBattery: Boolean get() = battery || batteryMulti
     }
@@ -346,6 +352,8 @@ object QrWidgets {
                 val moodAskOn = o.optBoolean("moodAsk", false)
                 val rpeColor = parseColor(o.optString("rpeColor", ""), QrRpe.DEFAULT_COLOR) // цвет служебных карточек из палитры формы; нет — фиолетовый макета
                 val moodColor = parseColor(o.optString("moodColor", ""), QrMood.DEFAULT_COLOR)
+                val chargeDoneOn = o.optBoolean("chargeDone", false) // «Заряд телефона достиг 80 %»: карточку рисует оболочка, страница шлёт флаг и цвет
+                val chargeColor = parseColor(o.optString("chargeColor", ""), QrCharge.DEFAULT_COLOR)
                 val ds = o.optJSONArray("dyn")
                 if (ds != null && (tasksOn || eventsOn)) {
                     val evs = ArrayList<Card>()
@@ -457,7 +465,7 @@ object QrWidgets {
                 out.add(
                     Cfg(
                         id, o.optString("name", "Виджет"), o.optBoolean("rotate", false),
-                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList, books = booksOn, bookCards = bookList, notes = notesOn, noteCards = noteList,
+                        o.optInt("rotateMin", 5).coerceIn(1, 720), o.optBoolean("relevance", false), cards, battery, batteryMulti, tasksOn, eventsOn, rpeAskOn, alarmsOn, moodAskOn, rpeColor, moodColor, habits = habitsOn, habitCards = habitList, eventsSoon = o.optBoolean("eventsSoon", false) && eventsOn, timers = timersOn, timerCards = timerList, books = booksOn, bookCards = bookList, notes = notesOn, noteCards = noteList, chargeDone = chargeDoneOn, chargeColor = chargeColor,
                         eventsDays = o.optInt("eventsDays", 2).coerceIn(1, QrPriority.EVENTS_DAYS_MAX) // нет числа (страница старой версии) — как было: сегодня и завтра
                     )
                 )
@@ -639,6 +647,7 @@ object QrWidgets {
     fun bitmapFor(ctx: Context, c: Card): Bitmap {
         if (c.key == QrRpe.KEY) return QrRpe.render(ctx, c.color)
         if (c.key == QrMood.KEY) return QrMood.render(ctx, c.color)
+        if (c.key == QrCharge.KEY) return QrCharge.render(ctx, c.color) // процент берётся с телефона в момент рисования
         if (c.key == QrBattery.KEY) return QrBattery.render(ctx, QrBattery.faceColor(ctx, c.color)) // низкий заряд — оранжевый / красный вместо выбранного цвета
         if (c.key == QrBattery.KEY2) return QrBattery.renderMulti(ctx, QrBattery.faceColor(ctx, c.color))
         if (c.dyn == "timer") return QrTimerFace.render(c.title, timerStateOf(ctx, c), c.sec, c.color) // таймер рисует оболочка: кольцо и минуты меняются сами
@@ -1357,6 +1366,7 @@ object QrWidgets {
             doneTaskIds = doneTaskIds(ctx),
             rpePending = rpePending(ctx, cfg),
             moodPending = moodPending(ctx, cfg),
+            chargeLevel = if (cfg.chargeDone) QrCharge.chargingLevel(ctx) else -1, // «Заряд телефона достиг 80 %»: при любом режиме, без «релевантности» тоже
             eventIndex = if (cfg.events) eventIndexOf(ctx, cfg.id, now) else 0,
             taskIndex = if (cfg.tasks) rowIndexOf(ctx, K_TKIDX, cfg.id, now) else 0,
             alarmRowRinging = cfg.cards.any { it.dyn == "alarm" && it.alarmId in ringing }
@@ -1426,7 +1436,7 @@ object QrWidgets {
     fun visibleCount(ctx: Context, cfg: Cfg): Int = QrPriority.visibleCount(cfg, snapshot(ctx, cfg))
 
     /** Все карточки виджета скрыты («На сегодня больше ничего»). */
-    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.habits || cfg.timers || cfg.rpeAsk || cfg.moodAsk) && visibleCount(ctx, cfg) == 0
+    fun isAllDone(ctx: Context, cfg: Cfg): Boolean = (cfg.cards.isNotEmpty() || cfg.tasks || cfg.events || cfg.alarms || cfg.habits || cfg.timers || cfg.rpeAsk || cfg.moodAsk || cfg.chargeDone) && visibleCount(ctx, cfg) == 0
 
     /**
      * Действие карточки [cardKey] сработало (нажатие в виджете, в приложении или скан): у карточек с «после срабатывания» = «скрывать» она
@@ -1493,8 +1503,8 @@ object QrWidgets {
 
     // ---------- обновление ----------
 
-    /** У виджета есть «верхняя карточка», к которой стопка возвращается: «по релевантности», служебные «Как тренировка?» / «Как настроение?» или идущий таймер карточки «Таймеры». */
-    private fun tracksTop(cfg: Cfg): Boolean = cfg.relevance || cfg.rpeAsk || cfg.moodAsk || cfg.timers || cfg.anyBattery
+    /** У виджета есть «верхняя карточка», к которой стопка возвращается: «по релевантности», служебные «Как тренировка?» / «Как настроение?», карточка «Заряд телефона достиг 80 %» или идущий таймер карточки «Таймеры». */
+    private fun tracksTop(cfg: Cfg): Boolean = cfg.relevance || cfg.rpeAsk || cfg.moodAsk || cfg.timers || cfg.anyBattery || cfg.chargeDone
 
     fun update(ctx: Context, mgr: AppWidgetManager, id: Int, resetTop: Boolean = false, rebuild: Boolean = false, intent: QrPriority.Motion.Kind? = null) {
         val app = ctx.applicationContext
@@ -1504,6 +1514,7 @@ object QrWidgets {
         val fresh = !wasBound && isBound(app, id) // виджет только что положили на экран: стопка обязана стоять на первой карточке порядка
         val cfg = cfgFor(app, id)
         if (cfg != null && cfg.anyBattery) QrBattery.register(app)
+        if (cfg != null && cfg.chargeDone) QrCharge.register(app)
         val rv = RemoteViews(app.packageName, R.layout.qr_widget)
         applyHostLayout(app, rv, hostSizeDp(app, mgr, id))
         // Нужно ли поставить стопку на верхнюю карточку. Одиночный setDisplayedChild(0) у уже смахнутой стопки позицию не менял (так «возврат» молча не срабатывал),
@@ -1777,10 +1788,12 @@ object QrWidgets {
         var anyRel = false
         var anyHide = false
         var anyBattery = false
+        var anyCharge = false
         var dynAt = Long.MAX_VALUE
         for (id in ids) {
             val cfg = cfgFor(app, id)
             if (cfg != null && cfg.anyBattery) anyBattery = true
+            if (cfg != null && cfg.chargeDone) anyCharge = true
             if (cfg != null && (cfg.tasks || cfg.events || cfg.relevance || cfg.moodAsk || cfg.habits || cfg.alarms || cfg.timers || cfg.books || cfg.notes)) dynAt = Math.min(dynAt, nextDynChange(app, cfg))
             if (cfg != null && cfg.rotate && visibleCount(app, cfg) > 1) {
                 if (force || rotatePi(app, id, false) == null) {
@@ -1796,8 +1809,9 @@ object QrWidgets {
         if (tickAt != Long.MAX_VALUE) setAlarm(app, tickAt, tickPi(app, true)!!)
         else tickPi(app, false)?.let { am(app).cancel(it); it.cancel() }
         armCycle(app, ids)
-        if (anyBattery) {
-            QrBattery.register(app)
+        if (anyBattery) QrBattery.register(app)
+        if (anyCharge) QrCharge.register(app)
+        if (anyBattery || anyCharge) { // один и тот же пятиминутный будильник заряда ведёт и карточки заряда, и «Заряд телефона достиг 80 %»
             if (force || batteryPi(app, false) == null) setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
         } else batteryPi(app, false)?.let { am(app).cancel(it); it.cancel() }
     }
@@ -1883,17 +1897,54 @@ object QrWidgets {
         }
     }
 
+    @Volatile private var lastChargeLevel = Int.MIN_VALUE
+    @Volatile private var lastChargeShown = false
+
+    /**
+     * Заряд телефона или питание изменились (приёмник [QrCharge.register], будильник заряда): виджеты с галочкой «Показывать карточку о том, что заряд телефона достиг 80%»
+     * перерисовываются. Карточка появилась или ушла (подключили к питанию при заряде не ниже порога, заряд дошёл до порога, отключили) — полное обновление ([update]):
+     * пересчёт порядка и, если сменился верх, возврат стопки на верхнюю карточку (решает диспетчер движения). Карточка осталась, сменилось только число (81, 82 …) — перерисовка лица.
+     * Повторы вещания (напряжение, температура) отсеиваются по зарядку-и-питанию: [force] — перерисовать в любом случае.
+     */
+    fun onChargeChanged(ctx: Context, force: Boolean = false) {
+        val app = ctx.applicationContext
+        val mgr = AppWidgetManager.getInstance(app)
+        val ids = mgr.getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java)).filter { cfgFor(app, it)?.chargeDone == true }
+        if (ids.isEmpty()) return
+        val level = QrCharge.chargingLevel(app)
+        if (!force && level == lastChargeLevel) return
+        val shown = level in QrPriority.CHARGE_DONE_PERCENT..100
+        val was = lastChargeShown
+        lastChargeLevel = level
+        lastChargeShown = shown
+        for (id in ids) {
+            try {
+                if (shown != was) {
+                    update(app, mgr, id)
+                    continue
+                }
+                if (shown) mgr.notifyAppWidgetViewDataChanged(id, R.id.qr_stack) // только процент на лице
+            } catch (e: Exception) {
+                // виджет удалили
+            }
+        }
+    }
+
     /** Будильник `ACTION_BATTERY`: обновляет карточку заряда (экран погашен — не будим) и ставит следующий через 5 минут. */
     fun onBatteryTick(ctx: Context) {
         val app = ctx.applicationContext
         val ids = AppWidgetManager.getInstance(app).getAppWidgetIds(ComponentName(app, QrWidgetProvider::class.java))
-        if (ids.none { cfgFor(app, it)?.anyBattery == true }) {
+        if (ids.none { cfgFor(app, it)?.let { c -> c.anyBattery || c.chargeDone } == true }) {
             batteryPi(app, false)?.let { am(app).cancel(it); it.cancel() }
             return
         }
-        QrBattery.register(app)
+        if (ids.any { cfgFor(app, it)?.anyBattery == true }) QrBattery.register(app)
+        if (ids.any { cfgFor(app, it)?.chargeDone == true }) QrCharge.register(app) // липкое вещание о заряде при подписке приходит сразу: процесс подняли — карточка проверяется и при погашенном экране
         val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (screenOn(pm)) onBatteryChanged(app)
+        if (screenOn(pm)) {
+            onBatteryChanged(app)
+            onChargeChanged(app)
+        }
         setAlarm(app, System.currentTimeMillis() + BATTERY_EVERY_MS, batteryPi(app, true)!!)
     }
 

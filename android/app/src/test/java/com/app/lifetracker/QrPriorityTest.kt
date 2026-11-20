@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 5.1 (19.11) — карточка «Заряд телефона достиг 80 %» (charge_*): под идущим таймером и низким зарядом, над «Как тренировка?» и «Как настроение?»; при любом режиме; пока телефон на зарядке и заряд 80…100 %.
 // Версия: 5.0 (19.11)
 // Версия: 4.7 (18.11) — карточка «Заметки» (notes_*): отдельная группа «nt_0»; заметка «в своё время» (утро/обед/вечер/все время) — в круге равных, без времени суток — нет.
 // Версия: 4.6 (17.11) — класс QrMotionTest: единый диспетчер движения стопки (QrPriority.Motion), ТЗ TZ_motion_dispatcher.md, п. 7.
@@ -37,16 +38,16 @@ class QrPriorityTest {
         days: Set<Int> = emptySet(), dyn: String = "", at: Long = 0L, habit: Boolean = false, tid: String = "", alarmId: String = "", prio: String = "normal"
     ) = Card(key = key, code = "", title = key, live = live, times = times, days = days, after = after, dyn = dyn, at = at, habit = habit, tid = tid, alarmId = alarmId, prio = prio)
 
-    private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false, moodAsk: Boolean = false) =
-        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk, moodAsk = moodAsk)
+    private fun cfg(cards: List<Card>, relevance: Boolean = false, rpeAsk: Boolean = false, moodAsk: Boolean = false, chargeDone: Boolean = false) =
+        Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = relevance, cards = cards, rpeAsk = rpeAsk, moodAsk = moodAsk, chargeDone = chargeDone)
 
     private fun snap(c: Calendar, workout: Boolean = false, pomodoro: Boolean = false, stopwatch: Boolean = false,
                      timers: Set<String> = emptySet(), hidden: Set<String> = emptySet(), moved: Map<String, Long> = emptyMap(),
                      done: Set<String> = emptySet(), rpe: Boolean = false, alarms: Map<String, Long> = emptyMap(),
-                     ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "", mood: Boolean = false) =
+                     ringing: Set<String> = emptySet(), battery: Int = -1, lastTop: String = "", mood: Boolean = false, charge: Int = -1) =
         QrPriority.Snapshot(now = c.timeInMillis, cal = c, workoutActive = workout, pomodoroActive = pomodoro, stopwatchActive = stopwatch,
             activeTimerIds = timers, alarms = alarms, ringingAlarmIds = ringing, batteryLowest = battery, hiddenKeys = hidden, movedAt = moved,
-            doneTaskIds = done, rpePending = rpe, moodPending = mood, lastTopKey = lastTop)
+            doneTaskIds = done, rpePending = rpe, moodPending = mood, lastTopKey = lastTop, chargeLevel = charge)
 
     /** Строит порядок и проверяет инварианты. */
     private fun run(cfg: Cfg, s: QrPriority.Snapshot): QrPriority.Result {
@@ -377,6 +378,82 @@ class QrPriorityTest {
     @Test fun battery_withoutReason_staysLast_evenIfListedFirst() {
         val cards = listOf(card(QrBattery.KEY), card("a"), card("b"))
         assertEquals(listOf("a", "b", QrBattery.KEY), keys(run(cfg(cards, true), snap(cal(12), battery = 80))))
+    }
+
+    // ---------- карточка «Заряд телефона достиг 80 %» ----------
+
+    @Test fun charge_shownFrom80To100_atAnyMode_withoutRelevanceToo() {
+        val cards = listOf(card("a"), card("b"))
+        for (rel in listOf(false, true)) {
+            for (p in listOf(80, 81, 85, 99, 100)) {
+                val r = run(cfg(cards, rel, chargeDone = true), snap(cal(12), charge = p))
+                assertEquals(listOf(QrCharge.KEY, "a", "b"), keys(r))
+                assertEquals(QrCharge.KEY, r.topKey)
+                assertEquals(QrCharge.KEY, r.anchorKey)
+                assertEquals("Заряд телефона $p %, можно отключать от зарядки", r.cards[0].reason)
+            }
+        }
+    }
+
+    @Test fun charge_hidden_belowThreshold_unplugged_orWithoutCheckbox() {
+        val cards = listOf(card("a"), card("b"))
+        for (p in listOf(79, 50, 0, -1)) { // -1 — телефон не на зарядке (или заряд неизвестен)
+            val r = run(cfg(cards, false, chargeDone = true), snap(cal(12), charge = p))
+            assertEquals(listOf("a", "b"), keys(r))
+            assertEquals("", r.topKey)
+            assertEquals("", r.anchorKey)
+        }
+        // галочки нет — карточки нет, даже если телефон заряжен
+        assertEquals(listOf("a", "b"), keys(run(cfg(cards, false, chargeDone = false), snap(cal(12), charge = 90))))
+    }
+
+    @Test fun charge_aboveRpeAndMood() {
+        val cards = listOf(card("a"))
+        val r = run(cfg(cards, false, rpeAsk = true, moodAsk = true, chargeDone = true), snap(cal(12), rpe = true, mood = true, charge = 85))
+        assertEquals(listOf(QrCharge.KEY, QrRpe.KEY, QrMood.KEY, "a"), keys(r))
+        assertEquals(QrCharge.KEY, r.topKey)
+        assertEquals(QrCharge.KEY, r.anchorKey)
+        // телефон отключили от зарядки — «Как тренировка?» наверху, как прежде
+        val off = run(cfg(cards, false, rpeAsk = true, moodAsk = true, chargeDone = true), snap(cal(12), rpe = true, mood = true, charge = -1))
+        assertEquals(listOf(QrRpe.KEY, QrMood.KEY, "a"), keys(off))
+        assertEquals(QrRpe.KEY, off.topKey)
+    }
+
+    @Test fun charge_belowLowBatteryCards() {
+        // телефон на зарядке (85 %), а наушники сели (15 %): низкий заряд выше, «Заряд телефона достиг 80 %» сразу под ним, затем «Как тренировка?»
+        val cards = listOf(card("a"), card(QrBattery.KEY))
+        val r = run(cfg(cards, false, rpeAsk = true, chargeDone = true), snap(cal(12), rpe = true, battery = 15, charge = 85))
+        assertEquals(listOf(QrBattery.KEY, QrCharge.KEY, QrRpe.KEY, "a"), keys(r))
+        assertEquals(QrBattery.KEY, r.topKey)
+        assertEquals(QrBattery.KEY, r.anchorKey)
+        // обычный (не низкий) заряд: карточка заряда остаётся в основной части, наверху «Заряд телефона достиг 80 %»
+        val calm = run(cfg(cards, false, rpeAsk = true, chargeDone = true), snap(cal(12), rpe = true, battery = 60, charge = 85))
+        assertEquals(listOf(QrCharge.KEY, QrRpe.KEY, "a", QrBattery.KEY), keys(calm))
+        assertEquals(QrCharge.KEY, calm.topKey)
+    }
+
+    @Test fun charge_belowRunningTimer() {
+        val c = cal(12, 0)
+        val cf = Cfg(id = "w", name = "w", rotate = false, rotateMin = 5, relevance = true, cards = emptyList(), rpeAsk = true, timers = true, timerCards = listOf(tmr("t1")), chargeDone = true)
+        val r = run(cf, snap(c, rpe = true, timers = setOf("id_t1"), charge = 90))
+        assertEquals(listOf("tmr_0", QrCharge.KEY, QrRpe.KEY), keys(r)) // идущий таймер выше всего, затем заряд, затем «Как тренировка?»
+        assertEquals("tmr_0", r.topKey)
+        assertEquals("tmr_0", r.anchorKey)
+    }
+
+    @Test fun charge_doesNotChangeOrderOfOrdinaryCards() {
+        val cards = listOf(card("a"), card("s", times = setOf("m", "d", "e", "a")), card("b"))
+        val plain = run(cfg(cards, true), snap(cal(12)))
+        val withCharge = run(cfg(cards, true, chargeDone = true), snap(cal(12), charge = 95))
+        assertEquals(listOf(QrCharge.KEY) + keys(plain), keys(withCharge)) // обычные карточки стоят так же, карточка заряда просто добавлена наверх
+    }
+
+    @Test fun charge_countsInVisibleCount() {
+        val cf = cfg(emptyList(), false, chargeDone = true)
+        assertEquals(0, QrPriority.visibleCount(cf, snap(cal(12), charge = 79)))
+        assertEquals(1, QrPriority.visibleCount(cf, snap(cal(12), charge = 80)))
+        assertEquals(1, QrPriority.visibleCount(cf, snap(cal(12), charge = 100)))
+        assertEquals(0, QrPriority.visibleCount(cfg(emptyList(), false, chargeDone = false), snap(cal(12), charge = 100)))
     }
 
     @Test fun eventBeforeTask_equalScore_evenIfTaskListedFirst() {

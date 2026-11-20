@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.22 (19.11) — у служебной карточки «Заряд телефона достиг 80 %» ([QrCharge.KEY]) нет нажатия (как у карточек заряда). Откат: QrWidgetService.kt 2.21.
 // Версия: 2.22 (20.11) — нажатие на карточку «Книги»/«Заметки» несёт ещё `wid`, `slot` и `bkey` (полный ключ показанного элемента): ScanActivity запоминает открытый последним (QrWidgets.groupOpened). Откат: QrWidgetService.kt 2.21.
 // Версия: 2.21 (19.11) — ТОЛЬКО ДИАГНОСТИКА (журнал `QrDiag`, QrWidgets.diag): что собрала фабрика (ключи карточек, группы, размеры картинок), что отдано в getViewAt, запрос заглушки загрузки; исключение в onDataSetChanged больше не проглатывается молча — пишется в журнал (поведение прежнее). Откат: QrWidgetService.kt 2.20.
 // Версия: 2.20 (18.11) — карточка «Заметки» (dyn = "note") в том же разборе нажатий, что и «Книги»: `booktap` несёт id заметки (ключ без «bk_»), приложение открывает заметку. Откат: QrWidgetService.kt 2.19.
@@ -154,8 +155,8 @@ class QrWidgetService : RemoteViewsService() {
                 rv.setOnClickFillInIntent(R.id.ev_right, Intent().putExtra("evnav", 1).putExtra("wid", widgetId))
                 rv.setOnClickFillInIntent(R.id.ev_center, Intent().putExtra("evopen", c.eid).putExtra("evat", c.at))
             }
-            // карточки заряда — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
-            if (!isRpe && !isMood && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
+            // карточки заряда и «Заряд телефона достиг 80 %» — не QR-карточки: нажатие на них ничего не делает; у задач — своё (ниже) (без fill-in intent шаблон не срабатывает)
+            if (!isRpe && !isMood && c.key != QrCharge.KEY && !QrBattery.isBatteryKey(c.key) && c.dyn.isEmpty()) {
                 val fill = Intent().putExtra("key", c.key).putExtra("habit", c.habit)
                 // будильник: ScanActivity заводит/выключает его сама, без окна и страницы (`alarm`); нет настроек от страницы — прежний путь (`alarmmark:<id>`)
                 if (c.alarmId.isNotEmpty() && c.alarmSpec != null) fill.putExtra("alarm", c.key)
