@@ -1,5 +1,6 @@
 /* ===========================================================================
    usertabs.js
+   Версия: 5.3 (20.11) — `syncEdge`: «Claude» (#claudeTabView) тоже получает `.lt-site` — под рядом кнопок нет светлой подложки окна, как у вкладок-сайтов.
    Версия: 5.2 (16.11) — «Поделиться» отдаёт ссылку читаемой: процентные последовательности кириллицы и других не-ASCII символов (%D0%B...) декодируются в буквы (`readableUrl`), служебные %XX (пробел, /, ?, &, #, %) остаются, чтобы ссылка не ломалась; флаг SHARE_STRIP_SCHEME убирает «https://» (по умолчанию выключен). Откат: usertabs.js 5.1.
    Версия: 5.1 (15.11) — в форме адреса (долгое нажатие на кнопку вкладки) галочка «Зафиксировать иконку для этой вкладки» (`locks`, localStorage `userTabIconLock_v1`, только на этом устройстве): значок на кнопке остаётся тем, что был на момент включения, сайт его больше не меняет (`syncIcon`); снять галочку — значок снова обновляется. Kotlin не менялся. Откат: usertabs.js 5.0.
    Версия: 5.0 (13.11)
@@ -591,7 +592,7 @@
     var box = c.parentNode, ov = c.closest ? c.closest(".settings-modal-overlay") : null;
     var was = !!(box && box.classList && box.classList.contains("lt-edge"));
     var site = false;
-    for(var j = 0; j < c.children.length; j++){ if(c.children[j].id === "userTabView"){ site = true; break; } }
+    for(var j = 0; j < c.children.length; j++){ if(c.children[j].id === "userTabView" || c.children[j].id === "claudeTabView"){ site = true; break; } }
     if(box && box.classList){ box.classList.toggle("lt-edge", has); box.classList.toggle("lt-site", site); }
     if(ov) ov.classList.toggle("lt-edge-ov", has);
     if(was !== has){ try{ window.dispatchEvent(new Event("resize")); }catch(e){} }

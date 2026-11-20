@@ -1,8 +1,11 @@
 package com.app.lifetracker
+// Версия: 1.5 (20.11) — кнопки вкладки перенесены в нижний ряд страницы, а claude.ai растянут на всю область и заходит под них: WebView теперь `SiteWebView` с «окнами» ([setHoles], мост `claudeHoles`; Android 10+, как у вкладок-сайтов). Откат: ClaudeTab.kt 1.4.
 // Версия: 1.4 (11.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.RectF
+import android.os.Build
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -49,6 +52,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     private var rW = 1
     private var rH = 1
     private var kb = 0
+    private var holes: List<RectF> = emptyList() // окна под кнопки страницы, px родителя
 
     val isVisible: Boolean get() = shown && view != null
 
@@ -95,6 +99,26 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         kb = px
         val v = view ?: return
         if (shown) layoutShown(v)
+    }
+
+    /**
+     * Окна под кнопки страницы: [spec] — «x,y,w,h;x,y,w,h» в CSS-пикселях страницы (как прямоугольник в [show]); пусто — окон нет.
+     * Сквозь окна виден главный WebView с кнопками нижнего ряда, а сам claude.ai растянут под них. Работает с Android 10 (API 29).
+     */
+    fun setHoles(spec: String?) {
+        if (Build.VERSION.SDK_INT < 29) return
+        val d = activity.resources.displayMetrics.density
+        val list = ArrayList<RectF>()
+        if (!spec.isNullOrEmpty() && spec.length < 400) {
+            for (part in spec.split(";")) {
+                val nums = part.split(",").mapNotNull { it.trim().toFloatOrNull() }
+                if (nums.size != 4 || nums[2] <= 0f || nums[3] <= 0f) continue
+                list.add(RectF(nums[0] * d, nums[1] * d, (nums[0] + nums[2]) * d, (nums[1] + nums[3]) * d))
+                if (list.size >= 8) break
+            }
+        }
+        holes = list
+        (view as? SiteWebView)?.setHoles(list, 8f * d)
     }
 
     fun hide() {
@@ -149,7 +173,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     @SuppressLint("SetJavaScriptEnabled")
     private fun ensureView(): WebView {
         view?.let { return it }
-        val v = SelectionMenuWebView(activity)
+        val v = SiteWebView(activity)
+        v.setHoles(holes, 8f * activity.resources.displayMetrics.density)
         v.selectionListener = activity.siteSelectionMenu
         v.hotkeyForwarder = { combo -> activity.forwardHotkey(combo) }
         v.setBackgroundColor(0xFFFFFFFF.toInt())

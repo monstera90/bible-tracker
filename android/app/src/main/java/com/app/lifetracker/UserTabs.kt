@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.6 (20.11) — `SiteWebView` (WebView с «окнами» под кнопки) стал `internal`: тот же класс использует вкладка Claude (ClaudeTab.kt 1.5). Поведение вкладок-сайтов не менялось. Откат: UserTabs.kt 8.5.
 // Версия: 8.5 (16.11) — мышь и тачпад: окна под кнопками («поделиться», «весь экран», «домик») пропускают и «общие» события (dispatchGenericMotionEvent), а не только касания.
 // Версия: 8.4 (16.11) — горячие клавиши физической клавиатуры из WebView вкладки-сайта уходят странице (hotkeyForwarder). Откат: UserTabs.kt 8.3.
 
@@ -52,7 +53,7 @@ import kotlin.math.roundToInt
  * под кнопки, как содержимое остальных вкладок. Вырез по контуру кнопки — `clipOutPath` (WebView честно учитывает такой
  * сложный вырез только с Android 10, поэтому окна включаются с API 29); нажатие, начатое в окне, отдаётся нижнему (главному) WebView.
  */
-private class SiteWebView(context: Context) : SelectionMenuWebView(context) {
+internal class SiteWebView(context: Context) : SelectionMenuWebView(context) {
     private var holes: List<RectF> = emptyList()
     private var radius = 0f
     private var passThrough = false

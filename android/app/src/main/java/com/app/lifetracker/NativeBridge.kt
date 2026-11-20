@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.2 (20.11) — `claudeHoles(spec)`: окна под кнопки страницы в WebView вкладки Claude (claude.ai растянут под нижний ряд кнопок; Android 10+). Версию моста не меняет — страница проверяет наличие метода.
 // Версия: 30.1 (19.11) — `widgetDiagLog()`: журнал диагностики виджетов для кнопки панели отладки (версию моста не меняет).
 // Версия: 30.0 (15.11) — мост версии 38: `apkGetState` / `apkCheckNow` / `apkInstall` (обновление самого APK из GitHub Releases, ApkUpdater; вкладка «Проверка обновлений»).
 // Версия: 29.0 (14.11) — мост версии 37: карточка «Как настроение?» в виджетах (`widgetMoodSet` / `widgetMoodTake` / `widgetMoodAck`; QrMood).
@@ -863,6 +864,17 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeReload() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.claudeTab.reload() }
+    }
+
+    /**
+     * Окна под кнопки страницы во вкладке Claude: [spec] — «x,y,w,h;…» в CSS-пикселях страницы; пусто — окон нет. Возвращает true, если оболочка умеет окна
+     * (Android 10+); иначе страница оставляет прежнюю раскладку — claude.ai заканчивается над рядом кнопок.
+     */
+    @JavascriptInterface
+    fun claudeHoles(spec: String?): Boolean {
+        if (!activity.pageTrusted || Build.VERSION.SDK_INT < 29) return false
+        activity.runOnUiThread { activity.claudeTab.setHoles(spec) }
+        return true
     }
 
     @JavascriptInterface
