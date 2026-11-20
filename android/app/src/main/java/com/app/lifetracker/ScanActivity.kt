@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.10 (20.11) — `booktap` теперь запоминает открытую книгу/заметку (extra `wid`, `slot`, `bkey` → QrWidgets.groupOpened). Откат: ScanActivity.kt 13.9.
 // Версия: 13.9 (17.11) — `booktap` (id книги): нажатие на карточку «Книги» в виджете открывает приложение на этой книге (MainActivity.ACTION_OPEN_BOOK), окно сканера не нужно. Откат: ScanActivity.kt 13.7.
 // Версия: 13.7 (16.11) — одно нажатие на карточку задачи в виджете открывает приложение на форме задачи (MainActivity.ACTION_OPEN_WIDGET_TASK), двойное по-прежнему отмечает выполненной. Откат: ScanActivity.kt 13.6.
 // Версия: 13.6 (16.11) — `timerstart` (ключ карточки): нажатие на не запущенный таймер в карточке «Таймеры» виджета запускает его сразу ([QrWidgets.startTimer]) без окна с карточкой; не вышло — прежний путь по `code`. Откат: ScanActivity.kt 13.5.
@@ -171,6 +172,7 @@ class ScanActivity : ComponentActivity() {
                     // карточка «Книги»: открыть показанную книгу на основной закладке (id проверяет MainActivity)
                     val bid = i.getStringExtra("booktap") ?: ""
                     if (BOOK_ID_RE.matches(bid)) {
+                        QrWidgets.groupOpened(applicationContext, i.getIntExtra("wid", -1), i.getStringExtra("slot") ?: "", i.getStringExtra("bkey") ?: "") // запомнить открытую книгу/заметку
                         val open = Intent(this, MainActivity::class.java).apply {
                             action = MainActivity.ACTION_OPEN_BOOK
                             putExtra(MainActivity.EXTRA_BOOK_ID, bid)

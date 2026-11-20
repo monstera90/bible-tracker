@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 16.6 (20.11) — карточки «Книги» и «Заметки» запоминают, какой элемент (книга/заметка) пользователь открыл последним нажатием на карточку ([groupOpened], хранит [K_LASTOPEN]): когда нет ни выбора краем (60 с), ни круга равных, показывается он, а не первый. Заметка «в своё время» (есть заметка, чьё время суток сейчас) главнее; заметка со своим временем суток запоминанию не подлежит. Откат: QrWidgets.kt 16.5.
 // Версия: 16.5 (19.11)
 // Версия: 16.4 (19.11) — ТОЛЬКО ДИАГНОСТИКА (поведение не меняется): журнал `QrDiag` пишется ещё и в файл `qrdiag.log` (до ~16 КБ; читается кнопкой «▶ Виджеты: журнал оболочки» в панели отладки, мост `widgetDiagLog`) — компьютер не нужен; ([diag], пишет только при изменении сообщения) — разбор настроек (сколько заметок пришло и принято), приём картинок лиц (ключ, размер), разбор файла лица книги/заметки в [bitmapFor] (размер, декодируется ли, сколько точек непрозрачных), итог [update]. Ищем, почему виджет только с карточкой заметки прозрачный. Откат: QrWidgets.kt 16.3.
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
@@ -166,6 +167,7 @@ object QrWidgets {
     private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ карточки-группы («hab_0», «alm_0»): {h: ключ выбранного элемента, t: время последнего нажатия, мс}}
+    private const val K_LASTOPEN = "lastopen"   // id виджета конструктора → {ключ карточки-группы («bk_0», «nt_0»): ключ элемента, открытого последним нажатием на карточку}
     private const val AEV_MAX = 50
     private const val K_TEV = "timerEv"       // очередь: таймеры, запущенные нажатием в виджете без окна — страница запишет их в журнал событий
     private const val K_TEVSEQ = "timerEvSeq"
@@ -928,6 +930,7 @@ object QrWidgets {
         val over = synchronized(LOCK) { jmap(ctx, K_HABIDX).optJSONObject(cfg.id) }
         for (g in gs) {
             var idx = res.faces[g.key] ?: g.defaultIdx
+            if (res.faces[g.key] == null) lastOpenedIdx(ctx, cfg.id, g)?.let { idx = it } // (в) вместо «первого» — открытый последним (только книги и заметки)
             val e = over?.optJSONObject(g.key)
             if (e != null) {
                 val t = e.optLong("t", 0L)
@@ -959,6 +962,40 @@ object QrWidgets {
             if (t > 0L && now >= t && now - t < EVENT_RESET_MS) at = Math.min(at, t + EVENT_RESET_MS + 500L)
         }
         return if (at == Long.MAX_VALUE) null else at
+    }
+
+    /**
+     * Номер в группе [g] элемента, открытого последним (нажатием на карточку «Книги»/«Заметки»), или null — запоминание не действует: группа не книги и не заметки,
+     * ничего не открывали, элемент убран из виджета, в группе заметок есть заметка «в своё время» (её время суток — настройка пользователя, она главнее)
+     * или сама открытая заметка со своим временем суток (она подчиняется времени, а не запоминанию).
+     */
+    private fun lastOpenedIdx(ctx: Context, cfgId: String, g: QrPriority.Group): Int? {
+        if (g.key != QrPriority.BOOK_SLOT_KEY && g.key != QrPriority.NOTE_SLOT_KEY) return null
+        val key = synchronized(LOCK) { jmap(ctx, K_LASTOPEN).optJSONObject(cfgId)?.optString(g.key, "") } ?: return null
+        if (key.isEmpty()) return null
+        val i = g.items.indexOfFirst { it.key == key }
+        if (i < 0) return null
+        if (g.key == QrPriority.NOTE_SLOT_KEY && (g.scores.any { it > 0 } || g.items[i].times.isNotEmpty())) return null
+        return i
+    }
+
+    /**
+     * Пользователь нажатием на карточку-группу [slotKey] («Книги» или «Заметки») виджета [widgetId] открыл элемент [itemKey]: запоминаем его (ScanActivity, `booktap`).
+     * Лицо не перерисовывается: показанный элемент и есть открытый, а при возврате после выбора краем (через [EVENT_RESET_MS]) карточка встанет на него.
+     */
+    fun groupOpened(ctx: Context, widgetId: Int, slotKey: String, itemKey: String) {
+        if (slotKey != QrPriority.BOOK_SLOT_KEY && slotKey != QrPriority.NOTE_SLOT_KEY) return
+        if (!KEY_RE.matches(itemKey)) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        synchronized(LOCK) {
+            val all = jmap(app, K_LASTOPEN)
+            val per = all.optJSONObject(cfg.id) ?: JSONObject()
+            if (per.optString(slotKey, "") == itemKey) return
+            per.put(slotKey, itemKey)
+            all.put(cfg.id, per)
+            prefs(app).edit().putString(K_LASTOPEN, all.toString()).apply()
+        }
     }
 
     /** Запоминает выбранный элемент [itemKey] карточки-группы [slotKey] виджета [cfgId] на [EVENT_RESET_MS]. */

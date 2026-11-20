@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.22 (20.11) — нажатие на карточку «Книги»/«Заметки» несёт ещё `wid`, `slot` и `bkey` (полный ключ показанного элемента): ScanActivity запоминает открытый последним (QrWidgets.groupOpened). Откат: QrWidgetService.kt 2.21.
 // Версия: 2.21 (19.11) — ТОЛЬКО ДИАГНОСТИКА (журнал `QrDiag`, QrWidgets.diag): что собрала фабрика (ключи карточек, группы, размеры картинок), что отдано в getViewAt, запрос заглушки загрузки; исключение в onDataSetChanged больше не проглатывается молча — пишется в журнал (поведение прежнее). Откат: QrWidgetService.kt 2.20.
 // Версия: 2.20 (18.11) — карточка «Заметки» (dyn = "note") в том же разборе нажатий, что и «Книги»: `booktap` несёт id заметки (ключ без «bk_»), приложение открывает заметку. Откат: QrWidgetService.kt 2.19.
 // Версия: 2.19 (17.11) — нажатие по центру и по самой карточке «Книги» открывает показанную книгу на основной закладке: `booktap` несёт id книги (ключ без «bk_»), ScanActivity открывает приложение.
@@ -123,7 +124,7 @@ class QrWidgetService : RemoteViewsService() {
                 if (c.dyn == "book" || item?.dyn == "book" || c.dyn == "note" || item?.dyn == "note") {
                     // у книг и заметок нажатия по центру нет (нажатие открывает книгу или заметку в приложении), но fill-in intent задаётся ВСЕГДА: элемент списка переиспользуется, и без него у книги оставалось нажатие
                     // прежней карточки в этом же элементе (таймер «Кофе» запускался от нажатия на книгу). ScanActivity по `booktap` открывает книгу в приложении.
-                    val noop = Intent().putExtra("booktap", (item?.key ?: "").removePrefix(QrPriority.BOOK_SLOT_PREFIX))
+                    val noop = Intent().putExtra("booktap", (item?.key ?: "").removePrefix(QrPriority.BOOK_SLOT_PREFIX)).putExtra("wid", widgetId).putExtra("slot", c.key).putExtra("bkey", item?.key ?: "")
                     rv.setOnClickFillInIntent(R.id.ev_center, noop)
                     rv.setOnClickFillInIntent(R.id.qr_card_img, Intent(noop))
                 } else if (item != null) {
