@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.4 (22.11) — кнопка тегов на вкладках задач заменена фильтром по цвету полосы (корешка): «Все» + цвета, которые есть на вкладке (в т. ч. «Цвет темы»), выбор помнится по вкладкам (`bibleTaskColorFilter_v1`), новая задача при выбранном цвете получает его. Фильтра по тегам больше нет (теги остались на карточках и в QR). Откат: my.js 153.3.
    Версия: 153.3 (22.11) — приоритет задачи: 7 цветов по кругу (красный, оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый; в данных red/yellow(=оранжевый)/gold/green/cyan/blue/purple), долгое нажатие — цвет темы; на вкладку «Red» по-прежнему попадают только красные и оранжевые (`taskFlagList`/`taskFlagClass`/`cycleTaskFlag`). Откат: my.js 153.2.
    Версия: 153.2 (21.11) — задачи: размер шрифта («Аа») отвязан от остального приложения (свой шаг `taskFontSizeStep`, переменная `--task-font-size`, mdeditor.js); кнопки свёрнутой карточки всегда прижаты к низу (не «ползут» при смене шрифта). Откат: my.js 153.1.
    Версия: 153.1 (21.11) — карточки задач: соотношение сторон 2,113:1 (как у виджета 4×2: 1063×503 px по скриншоту) вместо 1,864:1; в свёрнутом виде размер не зависит от размера шрифта и длины текста; в режиме редактирования карточка растёт по тексту (не ниже свёрнутой). Откат: my.js 153.0.
@@ -22650,29 +22651,63 @@
     if(isGroupTasksActive()){ try{ all = all.concat(getAllGroupTasks()); }catch(e){} }
     return collectTaskTags(all.filter(function(t){ return t.c.checked !== true; })).map(function(x){ return x.label; });
   }
-  var taskTagState = {tab: null, list: [], sel: ""}; // что показано на кнопке сейчас (его же показывает попап)
+  // ---------------------------------------------------------------------------
+  // ФИЛЬТР ПО ЦВЕТУ ПОЛОСЫ (22.11). Та же кнопка (#taskTagBtn) и тот же попап, что были у тегов: список «Все» + цвета полос (корешков)
+  // задач ЭТОЙ вкладки (только те, что на ней есть; «Цвет темы» — задачи без отметки). Выбор цвета оставляет только задачи с ним;
+  // помнится отдельно для каждой вкладки (localStorage bibleTaskColorFilter_v1 = {<вкладка>: <цвет>}); если такого цвета на вкладке
+  // больше нет — фильтр сам сбрасывается на «Все». Кнопка: «Все» — белая, любой цвет — инверсия (.pressed). Новая задача при выбранном
+  // цвете получает его (иначе пропала бы из списка). Теги задач (c.tag) остаются на карточках и в QR, но фильтра по ним больше нет.
+  // ---------------------------------------------------------------------------
+  var TASK_COLOR_FILTER_KEY = "bibleTaskColorFilter_v1";
+  var TASK_COLOR_NAMES = {theme: "Цвет темы", red: "Красный", yellow: "Оранжевый", gold: "Жёлтый", green: "Зелёный", cyan: "Голубой", blue: "Синий", purple: "Фиолетовый"};
+  function taskColorKeyOf(t){
+    var f = t && t.c ? t.c.flag : null;
+    return taskFlagList().indexOf(f) >= 0 ? f : "theme";
+  }
+  function readTaskColorFilters(){
+    try{
+      var o = JSON.parse(localStorage.getItem(TASK_COLOR_FILTER_KEY) || "{}");
+      return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    }catch(e){ return {}; }
+  }
+  function getTaskColorFilter(tab){
+    var v = readTaskColorFilters()[tab];
+    return (typeof v === "string" && TASK_COLOR_NAMES[v]) ? v : "";
+  }
+  function setTaskColorFilter(tab, key){
+    var o = readTaskColorFilters();
+    if(key) o[tab] = key; else delete o[tab];
+    try{ localStorage.setItem(TASK_COLOR_FILTER_KEY, JSON.stringify(o)); }catch(e){}
+  }
+  // цвета списка задач: [{key, label}] в порядке круга (цвет темы первым)
+  function collectTaskColors(tasks){
+    var have = {};
+    tasks.forEach(function(t){ have[taskColorKeyOf(t)] = true; });
+    return ["theme"].concat(taskFlagList()).filter(function(k){ return have[k]; }).map(function(k){ return {key: k, label: TASK_COLOR_NAMES[k]}; });
+  }
+  function taskColorSwatchVar(k){ return k === "theme" ? "var(--wood)" : "var(--tc-flag-" + k + ")"; }
+  var taskTagState = {tab: null, list: [], sel: ""}; // что показано на кнопке сейчас (его же показывает попап); имя осталось от тегов
   function updateTaskTagBtn(tabKey, list, selKey){
     taskTagState = {tab: tabKey, list: list, sel: selKey};
     var btn = document.getElementById("taskTagBtn");
     if(!btn) return;
     btn.classList.toggle("pressed", !!selKey);
-    var lab = "";
-    list.forEach(function(x){ if(x.key === selKey) lab = x.label; });
-    btn.title = selKey ? ("Тег: " + lab + " (нажмите, чтобы сменить)") : "Теги: показать задачи с выбранным тегом";
+    btn.title = selKey ? ("Цвет: " + TASK_COLOR_NAMES[selKey].toLowerCase() + " (нажмите, чтобы сменить)") : "Фильтр по цвету полосы";
   }
   function renderTaskTagPopup(){
     var popup = document.getElementById("taskTagPopup");
     if(!popup) return;
     var items = [{key: "", label: "Все"}].concat(taskTagState.list);
     popup.innerHTML = items.map(function(it){
-      return '<button type="button" data-key="' + escapeHtml(it.key) + '"' + (it.key === taskTagState.sel ? ' class="selected"' : '') + '>' + escapeHtml(it.label) + '</button>';
+      return '<button type="button" data-key="' + escapeHtml(it.key) + '"' + (it.key === taskTagState.sel ? ' class="selected"' : '') + '>' +
+        (it.key ? '<span class="task-color-sw" style="background:' + taskColorSwatchVar(it.key) + '"></span>' : '') + escapeHtml(it.label) + '</button>';
     }).join("");
     Array.prototype.forEach.call(popup.querySelectorAll("button"), function(b, i){
       b.addEventListener("click", function(){
         popup.classList.remove("open");
         var tab = taskTagState.tab;
         if(!tab) return;
-        setTaskTagFilter(tab, i === 0 ? "" : items[i].label);
+        setTaskColorFilter(tab, items[i].key);
         renderTaskTabList(tab);
       });
     });
@@ -24774,11 +24809,11 @@
     if(tabKey === "next" && getNextHideLinkedTasks()){
       tasks = tasks.filter(function(t){ return !t.c.nextForProjectId; });
     }
-    // теги (22.10): список кнопки — теги задач этой вкладки; выбранный тег оставляет только задачи с ним (нет такого — сброс на «Все»)
-    var tagList = collectTaskTags(tasks);
-    var tagSelKey = taskTagKey(getTaskTagFilter(tabKey));
-    if(tagSelKey && !tagList.some(function(x){ return x.key === tagSelKey; })){ setTaskTagFilter(tabKey, ""); tagSelKey = ""; }
-    if(tagSelKey) tasks = tasks.filter(function(t){ return taskTagKey(t.c && t.c.tag) === tagSelKey; });
+    // фильтр по цвету полосы (22.11): список кнопки — цвета задач этой вкладки; выбранный цвет оставляет только задачи с ним (нет такого — сброс на «Все»)
+    var tagList = collectTaskColors(tasks);
+    var tagSelKey = getTaskColorFilter(tabKey);
+    if(tagSelKey && !tagList.some(function(x){ return x.key === tagSelKey; })){ setTaskColorFilter(tabKey, ""); tagSelKey = ""; }
+    if(tagSelKey) tasks = tasks.filter(function(t){ return taskColorKeyOf(t) === tagSelKey; });
     updateTaskTagBtn(tabKey, tagList, tagSelKey);
     var rowsHtml = tasks.map(function(t){ return buildTaskRowHtml(t); }).join("");
     // Шаг 11 ТЗ синхронизации — подсказка "только чтение" в шапке вкладки для роли viewer (п. 3
@@ -24822,9 +24857,9 @@
         flushPendingTaskEdits(); // не потерять то, что уже набрано в другой строке
         if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards(); // сторож соседней строки не должен откатывать прокрутку к новой
         var id = createTask(tabKey);
-        // при выбранном теге новая задача получает его — иначе при следующей перерисовке она пропала бы из отфильтрованного списка
-        var curTagLabel = getTaskTagFilter(tabKey);
-        if(curTagLabel){ var nt = getTaskById(id); if(nt){ nt.c.tag = curTagLabel; saveTaskData(id, nt.c); } }
+        // при выбранном цвете новая задача получает его — иначе при следующей перерисовке она пропала бы из отфильтрованного списка
+        var curColorKey = getTaskColorFilter(tabKey);
+        if(curColorKey){ var nt = getTaskById(id); if(nt){ nt.c.flag = (curColorKey === "theme") ? null : curColorKey; saveTaskData(id, nt.c); } }
         var wrap = document.getElementById("taskListWrap");
         if(wrap){
           var emptyMsg = document.querySelector(".task-empty");

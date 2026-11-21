@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.5 (22.11) — `.task-color-sw` (образец цвета в попапе фильтра по цвету полосы). Откат: modals.css 23.4.
    Версия: 23.4 (22.11) — полоса приоритета карточки задачи: цвета gold/green/cyan/blue/purple (`--tc-flag-gold` #ffc933, `-green` #3fcf6b, `-cyan` #2ec4f1, `-blue` #3d6bff, `-purple` #8000ff) и образцы на экране «Кнопки задач». Откат: modals.css 23.3.
    Версия: 23.3 (22.11) — полноэкранный режим и режим чтения: полоса приоритета карточки задачи больше не скрывается (`.reading-mode-active .task-card > .task-flag-dot{display:block}`). Откат: modals.css 23.2.
    Версия: 23.2 (21.11) — задачи: `.task-body` берёт размер из `--task-font-size` (свой шаг «Аа» задач); `.task-card > .task-actions` с `margin-top:auto` — кнопки свёрнутой карточки не зависят от размера шрифта. Откат: modals.css 23.1.
@@ -2468,6 +2469,7 @@
     -webkit-tap-highlight-color:transparent;
   }
   .task-tag-popup button.selected{ background:#f4ead0; font-weight:700; }
+  .task-tag-popup .task-color-sw{ display:inline-block; width:12px; height:18px; margin-right:9px; vertical-align:-4px; border-radius:4px; }
   @media (hover:hover) and (pointer:fine){
     .task-tag-popup button:hover{ background:#f4ead0; }
   }
