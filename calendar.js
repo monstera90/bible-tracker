@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.7 (21.11) — (1) перетаскивание в «Неделе» и «Двух неделях»: долгое удержание мероприятия или задачи (`LTPress`, `DRAG_MS`), блок-копия идёт за пальцем, по отпусканию встаёт на день под пальцем и время со сдвигом в 5 минут (`DRAG_SNAP_MIN`); на другую неделю тянуть нельзя (рамка — видимые дни), у края экрана сетка сама прокручивается; у повторяющегося мероприятия спрашивает «Только это» / «Это и все последующие» (`applyOnlyThis` / `applyFollowing`), общее мероприятие читателя группы не двигается; (2) новый режим «Две недели» (`mode = "two"`, 14 колонок: текущая и следующая неделя, без стрелок и свайпа), показывается только если окно не уже `TWO_WEEK_MIN_W` (телефон в горизонтальном положении); в кругу кнопки режима: список → неделя → две недели → список; на узком экране режим «две недели» пропускается, а сохранённый выбор возвращается при повороте. Откат: calendar.js 18.6.
    Версия: 18.6 (19.11) — в нижнем ряду («Список» и «Неделя») слева от «домика» кнопка полноэкранного режима (`#calendarFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: calendar.js 18.5.
    Версия: 18.5 (19.11) — настройки календаря (скрытые, цвета, переключатели) синхронизируются между устройствами через хранилище my.js (`prefGet/prefSet/hiddenAll/hiddenSet`, `importPrefs`, `refreshDayCols`); задачу в календаре можно сохранить с одной картинкой без названия (`IMG_ONLY_TITLE`). Откат: calendar.js 18.4.
    Версия: 18.4 (19.11) — скрытие повторяющегося мероприятия (поле «Отображение» в форме) спрашивает «Только это» / «Это и все последующие», как правка и удаление; признак по-прежнему только на устройстве и серию не меняет: `isHidden(id, at)`, `setHidden(id, on, at, following)` (запись {b, r} с правилами по дням/«с этого дня»; старый вид {id:1} читается как раньше), `hideOccurrence`; список/неделя/виджет проверяют скрытие по каждому повторению. Откат: calendar.js 18.3.
@@ -95,6 +96,9 @@
   var MIN_BLOCK_PX = 14;    // минимальная высота блока события в неделе
   var SWIPE_DX = 70, SWIPE_DY = 50;
   var DOUBLE_MS = 300;      // как в itemcards.js (двойной тап по карточке)
+  var DRAG_MS = 450;        // сколько держать палец на блоке недели, чтобы начать перетаскивание
+  var DRAG_SNAP_MIN = 5;    // шаг времени при перетаскивании, минут
+  var TWO_WEEK_MIN_W = 640; // режим «Две недели» показывается, только если окно не уже стольких px (телефон в горизонтальном положении да, в вертикальном нет)
   var EXPAND_COUNT = 12;    // сколько ближайших повторений показывает раскрытая серия
   var REPEATS = [
     { key: "day", label: "Каждый день" },
@@ -110,6 +114,9 @@
   var WEEK_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
       '<rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16"></path><path d="M9.3 10v10"></path><path d="M14.7 10v10"></path></svg>';
+  var TWO_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="2.5" y="5" width="19" height="15" rx="2"></rect><path d="M2.5 10h19"></path><path d="M12 5v15" stroke-width="2.4"></path><path d="M5.7 10v10"></path><path d="M8.8 10v10"></path><path d="M15.2 10v10"></path><path d="M18.3 10v10"></path></svg>';
   var LIST_ICON_SVG =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
       '<path d="M9 6h11"></path><path d="M9 12h11"></path><path d="M9 18h11"></path><path d="M4.5 6h.01"></path><path d="M4.5 12h.01"></path><path d="M4.5 18h.01"></path></svg>';
@@ -132,7 +139,9 @@
       '<path d="M12 5v14"></path><path d="M5 12h14"></path></svg>';
 
   var screen = "list"; // "list" | "week" | "form" — что сейчас нарисовано во вкладке
-  var mode = "list";    // выбранный режим: "list" | "week" (хранится в MODE_KEY)
+  var mode = "list";    // выбранный режим: "list" | "week" | "two" (хранится в MODE_KEY); "two" на узком окне рисуется как "week" (см. effMode)
+  var wkN = 7;          // сколько дней в нарисованной сетке: 7 («Неделя») или 14 («Две недели»)
+  var dragOn = false;   // идёт перетаскивание блока: фоновые перерисовки ждут
   var weekStart = null; // начало (понедельник 00:00) показанной недели; null — текущая
   var weekScrollKeep = null; // прокрутка недели, которую вернуть после формы
   var weekScrollToNow = false; // «домик»: один раз прокрутить к красной линии (иначе неделя всегда открывается с 8:00)
@@ -693,16 +702,34 @@
     loadColors();
     applyUserColors();
     try{
-      mode = localStorage.getItem(MODE_KEY) === "week" ? "week" : "list";
+      var sm = localStorage.getItem(MODE_KEY);
+      mode = sm === "week" || sm === "two" ? sm : "list";
       var z = parseFloat(localStorage.getItem(ZOOM_KEY));
       hourPx = isFinite(z) ? clampHour(z) : HOUR_DEFAULT;
     }catch(e){ mode = "list"; hourPx = HOUR_DEFAULT; }
   }
   function saveMode(){ try{ localStorage.setItem(MODE_KEY, mode); }catch(e){} }
+  function weekLike(){ return mode === "week" || mode === "two"; } // на экране сетка дней (а не список)
+  // хватает ли окну места на две недели (ширина самого окна календаря, а не экрана: на телефоне вертикально — нет, горизонтально — да)
+  function twoOk(){
+    var c = container(), w = (c && c.clientWidth) || window.innerWidth || 0;
+    return w >= TWO_WEEK_MIN_W;
+  }
+  function effMode(){ return mode === "two" && !twoOk() ? "week" : mode; }
+  // куда переключит кнопка: список → неделя → две недели (если есть место) → список
+  function nextMode(){
+    var m = effMode();
+    if(m === "list") return "week";
+    if(m === "week") return twoOk() ? "two" : "list";
+    return "list";
+  }
+  var fabTwoOk = false; // было ли место на две недели, когда рисовали нижний ряд (поворот экрана меняет кнопку режима)
   function fabRowHtml(){
+    fabTwoOk = twoOk();
+    var nm = nextMode();
     return '<div class="mdeditor-fab-row">' +
-      '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (mode === "week" ? "Режим: список" : "Режим: неделя") + '">' +
-        (mode === "week" ? LIST_ICON_SVG : WEEK_ICON_SVG) + '</button>' +
+      '<button type="button" class="mdeditor-fab-btn" id="calendarModeBtn" title="' + (nm === "list" ? "Режим: список" : (nm === "two" ? "Режим: две недели" : "Режим: неделя")) + '">' +
+        (nm === "list" ? LIST_ICON_SVG : (nm === "two" ? TWO_ICON_SVG : WEEK_ICON_SVG)) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarTrkBtn" title="' + (trackersOn ? 'Скрыть трекеры занятий' : 'Показать трекеры занятий') + '">' + (trackersOn ? TRK_ICON_SVG : TRK_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarHiddenBtn" title="' + eyeTitle() + '">' + (showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG) + '</button>' +
       '<button type="button" class="mdeditor-fab-btn" id="calendarColorBtn" title="Цвета календаря">' + COLOR_ICON_SVG + '</button>' +
@@ -721,19 +748,19 @@
       saveShowHidden(!showHidden());
       var hb = document.getElementById("calendarHiddenBtn");
       if(hb){ hb.innerHTML = showHidden() ? EYE_ICON_SVG : EYE_OFF_ICON_SVG; hb.title = eyeTitle(); }
-      if(mode === "week"){ weekRememberScroll(); renderWeek(); return; }
+      if(weekLike()){ weekRememberScroll(); renderWeek(); return; }
       refreshList();
     });
     document.getElementById("calendarTrkBtn").addEventListener("click", function(){
       trackersOn = !trackersOn;
       saveTrackersOn();
       var tb = document.getElementById("calendarTrkBtn");
-      if(mode === "week"){ weekRememberScroll(); renderWeek(); return; }
+      if(weekLike()){ weekRememberScroll(); renderWeek(); return; }
       refreshList(); // список: обновляется только содержимое, прокрутка остаётся
       if(tb){ tb.innerHTML = trackersOn ? TRK_ICON_SVG : TRK_OFF_ICON_SVG; tb.title = trackersOn ? "Скрыть трекеры занятий" : "Показать трекеры занятий"; }
     });
     document.getElementById("calendarModeBtn").addEventListener("click", function(){
-      mode = mode === "week" ? "list" : "week";
+      mode = nextMode();
       saveMode();
       weekStart = null; weekScrollKeep = null;
       renderMain();
@@ -741,8 +768,22 @@
   }
   function renderMain(){
     if(extForm){ closeExtForm(); return; } // форма была открыта поверх заметки: выход из неё — обратно в заметку
-    if(mode === "week") renderWeek(); else renderList();
+    if(weekLike()) renderWeek(); else renderList();
   }
+  // поворот экрана: «Неделя» ↔ «Две недели» по месту; кнопка режима и список сами пересчитывают, что дальше в круге
+  var resizeTimer = null;
+  function onResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function(){
+      if(screen !== "week" || dragOn || !document.getElementById("calWeek")) return;
+      var want = (mode === "two" && twoOk()) ? 14 : 7;
+      if(want === wkN && twoOk() === fabTwoOk) return;
+      weekRememberScroll();
+      renderWeek();
+    }, 200);
+  }
+  window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
 
   // ---------- экран «Неделя» ----------
   function mondayOf(ts){
@@ -752,8 +793,8 @@
   }
   function dayStartAt(base, i){ var d = new Date(base); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + i, 0, 0, 0, 0).getTime(); }
   function minutesOfDay(ts){ var d = new Date(ts); return d.getHours() * 60 + d.getMinutes(); }
-  function weekTitle(ws){
-    var a = new Date(ws), b = new Date(dayStartAt(ws, 6));
+  function weekTitle(ws, n){
+    var a = new Date(ws), b = new Date(dayStartAt(ws, (n || 7) - 1));
     if(a.getFullYear() !== b.getFullYear())
       return a.getDate() + " " + MONTHS_SHORT[a.getMonth()] + " " + a.getFullYear() + " – " + b.getDate() + " " + MONTHS_SHORT[b.getMonth()] + " " + b.getFullYear();
     if(a.getMonth() !== b.getMonth())
@@ -845,23 +886,25 @@
   }
   function weekHtml(ws){
     var now = Date.now(), todayKey = dateValue(now);
-    var segsByDay = weekSegments(ws);
-    var trkByDay = trackersOn ? weekTrackerSegments(ws) : null;
+    var segsByDay = weekSegments(ws, wkN);
+    var trkByDay = trackersOn ? weekTrackerSegments(ws, wkN) : null;
     var head = '<div class="cal-wk-head"><div class="cal-wk-gutter"></div>';
     var cols = '';
-    for(var i = 0; i < 7; i++){
+    for(var i = 0; i < wkN; i++){
       var ds = dayStartAt(ws, i), isToday = dateValue(ds) === todayKey;
-      head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + '" data-day="' + ds + '"><span>' + WEEKDAYS[i] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
-      cols += dayColHtml(ds, segsByDay[i], trkByDay ? trkByDay[i] : null, isToday, now);
+      var sep = i === 7; // вторая неделя в режиме «Две недели» — с жирной границей слева
+      head += '<div class="cal-wk-dayh' + (isToday ? ' cal-wk-today' : '') + (sep ? ' cal-wk-wk2' : '') + '" data-day="' + ds + '"><span>' + WEEKDAYS[i % 7] + '</span><b>' + new Date(ds).getDate() + '</b></div>';
+      var colHtml = dayColHtml(ds, segsByDay[i], trkByDay ? trkByDay[i] : null, isToday, now);
+      cols += sep ? colHtml.replace("cal-wk-col", "cal-wk-col cal-wk-wk2") : colHtml;
     }
     head += '</div>';
     var labels = '';
     for(var h2 = 1; h2 < 24; h2++) labels += '<span data-h="' + h2 + '" style="top:' + (h2 * hourPx - 6) + 'px">' + pad2(h2) + ':00</span>';
     return '<div class="cal-wk-top">' +
         '<div class="cal-wk-nav">' +
-          '<button type="button" class="cal-wk-btn" id="calWkPrev" title="Предыдущая неделя">‹</button>' +
-          '<div class="cal-wk-title">' + weekTitle(ws) + '</div>' +
-          '<button type="button" class="cal-wk-btn" id="calWkNext" title="Следующая неделя">›</button>' +
+          (wkN === 7 ? '<button type="button" class="cal-wk-btn" id="calWkPrev" title="Предыдущая неделя">‹</button>' : '') +
+          '<div class="cal-wk-title">' + weekTitle(ws, wkN) + '</div>' +
+          (wkN === 7 ? '<button type="button" class="cal-wk-btn" id="calWkNext" title="Следующая неделя">›</button>' : '') +
         '</div>' + head +
       '</div>' +
       '<div class="cal-wk-body" id="calWkBody" style="height:' + (24 * hourPx) + 'px">' +
@@ -897,7 +940,7 @@
   // Красная линия «сейчас» и пометка прошедших событий (класс и выбранный цвет) на уже нарисованной неделе. Зовётся раз в 30 с, при возврате
   // на страницу и из my.js (`__ltOnAppResume`). Сменился день — неделя перерисовывается (прокрутка сохраняется).
   function weekNowTick(){
-    if(screen !== "week" || mode !== "week") return;
+    if(screen !== "week" || !weekLike() || dragOn) return;
     var c = container(), wk = document.getElementById("calWeek");
     if(!c || !wk || wk.querySelector(".cal-wk-clone")) return; // нет недели на экране или идёт листание
     var now = Date.now();
@@ -927,7 +970,7 @@
   window.addEventListener("pageshow", weekNowTick);
   function weekRememberScroll(){
     var c = container();
-    weekScrollKeep = (mode === "week" && c) ? c.scrollTop : null;
+    weekScrollKeep = (weekLike() && c) ? c.scrollTop : null;
   }
   function renderWeek(){
     var c = container();
@@ -936,9 +979,10 @@
     expanded = {};
     clearTimeout(tapTimer); tapTimer = null;
     var cur = mondayOf(Date.now());
-    if(weekStart === null) weekStart = cur;
+    wkN = (mode === "two" && twoOk()) ? 14 : 7;
+    if(weekStart === null || wkN === 14) weekStart = cur; // «Две недели» — всегда текущая и следующая
     var ws = weekStart;
-    c.innerHTML = '<div class="cal-week" id="calWeek">' + weekHtml(ws) + '</div>' + fabRowHtml();
+    c.innerHTML = '<div class="cal-week' + (wkN === 14 ? ' cal-wk-two' : '') + '" id="calWeek">' + weekHtml(ws) + '</div>' + fabRowHtml();
     weekRenderedAt = Date.now();
     bindFab();
     syncFlush();
@@ -1000,8 +1044,9 @@
       void wk.offsetWidth; // зафиксировать стартовое положение, чтобы переход анимировался
       slideFinish(true);
     }
-    document.getElementById("calWkPrev").addEventListener("click", function(){ shift(-1); });
-    document.getElementById("calWkNext").addEventListener("click", function(){ shift(1); });
+    var prevBtn = document.getElementById("calWkPrev"), nextBtn = document.getElementById("calWkNext");
+    if(prevBtn) prevBtn.addEventListener("click", function(){ shift(-1); });
+    if(nextBtn) nextBtn.addEventListener("click", function(){ shift(1); });
     document.getElementById("calendarHomeBtn").addEventListener("click", function(){ if(slide) return; weekStart = null; weekScrollKeep = null; weekScrollToNow = true; renderWeek(); });
     var wk = document.getElementById("calWeek");
     wk.addEventListener("click", function(e){
@@ -1027,12 +1072,14 @@
       weekRememberScroll();
       openForm(null, null, new Date(d.getFullYear(), d.getMonth(), d.getDate(), hour, 0, 0, 0).getTime());
     });
+    var drag = null; // идёт перетаскивание: {ev, at, blk, ghost, ...}
     // жесты: один палец — свайп недели; два пальца по вертикали — щипок (размер сетки)
     var sx = 0, sy = 0, tracking = false, lock = null, t0 = 0, lastDx = 0; // lock: null | "h" (листаем неделю) | "v" (обычная прокрутка)
     var pinch = null; // {gap0, px0, anchor (минуты под серединой пальцев)}
     function gapOf(t){ return Math.abs(t[0].clientY - t[1].clientY); }
     function midOf(t){ return (t[0].clientY + t[1].clientY) / 2; }
     wk.addEventListener("touchstart", function(e){
+      if(drag){ if(e.touches && e.touches.length > 1) dragEnd(false); return; } // второй палец — перетаскивание отменяется
       if(slide && slide.finishing) return; // неделя ещё доезжает — новый жест не начинаем
       if(e.touches && e.touches.length === 2){
         tracking = false; lock = null;
@@ -1048,10 +1095,11 @@
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true; lock = null; t0 = Date.now(); lastDx = 0;
     }, { passive: true });
     wk.addEventListener("touchmove", function(e){
+      if(drag){ var dt = e.touches && e.touches[0]; if(dt) dragMove(dt.clientX, dt.clientY); if(e.cancelable) e.preventDefault(); return; }
       if(!pinch && tracking && lock !== "v" && e.touches && e.touches.length === 1){
         var mdx = e.touches[0].clientX - sx, mdy = e.touches[0].clientY - sy;
         if(lock === null && (Math.abs(mdx) > 8 || Math.abs(mdy) > 8)){
-          lock = Math.abs(mdx) > Math.abs(mdy) * 1.4 ? "h" : "v";
+          lock = (wkN === 7 && Math.abs(mdx) > Math.abs(mdy) * 1.4) ? "h" : "v"; // в «Двух неделях» листать нечего: жест — обычная прокрутка
         }
         if(lock === "h"){
           if(e.cancelable) e.preventDefault();
@@ -1073,6 +1121,7 @@
       }
     }, { passive: false });
     wk.addEventListener("touchend", function(e){
+      if(drag){ if(!e.touches || e.touches.length === 0) dragEnd(true); return; }
       if(pinch){
         if(!e.touches || e.touches.length < 2){
           pinch = null; tracking = false;
@@ -1095,9 +1144,103 @@
       lock = null;
     }, { passive: true });
     wk.addEventListener("touchcancel", function(){
+      if(drag){ dragEnd(false); return; }
       tracking = false; lock = null;
       if(slide && !slide.finishing) slideFinish(false);
     }, { passive: true });
+
+    // ----- перетаскивание: долгое удержание блока мероприятия/задачи, дальше блок-копия идёт за пальцем, по отпусканию — на новое место -----
+    // Рамка — видимые дни и сутки (на другую неделю не утащить); день берётся по пальцу, время — по верху блока со сдвигом DRAG_SNAP_MIN минут.
+    function dragStart(blk){
+      if(drag || slide || pinch || lock !== null) return;
+      var ev = findEvent(blk.getAttribute("data-id"));
+      if(!ev || !canEdit(ev)) return; // общее мероприятие читателя группы не двигается
+      var box = wk.querySelector(".cal-wk-cols"), body = document.getElementById("calWkBody");
+      var colEls = box ? box.querySelectorAll(".cal-wk-col") : null;
+      if(!box || !body || !colEls || colEls.length !== wkN) return;
+      var origIdx = -1;
+      for(var i = 0; i < colEls.length; i++) if(colEls[i] === blk.parentNode) origIdx = i;
+      if(origIdx < 0) return;
+      var r = blk.getBoundingClientRect(), t = lastTouch;
+      var ghost = blk.cloneNode(false);
+      ghost.removeAttribute("data-id"); ghost.removeAttribute("data-at");
+      ghost.className += " cal-wk-ghost";
+      var gw = Math.max(r.width, 64);
+      ghost.innerHTML = '<span></span><span class="cal-wk-et"></span>';
+      ghost.firstChild.textContent = ev.title;
+      ghost.style.width = gw + "px"; ghost.style.height = r.height + "px";
+      wk.style.position = "relative";
+      wk.appendChild(ghost);
+      blk.classList.add("cal-wk-dragging");
+      dragOn = true; tracking = false; lock = null;
+      drag = {
+        ev: ev, at: +blk.getAttribute("data-at"), blk: blk, ghost: ghost, box: box, body: body, colEls: colEls, hi: -1,
+        origIdx: origIdx, origTop: +blk.getAttribute("data-t"), dur: Math.max(0, ev.end - ev.start),
+        w: gw, h: r.height, gx: (t ? t.x : r.left) - r.left, gy: (t ? t.y : r.top) - r.top,
+        x: t ? t.x : r.left, y: t ? t.y : r.top, dayDiff: 0, minDiff: 0, newStart: 0, timer: null
+      };
+      drag.timer = setInterval(dragScroll, 30);
+      try{ if(navigator.vibrate) navigator.vibrate(20); }catch(err){}
+      dragMove(drag.x, drag.y);
+    }
+    function dragMove(x, y){
+      var d = drag;
+      if(!d) return;
+      d.x = x; d.y = y;
+      var cr = d.box.getBoundingClientRect(), br = d.body.getBoundingClientRect(), wr = wk.getBoundingClientRect();
+      var gx = Math.max(cr.left, Math.min(cr.right - d.w, x - d.gx));
+      var gy = Math.max(br.top, Math.min(br.bottom - d.h, y - d.gy));
+      d.ghost.style.left = (gx - wr.left) + "px";
+      d.ghost.style.top = (gy - wr.top) + "px";
+      var idx = Math.max(0, Math.min(wkN - 1, Math.floor((x - cr.left) / (cr.width / wkN))));
+      var raw = (gy - br.top) * 60 / hourPx - d.origTop;
+      var minDiff = Math.round(raw / DRAG_SNAP_MIN) * DRAG_SNAP_MIN;
+      minDiff = Math.max(-d.origTop, Math.min(1435 - d.origTop, minDiff));
+      d.dayDiff = idx - d.origIdx; d.minDiff = minDiff;
+      var a = new Date(d.at);
+      d.newStart = new Date(a.getFullYear(), a.getMonth(), a.getDate() + d.dayDiff, a.getHours(), a.getMinutes() + minDiff).getTime();
+      if(d.hi !== idx){
+        if(d.hi >= 0) d.colEls[d.hi].classList.remove("cal-wk-drop");
+        d.colEls[idx].classList.add("cal-wk-drop");
+        d.hi = idx;
+      }
+      var lab = d.ghost.lastChild;
+      if(lab) lab.textContent = WEEKDAYS[(new Date(d.newStart).getDay() + 6) % 7] + " " + (isTask(d.ev) ? timeValue(d.newStart) : timeRange(d.newStart, d.dur));
+    }
+    // у верхнего/нижнего края окна сетка сама прокручивается
+    function dragScroll(){
+      var d = drag;
+      if(!d) return;
+      var cb = c.getBoundingClientRect(), top = c.querySelector(".cal-wk-top"), headH = top ? top.getBoundingClientRect().height : 0;
+      var dy = 0;
+      if(d.y < cb.top + headH + 36) dy = -10; else if(d.y > cb.bottom - 96) dy = 10;
+      if(!dy) return;
+      var before = c.scrollTop;
+      c.scrollTop = before + dy;
+      if(c.scrollTop !== before) dragMove(d.x, d.y);
+    }
+    function dragEnd(commit){
+      var d = drag;
+      if(!d) return;
+      drag = null; dragOn = false;
+      clearInterval(d.timer);
+      if(d.ghost.parentNode) d.ghost.parentNode.removeChild(d.ghost);
+      d.blk.classList.remove("cal-wk-dragging");
+      if(d.hi >= 0) d.colEls[d.hi].classList.remove("cal-wk-drop");
+      wk.style.position = "";
+      pinchEndedAt = Date.now(); // click, оставшийся от жеста, не открывает форму
+      if(!commit || (!d.dayDiff && !d.minDiff)) return;
+      moveEventTo(d.ev, d.at, d.newStart);
+    }
+    var lastTouch = null; // где палец: onLong от LTPress отдаёт координаты начала касания
+    if(window.LTPress){
+      LTPress.bind(wk, { sel: ".cal-wk-ev", ms: DRAG_MS, blockAll: true, onLong: function(info){
+        if(info.via !== "touch") return; // мышью/меню правой кнопки не двигаем
+        lastTouch = { x: info.x, y: info.y };
+        dragStart(info.el);
+        lastTouch = null;
+      } });
+    }
     var goNow = weekScrollToNow; weekScrollToNow = false;
     scrollWeek(c, goNow);
   }
@@ -1438,6 +1581,52 @@
       skipOccurrence(list, ev, at);
     }
     save(list);
+  }
+  // вопрос после перетаскивания повторяющегося мероприятия: cb(true) — это и все последующие, cb(false) — только это; «Отмена» ничего не меняет
+  function askMoveScope(cb){
+    var old = document.getElementById("calMoveScope");
+    if(old && old.parentNode) old.parentNode.removeChild(old);
+    var ov = document.createElement("div");
+    ov.id = "calMoveScope";
+    ov.className = "cal-scope-ov";
+    ov.innerHTML = '<div class="cal-scope-box"><div class="item-form-hint">Это повторяющееся мероприятие. Перенести:</div>' +
+      '<button type="button" class="workbooks-run-btn" data-a="one">Только это</button>' +
+      '<button type="button" class="workbooks-run-btn" data-a="all">Это и все последующие</button>' +
+      '<button type="button" class="workbooks-run-btn" data-a="no">Отмена</button></div>';
+    ov.addEventListener("click", function(e){
+      var b = e.target && e.target.closest ? e.target.closest("button") : null;
+      if(!b && e.target !== ov) return;
+      var a = b ? b.getAttribute("data-a") : "no";
+      if(ov.parentNode) ov.parentNode.removeChild(ov);
+      if(a === "one") cb(false); else if(a === "all") cb(true);
+    });
+    document.body.appendChild(ov);
+  }
+  // перетащенное в «Неделе» / «Двух неделях» мероприятие или задачу — на новое начало `newStart` (длительность сохраняется; у задачи начало = конец).
+  // at — начало того повторения, которое тащили (у серии)
+  function moveEventTo(ev, at, newStart){
+    var dur = Math.max(0, ev.end - ev.start);
+    var newEnd = isTask(ev) ? newStart : newStart + dur;
+    function done(){
+      if(screen !== "week" || !weekLike()) return;
+      var c = container();
+      if(c) weekScrollKeep = c.scrollTop;
+      renderWeek();
+    }
+    if(isTask(ev) || !ev.repeat){
+      var list = load(), rec = JSON.parse(JSON.stringify(ev));
+      rec.start = newStart; rec.end = newEnd; rec.updatedAt = Date.now();
+      if(!replaceInList(list, rec)) return;
+      save(list);
+      done();
+      return;
+    }
+    askMoveScope(function(following){
+      var hide = isHidden(ev.id, at); // скрытое повторение остаётся скрытым на новом месте
+      var nid = following ? applyFollowing(ev, at, ev.title, newStart, newEnd, ev.repeat, calOf(ev)) : applyOnlyThis(ev, at, ev.title, newStart, newEnd, calOf(ev));
+      setHidden(nid, hide);
+      done();
+    });
   }
 
   // ---------- форма ----------
@@ -1823,15 +2012,15 @@
     // колонка одного дня (по умолчанию сегодня) внутри host — для ежедневной заметки, см. шапку; возвращает {tick, destroy, refresh}
     mountDayColumn: function(host, opts){ return mountDayColumn(host, opts); },
     refresh: function(){
-      if(screen === "form") return;
+      if(screen === "form" || dragOn) return; // во время перетаскивания сетку не перерисовываем (подпись не запоминаем — обновится позже)
       var sig = sigNow();
       if(sig === lastSig) return;
       lastSig = sig;
       reloadPrefs(); // скрытые, цвета и переключатели могли прийти с другого устройства
       var c = container(), top = c ? c.scrollTop : 0;
-      if(mode === "week") weekScrollKeep = top;
+      if(weekLike()) weekScrollKeep = top;
       renderMain();
-      if(c && mode !== "week") c.scrollTop = top;
+      if(c && !weekLike()) c.scrollTop = top;
     },
     // для «Конструктора виджетов» (widgets.js): задачи и события для карточек стопки. Открытые задачи календаря, начало которых раньше `to`
     // (просроченные — тоже), и ближайшие повторения обычных мероприятий с началом в [from, to). Скрытые на этом устройстве не отдаются.
