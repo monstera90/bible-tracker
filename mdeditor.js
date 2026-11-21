@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.10 (21.11) — «Заметки-карточки»: кнопка «PDF» в нижнем ряду (`#mdNotesPdfBtn`, самая левая; на Android 5 её нет, как и во вкладке «QR-коды») и меню «Большие (4) / Средние (12) / Маленькие (24) на лист» — `exportNotesPdf`: лист с QR-кодами заметок `lt://v1/note/<id>` и названием под каждым (тот же писатель листов `CardPdf` из cardpdf.js, что и у карточек «QR-кодов»). Печатаются заметки, которые сейчас показаны на экране: текущая папка и выбранный цвет фильтра (папки и заметки с id, который не принимает сканер, пропускаются). Заметки никуда не переносятся. Откат: mdeditor.js 25.9.
    Версия: 25.9 (21.11) — карточки-заметки: одно нажатие открывает заметку (после 400 мс), два подряд убирают её из всех виджетов (`noteCardTap`, `LTNoteCards.dropFromWidgets`). Откат: mdeditor.js 25.8.
    Версия: 25.8 (19.11) — «Заметки-карточки»: кнопка-воронка в нижнем ряду (`#mdNotesFilterBtn`, значок тот же, что у воронки вкладки «QR-коды»; сразу слева от кнопки режима) — фильтр заметок по цвету карточки: список раскрывается над кнопкой и показывает только те цвета, которые реально выбраны у заметок текущей папки (`LTNoteCards.getColor`), плюс «Все цвета»; выбранный цвет оставляет в списке только заметки этого цвета (папки остаются), кнопка при этом нажата. Выбор живёт до перезагрузки (`noteColorFilter`); если цвета в этой папке уже нет — фильтр не действует. Откат: mdeditor.js 25.7.
    Версия: 25.7 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
@@ -3552,6 +3553,58 @@ window.initMdEditorModule = function(deps){
     var m = document.getElementById("mdNotesColorMenu");
     if(m) m.style.display = "none";
   }
+  // ---- лист с QR-кодами заметок (кнопка `mdNotesPdfBtn`, только в режиме «Заметки-карточки») ----
+  var NOTES_PDF_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z"></path><path d="M14 3v4h4"></path><path d="M9 12.5h6"></path><path d="M9 15.5h6"></path><path d="M9 18h3"></path></svg>'; // та же, что у кнопки PDF вкладки «QR-коды» (itemcards.js PDF_ICON_SVG)
+  var notesPdfBusy = false;
+  var notesPdfMenuBound = false;
+  function isAndroid5Notes(){ return /Android [1-5]\./.test(navigator.userAgent || ""); } // Android 5: PDF не реализуется (решение заказчика, ТЗ 16.10.2026)
+  function closeNotesPdfMenu(){
+    if(notesPdfBusy) return; // во время сборки меню остаётся — на нём строка «Готовлю…»
+    var m = document.getElementById("mdNotesPdfMenu");
+    if(m) m.style.display = "none";
+  }
+  function notesPdfTodayIso(){
+    var d = new Date(), p = function(n){ return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+  // files — [{id, name}] заметок, которые сейчас на экране; perPage — 4 | 12 | 24
+  function exportNotesPdf(files, perPage){
+    if(notesPdfBusy) return;
+    // сканер и оболочка принимают только такие id (см. toggleNoteQr)
+    var list = (files || []).filter(function(f){ return f && /^[A-Za-z0-9]{4,32}$/.test(String(f.id)); });
+    if(!list.length){ alert("Здесь нет заметок, для которых можно собрать PDF."); return; }
+    if(!window.CardPdf){ alert("Модуль PDF не загружен."); return; }
+    var forPdf = list.map(function(f){ return { id: f.id, title: f.name, qr: noteQrText(f.id) }; });
+    function setStatus(t){
+      var st = document.getElementById("mdNotesPdfStatus");
+      if(st){ st.style.display = t ? "block" : "none"; st.textContent = t || ""; }
+    }
+    function setButtons(disabled){
+      var m = document.getElementById("mdNotesPdfMenu");
+      if(!m) return;
+      var bs = m.querySelectorAll("button");
+      for(var i = 0; i < bs.length; i++) bs[i].disabled = disabled;
+    }
+    notesPdfBusy = true; setButtons(true); setStatus("Готовлю PDF…");
+    loadQrLib().then(function(){
+      return window.CardPdf.build(forPdf, perPage, { onProgress: function(done, total){ setStatus("Готовлю PDF… " + done + " из " + total); } });
+    }).then(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "notes-qr-" + notesPdfTodayIso() + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 4000); // в APK скачивание перехватывает native-shell.js — даём ему время забрать Blob
+    }).catch(function(err){
+      console.error(err);
+      alert("Не удалось собрать PDF.");
+    }).then(function(){
+      notesPdfBusy = false; setButtons(false); setStatus("");
+      closeNotesPdfMenu();
+    });
+  }
   var NOTE_WIDGET_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6h-6z"></path><path d="M14 4h6v6h-6z"></path><path d="M4 14h6v6h-6z"></path><path d="M14 17h6"></path><path d="M17 14v6"></path></svg>'; // как у карточки книги (my.js BOOK_WIDGET_ICON_SVG)
   var NOTE_CARD_SETTINGS_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="18" x2="20" y2="18"></line><circle cx="9" cy="6" r="2" fill="currentColor"></circle><circle cx="15" cy="12" r="2" fill="currentColor"></circle><circle cx="8" cy="18" r="2" fill="currentColor"></circle></svg>'; // «Настройки карточки»: форма с палитрой цвета (позже и другие настройки)
   function getNotesViewMode(){
@@ -3782,6 +3835,15 @@ window.initMdEditorModule = function(deps){
     html += '<input type="file" accept=".zip,application/zip" id="mdEditorImportImagesZipInput" style="display:none;">';
     html += '<div class="mdeditor-fab-row' + (cardsMode ? ' fab-row-ext' : '') + '">';
     // размер карточек — только в режиме «Заметки-карточки»; кнопка режима — сразу слева от «+» и показывает режим, В КОТОРЫЙ переключит клик
+    // PDF с QR-кодами заметок — самая левая кнопка ряда (как у вкладки «QR-коды»: PDF стоит перед размером); меню раскрывается над кнопкой вправо
+    if(cardsMode && !isAndroid5Notes()){
+      html += '<span class="item-filter-wrap"><div class="item-type-menu item-filter-menu" id="mdNotesPdfMenu" style="display:none;">' +
+        '<button type="button" class="workbooks-run-btn" data-per="4">Большие (4 на лист)</button>' +
+        '<button type="button" class="workbooks-run-btn" data-per="12">Средние (12 на лист)</button>' +
+        '<button type="button" class="workbooks-run-btn" data-per="24">Маленькие (24 на лист)</button>' +
+        '<div class="item-pdf-status" id="mdNotesPdfStatus" style="display:none;"></div>' +
+      '</div><button type="button" class="mdeditor-fab-btn" id="mdNotesPdfBtn" title="PDF с QR-кодами заметок для печати">' + NOTES_PDF_ICON_SVG + '</button></span>';
+    }
     if(cardsMode) html += '<button type="button" class="mdeditor-fab-btn" id="mdNotesSizeBtn" title="Размер карточек">' + NOTES_SIZE_ICON_SVG + '</button>';
     // воронка — фильтр по цвету карточки; список раскрывается над кнопкой (обёртка и стиль — как у воронки «QR-кодов»)
     if(cardsMode){
@@ -3823,6 +3885,33 @@ window.initMdEditorModule = function(deps){
         render();
       });
     }
+    var pdfBtn = document.getElementById("mdNotesPdfBtn");
+    var pdfMenu = document.getElementById("mdNotesPdfMenu");
+    if(pdfBtn && pdfMenu){
+      pdfBtn.addEventListener("click", function(){
+        var sb1 = document.getElementById("mdNotesSizeBar");
+        if(sb1) sb1.classList.remove("open");
+        closeNoteColorMenu();
+        var open = pdfMenu.style.display !== "flex";
+        if(open) pdfMenu.style.display = "flex"; else closeNotesPdfMenu();
+      });
+      pdfMenu.addEventListener("click", function(e){
+        var b = e.target.closest("button[data-per]");
+        if(!b) return;
+        // печатаются заметки, которые сейчас на экране: текущая папка и выбранный цвет (папки в лист не попадают)
+        exportNotesPdf(fileItems, parseInt(b.dataset.per, 10));
+      });
+      if(!notesPdfMenuBound){
+        notesPdfMenuBound = true; // один слушатель на документ: экран перерисовывается часто
+        document.addEventListener("pointerdown", function(e){
+          var m = document.getElementById("mdNotesPdfMenu");
+          if(!m || m.style.display !== "flex") return;
+          var t = e.target;
+          if(t && t.closest && t.closest(".item-filter-wrap")) return;
+          closeNotesPdfMenu();
+        }, true);
+      }
+    }
     var colorFilterBtn = document.getElementById("mdNotesFilterBtn");
     var colorMenu = document.getElementById("mdNotesColorMenu");
     if(colorFilterBtn && colorMenu){
@@ -3830,6 +3919,7 @@ window.initMdEditorModule = function(deps){
         var open = colorMenu.style.display !== "flex";
         var sb0 = document.getElementById("mdNotesSizeBar");
         if(sb0) sb0.classList.remove("open");
+        closeNotesPdfMenu();
         colorMenu.style.display = open ? "flex" : "none";
       });
       colorMenu.addEventListener("click", function(e){
@@ -3858,6 +3948,7 @@ window.initMdEditorModule = function(deps){
       var showSizeVal = function(){ sizeVal.textContent = Math.round(getNotesCardsScale() * 100) + "%"; };
       sizeBtn.addEventListener("click", function(){
         closeNoteColorMenu();
+        closeNotesPdfMenu();
         var open = !sizeBar.classList.contains("open");
         sizeBar.classList.toggle("open", open);
         if(open){ sizeRange.value = String(getNotesCardsScale()); showSizeVal(); }
