@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.0 (21.11) — карточки задач (my.js 153.0, `taskCardize`/`fitTaskCard`): `.task-row-card`, `.task-card` (рамка, скругление, фиксированное соотношение сторон `--tc-ratio`), полоса приоритета `.task-card > .task-flag-dot` (цвет темы / красный #ff4d52 / оранжевый #ff8a3d), нижний ряд `.task-actions-l`/`.task-actions-r`, развёрнутая `.task-card-open`. Откат: modals.css 22.8.
    Версия: 22.8 (21.11) — жесты строки задачи вместо кнопок «крестик/карандаш/галочка/шеврон» (my.js, bindTaskRowGestures): у обычного текста задачи гасится системное выделение/меню при долгом нажатии (`.task-text-view:not(.task-editable)`, кроме полноэкранного режима).
    Версия: 22.7 (20.11) — вкладка «Claude»: правило `.lt-edge .claude-tab-status` убрано (строка состояния теперь внутри `.claude-tab-bar`, стили — в claudetab.js).
    Версия: 22.6 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
@@ -2975,3 +2976,179 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
   pointer-events:none;
   background:transparent;
 }
+
+/* ===========================================================================
+   КАРТОЧКА ЗАДАЧИ (ТЗ 21.11; my.js: taskCardize / fitTaskCard).
+   Свёрнутая карточка — фиксированное соотношение сторон --tc-ratio (ширина/высота, с макета: 1012×543 px);
+   от числа строк и размера шрифта оно не зависит — лишний текст обрезается (число влезающих строк ставит
+   fitTaskCard). Развёрнутая (.task-card-open, редактирование) растёт по тексту, но не ниже свёрнутой.
+   Слева полоса приоритета — это та же кнопка .task-flag-dot: по умолчанию цвет темы, дальше красный, оранжевый.
+   =========================================================================== */
+:root{
+  --tc-ratio:1.864;
+  --tc-strip:10px;                 /* ширина цветной полосы */
+  --tc-pad-l:calc(var(--tc-strip) + 13px);
+  --tc-pad-r:14px;
+  --tc-btn:calc(28px * var(--task-ico-scale, 1));
+  --tc-flag-red:#ff4d52;
+  --tc-flag-orange:#ff8a3d;
+  --tc-line:var(--parchment-dark, #e9e0f1);
+}
+.task-row.task-row-card,
+.task-grid-list .task-row.task-row-card{
+  border-top:none;
+  padding:4px 0;
+}
+.task-row.task-row-card:first-child{ padding-top:0; }
+.task-body.task-card{
+  box-sizing:border-box;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  aspect-ratio:var(--tc-ratio);
+  background:var(--parchment);
+  border:2px solid var(--tc-line);
+  border-radius:14px;
+  padding:0;
+}
+.task-body.task-card.task-card-open{
+  aspect-ratio:auto;
+  overflow:visible;
+}
+/* текст свёрнутой карточки занимает всё место над рядом кнопок */
+.task-body.task-card > .task-text-view,
+.task-body.task-card > .task-editable{
+  box-sizing:border-box;
+  flex:1 1 0;
+  min-height:0;
+  margin:0;
+  padding:11px var(--tc-pad-r) 4px var(--tc-pad-l);
+  overflow:hidden;
+}
+.task-body.task-card > .task-editable{
+  flex:1 0 auto;
+  min-height:1.5em;
+  overflow:visible;
+}
+.task-body.task-card > .task-joint-signature{
+  padding:8px var(--tc-pad-r) 0 var(--tc-pad-l);
+  margin:0;
+}
+.task-body.task-card > .task-joint-signature + .task-text-view{ padding-top:2px; }
+/* картинка в начале задачи — прежний квадрат слева от текста; обрезка — по max-height, которую ставит fitTaskCard */
+.task-body.task-card > .task-text-view.task-has-img.task-text-clamped{ max-height:none; }
+/* ---- полоса приоритета (кнопка) ---- */
+.task-body.task-card > .task-flag-dot{
+  position:absolute;
+  left:0;top:0;bottom:0;
+  width:var(--tc-strip);
+  height:auto;
+  margin:0;
+  padding:0;
+  border:none;
+  border-radius:0;
+  background:var(--wood);
+  z-index:1;
+}
+.task-body.task-card.task-card-open > .task-flag-dot{ border-radius:12px 0 0 12px; }
+.task-body.task-card > .task-flag-dot.flag-red{ background:var(--tc-flag-red); }
+.task-body.task-card > .task-flag-dot.flag-yellow{ background:var(--tc-flag-orange); }
+.task-body.task-card > .task-flag-dot .task-flag-dot-inner{ display:none; }
+/* область нажатия шире видимой полосы — заходит на поле слева от текста */
+.task-body.task-card > .task-flag-dot::after{
+  content:"";
+  position:absolute;
+  left:0;top:0;bottom:0;
+  right:-12px;
+}
+/* ---- нижний ряд кнопок ---- */
+.task-body.task-card > .task-actions{
+  position:static;
+  flex:0 0 auto;
+  display:flex;
+  flex-wrap:nowrap;
+  align-items:center;
+  justify-content:space-between;
+  box-sizing:border-box;
+  width:100%;
+  max-width:none;
+  margin:0;
+  padding:0 var(--tc-pad-r) 12px var(--tc-pad-l);
+  top:auto;
+}
+.task-body.task-card .task-actions-l,
+.task-body.task-card .task-actions-r{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+}
+.task-body.task-card .task-actions-r{ flex-shrink:0; margin-left:auto; }
+.task-body.task-card .task-actions-l{ flex-wrap:nowrap; }
+.task-body.task-card .task-icon-btn{
+  box-sizing:border-box;
+  flex:0 0 auto;
+  width:var(--tc-btn);height:var(--tc-btn);
+  margin:0;
+  border:2px solid var(--tc-line);
+  border-radius:50%;
+  background:transparent;
+  color:var(--ink);
+}
+.task-body.task-card .task-icon-btn svg{ width:calc(var(--tc-btn) * .55); height:calc(var(--tc-btn) * .55); }
+/* чемоданчик: «в работе» — заливка цветом темы, «нужно проверить» — тонкое кольцо цветом темы */
+.task-body.task-card .task-icon-btn.task-worktasks-btn.active{
+  width:var(--tc-btn);height:var(--tc-btn);
+  margin:0;
+  background:var(--wood);
+  border-color:var(--wood);
+  color:var(--parchment);
+}
+.task-body.task-card .task-icon-btn.task-worktasks-btn.needs-check{
+  width:var(--tc-btn);height:var(--tc-btn);
+  margin:0;
+  border:2px solid var(--wood);
+  color:var(--ink);
+}
+/* напоминание: без напоминания — обычная круглая кнопка с часами; стоит — овал с часами и временем (число слева — если другой день) */
+.task-body.task-card .task-icon-btn.task-reminder-btn.has-time,
+.task-body.task-card .task-icon-btn.task-reminder-btn.has-date{
+  width:auto;
+  min-width:var(--tc-btn);
+  border:none;
+  border-radius:0;
+  gap:5px;
+}
+.task-body.task-card .task-icon-btn.task-reminder-btn.active{ border-color:transparent; background:transparent; }
+.task-body.task-card .task-icon-btn.task-reminder-btn.active:not(.has-time){
+  border-color:var(--wood);
+  background:var(--wood);
+  color:var(--parchment);
+}
+.task-body.task-card .task-reminder-btn .rb-circle,
+.task-body.task-card .task-reminder-btn .rb-date,
+.task-body.task-card .task-reminder-btn .rb-time{
+  height:var(--tc-btn);
+  background:var(--wood);
+  color:var(--parchment);
+}
+.task-body.task-card .task-reminder-btn .rb-circle,
+.task-body.task-card .task-reminder-btn .rb-date{ width:var(--tc-btn); }
+.task-body.task-card .task-reminder-btn .rb-circle svg{ width:calc(var(--tc-btn) * .55); height:calc(var(--tc-btn) * .55); }
+.task-body.task-card .task-reminder-btn .rb-time{
+  width:auto;
+  padding:0 12px 0 9px;
+  gap:5px;
+  border-radius:calc(var(--tc-btn) / 2);
+  font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size:calc(var(--tc-btn) * .52);
+}
+.task-body.task-card .task-reminder-btn .rb-time svg{ width:calc(var(--tc-btn) * .55); height:calc(var(--tc-btn) * .55); flex:0 0 auto; }
+.task-body.task-card .task-reminder-btn .rb-date{
+  font-family:system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size:calc(var(--tc-btn) * .45);
+}
+.task-body.task-card .task-reminder-btn .rb-date + .rb-time{ margin-left:0; }
+/* экран «Кнопки задач»: образцы кружков приоритета — те же цвета, что у полосы */
+.task-info-item .task-flag-dot.flag-red .task-flag-dot-inner{ background:var(--tc-flag-red, #ff4d52); }
+.task-info-item .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:var(--tc-flag-orange, #ff8a3d); }

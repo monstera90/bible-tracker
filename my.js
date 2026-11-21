@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.0 (21.11) — карточки задач (все вкладки задач, «Все задачи проекта», поиск): строка задачи — карточка с фиксированным соотношением сторон 1,864:1 в свёрнутом виде (от текста и размера шрифта не зависит: влезающее число строк считает `fitTaskCard`, остальное обрезается), в развёрнутом (редактирование) карточка растёт. Цветная полоса слева заменила кружок приоритета (кнопка `.task-flag-dot` — та же, обработчики те же): цвет темы → красная #ff4d52 → оранжевая #ff8a3d (в данных по-прежнему `flag:"yellow"`). Внизу слева «перенос / в начало / в конец / [ссылка] / копировать», справа «чемоданчик / напоминание» (часы + время). Разметка строк не менялась: `taskCardize` (вызывается из `fitTaskActions`) превращает готовую строку в карточку. Откат: my.js 152.3.
    Версия: 152.3 (21.11) — задачи: кнопки «крестик», «карандаш», «галочка» и «шеврон» убраны из всех строк (вкладки задач, «Все задачи проекта», поиск, ревью, архив). Вместо них жесты на самой строке (`bindTaskRowGestures`): один тап — развернуть и редактировать (потеря фокуса сохраняет, сворачивает и выключает редактирование), два тапа — выполнено (в архив), долгое нажатие — плашка только с крестиком, он удаляет задачу (`openTaskDeleteBubble`, `openAppBubbleGrid` с `opts.single`); в архиве тап разворачивает/сворачивает запись, долгое нажатие — удаление. Признак «строку можно править» теперь `data-editable` на `.task-body` (раньше — наличие карандаша, см. `taskHoldTarget`). Экран «Кнопки задач» переписан под жесты. Откат: my.js 152.2.
    Версия: 152.2 (21.11) — `LTNoteCards.dropFromWidgets(noteId)`: двойное нажатие на карточку-заметку в приложении убирает её из всех виджетов (`WidgetsTab.dropNoteEverywhere`). Откат: my.js 152.1.
    Версия: 152.1 (21.11) — `drainWidgetNotes`: заметки, снятые с виджета двойным нажатием на карточку «Заметки» (мост ≥ 40, `widgetNoteTake`/`widgetNoteAck`), убираются из списка виджета (`WidgetsTab.dropNote`); вызывается рядом с `drainWidgetTasks`. Откат: my.js 152.0.
@@ -23415,7 +23416,7 @@
     task.c.createdAt = edge === "top" ? edgeKey - 1 : edgeKey + 1;
     saveTaskData(id, task.c);
   }
-  // цветная отметка слева от чекбокса. (из null клик даёт red, но обратно в null кликом больше не
+  // цветная полоса слева от текста карточки (оранжевая — в данных "yellow"). (из null клик даёт red, но обратно в null кликом больше не
   // возвращается); снять отметку совсем можно только долгим нажатием (см. clearTaskFlag ниже,
   // bindTapOrHold — общий тап/холд-хелпер). Возвращает новое значение ("red"/"yellow").
   function cycleTaskFlag(id){
@@ -24881,7 +24882,81 @@
     var textEl = body.querySelector(".task-text-view") || body.querySelector(".task-editable");
     if(!actions || !textEl) return;
     watchTaskBodyFit(body, actions);
+    if(taskCardize(body, actions)){ fitTaskCard(body, actions, textEl); return; }
     fitTaskActionsNow(body, actions, textEl);
+  }
+  // ---------------------------------------------------------------------
+  // КАРТОЧКА ЗАДАЧИ (ТЗ 21.11). Любая строка с кнопкой приоритета (.task-flag-dot) — вкладки задач, «Все задачи
+  // проекта», поиск, в обычном виде и при редактировании — превращается в карточку: рамка со скруглением, слева
+  // цветная полоса (она же кнопка приоритета; цвет темы → красная → оранжевая, см. cycleTaskFlag), внизу ряд кнопок
+  // (слева — перенос/в начало/в конец/[ссылка]/копировать, справа — чемоданчик и напоминание). Сами строки
+  // (renderTaskRowView/Edit, renderRowView/Edit, search.js) разметку не менялись — их результат переделывает taskCardize
+  // (он вызывается из fitTaskActions, который все они зовут после отрисовки). Кнопка приоритета остаётся той же
+  // кнопкой — обработчики, повешенные bindTaskRowActions, переезжают вместе с ней. Комментарии и архив (нет кнопки
+  // приоритета) остаются прежними строками.
+  // ---------------------------------------------------------------------
+  var TASK_CARD_RATIO = 1.864; // ширина / высота свёрнутой карточки (с макета пользователя); то же число — в modals.css (--tc-ratio)
+  var TASK_CARD_ASPECT_OK = !!(window.CSS && CSS.supports && CSS.supports("aspect-ratio", "1 / 1"));
+  function taskCardize(body, actions){
+    var dot = body.querySelector(".task-flag-dot");
+    if(!dot) return false;
+    if(!body.classList.contains("task-card")){
+      body.classList.add("task-card");
+      var row = body.parentNode;
+      if(row && row.classList && row.classList.contains("task-row")) row.classList.add("task-row-card");
+    }
+    if(dot.parentNode !== body) body.insertBefore(dot, body.firstChild); // полоса — прямой потомок карточки
+    if(!actions.querySelector(".task-actions-l")){
+      var l = document.createElement("span"), r = document.createElement("span");
+      l.className = "task-actions-l"; r.className = "task-actions-r";
+      var kids = Array.prototype.slice.call(actions.children);
+      for(var i = 0; i < kids.length; i++){
+        var k = kids[i];
+        if(k.classList.contains("task-worktasks-btn") || k.classList.contains("task-reminder-btn")) r.appendChild(k);
+        else l.appendChild(k);
+      }
+      actions.appendChild(l); actions.appendChild(r);
+      // время напоминания — овал с часами и временем
+      var times = r.querySelectorAll(".rb-time");
+      for(var j = 0; j < times.length; j++){
+        if(!times[j].querySelector("svg")) times[j].insertAdjacentHTML("afterbegin", CLOCK_ICON_SVG);
+      }
+    }
+    return true;
+  }
+  // Свёрнутая карточка: высота = ширина / TASK_CARD_RATIO (CSS aspect-ratio), текст внутри обрезается по числу строк,
+  // которое реально помещается (от размера шрифта и числа строк высота карточки не зависит). Развёрнутая (редактирование
+  // — в строке .task-editable): высота по тексту, но не меньше свёрнутой.
+  function fitTaskCard(body, actions, textEl){
+    var open = textEl.classList.contains("task-editable");
+    body.classList.toggle("task-card-open", open);
+    // следы прежней подгонки кнопок под последнюю строку (если строка раньше была обычной)
+    setStyleIfChanged(body, "paddingBottom", "");
+    setStyleIfChanged(actions, "top", "");
+    var w = body.offsetWidth;
+    var h = w ? w / (TASK_CARD_RATIO || 1.864) : 0;
+    if(open){
+      setStyleIfChanged(body, "height", "");
+      setStyleIfChanged(body, "minHeight", h ? (Math.round(h * 10) / 10) + "px" : "");
+      setStyleIfChanged(textEl, "maxHeight", "");
+      textEl.style.removeProperty("-webkit-line-clamp");
+      return;
+    }
+    setStyleIfChanged(body, "minHeight", "");
+    if(TASK_CARD_ASPECT_OK === false) setStyleIfChanged(body, "height", h ? (Math.round(h * 10) / 10) + "px" : "");
+    // сначала снимаем свой прошлый предел, иначе измерение свободного места упрётся в него же
+    textEl.style.maxHeight = "";
+    textEl.style.removeProperty("-webkit-line-clamp");
+    var cs = window.getComputedStyle(textEl);
+    var fs = parseFloat(cs.fontSize) || 14;
+    var lh = parseFloat(cs.lineHeight);
+    if(!isFinite(lh) || lh <= 0) lh = fs * 1.5;
+    var padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    var avail = textEl.clientHeight - padV;
+    if(avail <= 0) return;
+    var lines = Math.max(1, Math.floor((avail + 1) / lh));
+    textEl.style.maxHeight = (lines * lh + padV) + "px";
+    textEl.style.setProperty("-webkit-line-clamp", String(lines));
   }
   // Подгонка считается по раскладке строк на момент вызова, а раскладка потом может поменяться сама, без события resize и без
   // нашего вызова: подгрузился шрифт или словарь переносов (строк стало больше/меньше), поменялись поля окна, ширина значков,
@@ -25177,9 +25252,9 @@
     html += iconRow(COPY_ICON_SVG, false, "Копирует текст задачи в буфер обмена.");
     html += iconRow(
       '<span class="task-flag-dot" style="pointer-events:none;"><span class="task-flag-dot-inner"></span></span>', false,
-      "Цветной кружок — отметка приоритета. Нажатие переключает по кругу: " +
+      "Цветная полоса слева на карточке — отметка приоритета (по умолчанию цвета темы). Нажатие переключает по кругу: " +
       '<span class="task-flag-dot flag-red"><span class="task-flag-dot-inner"></span></span> красная → ' +
-      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> жёлтая — и снова красная, по кругу. ' +
+      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> оранжевая — и снова красная, по кругу. ' +
       "Долгое нажатие снимает отметку совсем. Любая отмеченная задача, из какой бы вкладки она ни была, дополнительно показывается на вкладке «Red»."
     );
     html += iconRow(
