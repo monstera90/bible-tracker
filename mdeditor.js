@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.13 (21.11) — размер шрифта задач отдельный: `taskFontSizeStep`/`applyTaskFontSize`/`getTaskFontSizeStep`/`setTaskFontSizeStep` (ключ IndexedDB `taskFontSizeStep`, переменная `--task-font-size`); `bindFontSizeBar` принимает getStep. Откат: mdeditor.js 25.12.
    Версия: 25.12 (21.11) — только комментарии: карточка «Сегодня» теперь «Мой дневник» (itemcards.js 49.6). Код не менялся.
    Версия: 25.11 (21.11) — из нижнего ряда открытой заметки убрана кнопка «Копировать» (`#mdEditorCopyBtn`, её обработчик и строка в окне подсказки): копирование есть в круговом контекстном меню (ctxmenu.js). Откат: mdeditor.js 25.10.
    Версия: 25.10 (21.11) — «Заметки-карточки»: кнопка «PDF» в нижнем ряду (`#mdNotesPdfBtn`, самая левая; на Android 5 её нет, как и во вкладке «QR-коды») и меню «Большие (4) / Средние (12) / Маленькие (24) на лист» — `exportNotesPdf`: лист с QR-кодами заметок `lt://v1/note/<id>` и названием под каждым (тот же писатель листов `CardPdf` из cardpdf.js, что и у карточек «QR-кодов»). Печатаются заметки, которые сейчас показаны на экране: текущая папка и выбранный цвет фильтра (папки и заметки с id, который не принимает сканер, пропускаются). Заметки никуда не переносятся. Откат: mdeditor.js 25.9.
@@ -2283,6 +2284,26 @@ window.initMdEditorModule = function(deps){
     if((getReadingModeActive() || getFullscreenModeActive()) && fontSizeStepReading !== null) return fontSizeStepReading;
     return fontSizeStep;
   }
+  // Размер шрифта ЗАДАЧ — отдельный от остального приложения (заметки, ридер, обзор…): шаг taskFontSizeStep (ключ IndexedDB
+  // taskFontSizeStep), CSS-переменная --task-font-size на <html>; от режима чтения/полного экрана не зависит. Ползунок «Аа»
+  // на вкладках задач меняет только его. При первом запуске берёт текущий общий шаг, чтобы вид задач не скакнул.
+  var taskFontSizeStep = 0;
+  function applyTaskFontSize(){
+    var px = (FONT_SIZE_BASE_PX + taskFontSizeStep * FONT_SIZE_STEP_PX) + "px";
+    document.documentElement.style.setProperty("--task-font-size", px);
+    refitAllVisibleTaskBodies();
+  }
+  function getTaskFontSizeStep(){ return taskFontSizeStep; }
+  function setTaskFontSizeStep(step){
+    step = Math.round(Number(step));
+    if(!isFinite(step)) return taskFontSizeStep;
+    step = clampFontSizeStep(step);
+    if(step === taskFontSizeStep) return step;
+    taskFontSizeStep = step;
+    idbSet("taskFontSizeStep", taskFontSizeStep).catch(function(){});
+    applyTaskFontSize();
+    return taskFontSizeStep;
+  }
   function applyFontSize(){
     var px = (FONT_SIZE_BASE_PX + getActiveFontSizeStep() * FONT_SIZE_STEP_PX) + "px";
     document.documentElement.style.setProperty("--mdeditor-font-size", px);
@@ -2320,12 +2341,13 @@ window.initMdEditorModule = function(deps){
   // пока открыт попап: вызывающий код зовёт возвращённую функцию после каждого открытия/закрытия попапа.
   // applyStep(step) — как применить новый шаг (по умолчанию setFontSizeStep; ридер книг передаёт свой — с якорем места
   // чтения). Возвращает sync() — выставить видимость и значение по состоянию попапа.
-  function bindFontSizeBar(popup, bar, applyStep){
+  function bindFontSizeBar(popup, bar, applyStep, getStep){
     if(!bar) return function(){};
+    getStep = getStep || getActiveFontSizeStep; // задачи передают свой шаг (getTaskFontSizeStep)
     var range = bar.querySelector(".fontsize-bar-range");
     var val = bar.querySelector(".fontsize-bar-val");
     function show(){
-      var st = getActiveFontSizeStep();
+      var st = getStep();
       if(range){
         range.min = String(FONT_SIZE_MIN_STEP);
         range.max = String(FONT_SIZE_MAX_STEP);
@@ -2346,7 +2368,7 @@ window.initMdEditorModule = function(deps){
         var st = parseInt(range.value, 10);
         if(!isFinite(st)) return;
         (applyStep || setFontSizeStep)(st);
-        if(val) val.textContent = fontSizeStepLabel(getActiveFontSizeStep());
+        if(val) val.textContent = fontSizeStepLabel(getStep());
       });
     }
     sync();
@@ -2355,11 +2377,15 @@ window.initMdEditorModule = function(deps){
   // применяется сразу, не дожидаясь открытия вкладки "Мои заметки" (см.
   // пояснение выше) — idbGet/idbSet объявлены ниже как function-декларации
   // и поэтому уже доступны здесь благодаря hoisting.
-  Promise.all([idbGet("fontSizeStep"), idbGet("fontSizeStepReading")]).then(function(saved){
+  // (idbGet превращает сохранённый 0 в null — для шага задач нужен «сырой» чтец idbGetRaw)
+  Promise.all([idbGet("fontSizeStep"), idbGet("fontSizeStepReading"), idbGetRaw("taskFontSizeStep")]).then(function(saved){
     if(typeof saved[0] === "number" && isFinite(saved[0])) fontSizeStep = clampFontSizeStep(saved[0]);
     if(typeof saved[1] === "number" && isFinite(saved[1])) fontSizeStepReading = clampFontSizeStep(saved[1]);
+    if(typeof saved[2] === "number" && isFinite(saved[2])) taskFontSizeStep = clampFontSizeStep(saved[2]);
+    else { taskFontSizeStep = fontSizeStep; idbSet("taskFontSizeStep", taskFontSizeStep).catch(function(){}); } // первый запуск: как было
     applyFontSize();
-  }).catch(function(){ applyFontSize(); });
+    applyTaskFontSize();
+  }).catch(function(){ applyFontSize(); applyTaskFontSize(); });
   // закладки — теперь читаются из синхронизируемого state my.js (см.
   // getSyncedBookmarkNames/setSyncedBookmark выше), а не из IndexedDB:
   // state уже загружен из localStorage синхронно к моменту вызова
@@ -2574,7 +2600,7 @@ window.initMdEditorModule = function(deps){
   // Все функции читают/пишут через те же openDb/idbSet — второго независимого открытия базы нет.
   // Экспорт ТОЛЬКО читает.
   // ---------------------------------------------------------------------
-  var DEVICE_SETTINGS_IDB_KEYS = ["fontSizeStep", "fontSizeStepReading", "lastNote", "openedIndex"];
+  var DEVICE_SETTINGS_IDB_KEYS = ["fontSizeStep", "fontSizeStepReading", "taskFontSizeStep", "lastNote", "openedIndex"];
   // idbGet превращает любое «ложное» значение (например, шаг шрифта 0) в null; для выгрузки
   // нужно отличать «ключа нет» от 0, поэтому здесь свой чтец без такого приведения.
   function idbGetRaw(key){
@@ -2625,7 +2651,7 @@ window.initMdEditorModule = function(deps){
     DEVICE_SETTINGS_IDB_KEYS.forEach(function(k){
       if(!Object.prototype.hasOwnProperty.call(obj, k)) return;
       var v = obj[k];
-      var ok = (k === "fontSizeStep" || k === "fontSizeStepReading")
+      var ok = (k === "fontSizeStep" || k === "fontSizeStepReading" || k === "taskFontSizeStep")
         ? (typeof v === "number" && isFinite(v))
         : (v && typeof v === "object" && !Array.isArray(v));
       if(!ok) return;
@@ -7401,6 +7427,10 @@ window.initMdEditorModule = function(deps){
     changeFontSizeStep: changeFontSizeStep,
     // 14.10: ползунок «Аа» (см. bindFontSizeBar) — задачи и ридер книг зовут из my.js.
     setFontSizeStep: setFontSizeStep,
+    // размер шрифта задач — отдельный от остального приложения (см. taskFontSizeStep выше)
+    getTaskFontSizeStep: getTaskFontSizeStep,
+    setTaskFontSizeStep: setTaskFontSizeStep,
+    applyTaskFontSize: applyTaskFontSize,
     bindFontSizeBar: bindFontSizeBar,
     // ТЗ 20.09: my.js зовёт при входе/выходе из режима чтения (toggleReadingMode) —
     // подставляет размер шрифта того режима, в который перешли.
