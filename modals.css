@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.6 (22.11) — карточка задачи: меньше отступ от верхнего края карточки до текста (11→5px) и от текста до ряда кнопок (4→0px); освободившееся место fitTaskCard отдаёт под текст. Откат: modals.css 23.5.
    Версия: 23.5 (22.11) — `.task-color-sw` (образец цвета в попапе фильтра по цвету полосы). Откат: modals.css 23.4.
    Версия: 23.4 (22.11) — полоса приоритета карточки задачи: цвета gold/green/cyan/blue/purple (`--tc-flag-gold` #ffc933, `-green` #3fcf6b, `-cyan` #2ec4f1, `-blue` #3d6bff, `-purple` #8000ff) и образцы на экране «Кнопки задач». Откат: modals.css 23.3.
    Версия: 23.3 (22.11) — полноэкранный режим и режим чтения: полоса приоритета карточки задачи больше не скрывается (`.reading-mode-active .task-card > .task-flag-dot{display:block}`). Откат: modals.css 23.2.
@@ -3043,7 +3044,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
   flex:1 1 0;
   min-height:0;
   margin:0;
-  padding:11px var(--tc-pad-r) 4px var(--tc-pad-l);
+  padding:5px var(--tc-pad-r) 0 var(--tc-pad-l); /* 23.6: сверху 11→5px, снизу до кнопок 4→0 */
   overflow:hidden;
 }
 .task-body.task-card > .task-editable{
