@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.11 (21.11) — из нижнего ряда открытой заметки убрана кнопка «Копировать» (`#mdEditorCopyBtn`, её обработчик и строка в окне подсказки): копирование есть в круговом контекстном меню (ctxmenu.js). Откат: mdeditor.js 25.10.
    Версия: 25.10 (21.11) — «Заметки-карточки»: кнопка «PDF» в нижнем ряду (`#mdNotesPdfBtn`, самая левая; на Android 5 её нет, как и во вкладке «QR-коды») и меню «Большие (4) / Средние (12) / Маленькие (24) на лист» — `exportNotesPdf`: лист с QR-кодами заметок `lt://v1/note/<id>` и названием под каждым (тот же писатель листов `CardPdf` из cardpdf.js, что и у карточек «QR-кодов»). Печатаются заметки, которые сейчас показаны на экране: текущая папка и выбранный цвет фильтра (папки и заметки с id, который не принимает сканер, пропускаются). Заметки никуда не переносятся. Откат: mdeditor.js 25.9.
    Версия: 25.9 (21.11) — карточки-заметки: одно нажатие открывает заметку (после 400 мс), два подряд убирают её из всех виджетов (`noteCardTap`, `LTNoteCards.dropFromWidgets`). Откат: mdeditor.js 25.8.
    Версия: 25.8 (19.11) — «Заметки-карточки»: кнопка-воронка в нижнем ряду (`#mdNotesFilterBtn`, значок тот же, что у воронки вкладки «QR-коды»; сразу слева от кнопки режима) — фильтр заметок по цвету карточки: список раскрывается над кнопкой и показывает только те цвета, которые реально выбраны у заметок текущей папки (`LTNoteCards.getColor`), плюс «Все цвета»; выбранный цвет оставляет в списке только заметки этого цвета (папки остаются), кнопка при этом нажата. Выбор живёт до перезагрузки (`noteColorFilter`); если цвета в этой папке уже нет — фильтр не действует. Откат: mdeditor.js 25.7.
@@ -4911,8 +4912,6 @@ window.initMdEditorModule = function(deps){
     html += row(btnIcon(HIGHLIGHT_ICON_SVG),
       "Текстовыделитель: выделите текст и нажмите кнопку — он будет выделен цветом. В тексте это " + code("==выделенный==") + ".");
 
-    html += row(btnIcon(COPY_ICON_SVG),
-      "Копирует выделенный текст в буфер обмена. Системное меню выделения в приложении не показывается — копируйте этой кнопкой.");
     html += row(btnIcon(QR_ICON_SVG),
       "QR-код заметки: при первом нажатии заметка получает код и переходит в папку «cards-notes» (папка создаётся сама), код показывается над рядом кнопок. " +
       "Повторное нажатие показывает его снова, тап по коду прячет. Распечатайте код — сканер в «Карточках предметов» откроет эту заметку.");
@@ -4962,7 +4961,6 @@ window.initMdEditorModule = function(deps){
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-italic" id="mdEditorFmtItalicBtn" title="Курсив">К</button>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-underline" id="mdEditorFmtUnderlineBtn" title="Подчёркнутый">П</button>' +
           '<button type="button" class="mdeditor-fab-btn mdeditor-fab-btn-text fmt-btn-strike" id="mdEditorFmtStrikeBtn" title="Зачёркнутый">Ч</button>' +
-          '<button type="button" class="mdeditor-fab-btn" id="mdEditorCopyBtn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="mdeditor-fab-btn" id="mdEditorHighlightBtn" title="Выделить текст">' + HIGHLIGHT_ICON_SVG + '</button>' +
           '<span class="mdeditor-fontsize-wrap" id="mdEditorFontSizeWrap">' +
             '<div class="mdeditor-fontsize-popup" id="mdEditorFontSizePopup">' +
@@ -5074,17 +5072,6 @@ window.initMdEditorModule = function(deps){
     // выделения, что и у Ж/К/П/Ч, см. wrapCmSelection/bindFormatBtn выше).
     // mousedown с preventDefault — чтобы клик по кнопке не сбрасывал
     // выделение в CodeMirror до срабатывания click.
-    // «Копировать» — слева от маркера: выделение CodeMirror (sliceDoc) уходит в буфер обмена через window.LTCopyText (my.js).
-    var copyBtn = document.getElementById("mdEditorCopyBtn");
-    if(copyBtn){
-      copyBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
-      copyBtn.addEventListener("click", function(){
-        if(!cmView) return;
-        var sel = cmView.state.selection.main;
-        if(sel.from === sel.to) return;
-        if(window.LTCopyText) window.LTCopyText(cmView.state.sliceDoc(sel.from, sel.to));
-      });
-    }
     var highlightBtn = document.getElementById("mdEditorHighlightBtn");
     if(highlightBtn){
       highlightBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
