@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (21.11) — нажатие на карточку-будильник: одно заглушает звонок (повторы остаются — `silence`), два подряд выключают будильник совсем; завести можно и одним, и двумя (`tapDecision`, общее для виджета и приложения). Откат: CardAlarms.kt 1.2.
 // Версия: 1.2 (14.11)
 
 import android.annotation.SuppressLint
@@ -166,6 +167,37 @@ object CardAlarms {
         schedule(ctx, a)
         QrWidgets.onAlarmsChanged(ctx)
         firstAt
+    }
+
+    // ---------- нажатие на карточку (одно — заглушить, два — выключить) ----------
+    const val TAP_ARM = 0       // будильник не заведён: завести (и одним, и двумя нажатиями)
+    const val TAP_SILENCE = 1   // заведён, первое нажатие: заглушить звонок, повторы остаются
+    const val TAP_CANCEL = 2    // второе нажатие сразу после «заглушить»: выключить совсем, вместе с повторами
+    const val TAP_IGNORE = 3    // второе нажатие сразу после «завести»: ничего (иначе завели бы и тут же выключили)
+    const val DOUBLE_MS = 400L  // окно двойного нажатия — то же, что ScanActivity.HABIT_DOUBLE_MS
+    private val lastTap = HashMap<String, Pair<Long, Int>>() // id → (когда, что решили на первом нажатии)
+
+    /**
+     * Что делать с нажатием на карточку будильника [id] (виджет и приложение решают одинаково). Первое нажатие: не заведён — [TAP_ARM], заведён — [TAP_SILENCE];
+     * второе в течение [DOUBLE_MS] — [TAP_CANCEL] (после «заглушить») или [TAP_IGNORE] (после «завести»). Решение запоминается здесь, вызывать один раз на нажатие.
+     */
+    fun tapDecision(ctx: Context, id: String): Int = synchronized(LOCK) {
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = lastTap[id]
+        if (last != null && now - last.first <= DOUBLE_MS) {
+            lastTap.remove(id)
+            return@synchronized if (last.second == TAP_ARM) TAP_IGNORE else TAP_CANCEL
+        }
+        val d = if (load(ctx).containsKey(id)) TAP_SILENCE else TAP_ARM
+        lastTap[id] = Pair(now, d)
+        d
+    }
+
+    /** Заглушить звонок: звонящая карточка-уведомление убирается, сам будильник и его повторы остаются. */
+    fun silence(ctx: Context, id: String) = synchronized(LOCK) {
+        if (!ID_RE.matches(id)) return@synchronized
+        cancelNotification(ctx, id)
+        QrWidgets.onAlarmsChanged(ctx) // виджеты пересчитывают порядок: будильник больше не «звонит»
     }
 
     /** «Выкл.» на карточке и удаление карточки: будильник снимается вместе с повторами, звонящая карточка убирается. */

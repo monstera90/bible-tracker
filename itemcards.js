@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 49.9 (21.11) — карточка «Будильник» в приложении ведёт себя как в виджете: не заведён — заводится (одним или двумя нажатиями); заведён — одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем (`alarmTapDecision`, `silenceAlarmForCard`; мост ≥ 41: `cardAlarmTap`, `silenceCardAlarm`). Откат: itemcards.js 49.8.
    Версия: 49.8 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
    Версия: 49.7 (19.11) — класс `fab-row-ext` на нижнем ряду, где есть кнопка справа от «домика» (в полноэкранном режиме ряд сдвигается на её ширину, modals.css 22.5). Откат: itemcards.js 49.6.
    Версия: 49.6 (19.11) — в нижнем ряду слева от «домика» кнопка полноэкранного режима (`#itemCardsFullscreenBtn`, `window.LTFullscreen` из my.js; на странице scan.html без приложения её нет). Откат: itemcards.js 49.5.
@@ -1549,10 +1550,11 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   }
   function onCardTap(c){
     if(c.type === "habit"){ openHabitMap(c.id); return; } // привычка: карта дней (отметка — нажатием на день); скан кода по-прежнему отмечает сегодня
-    if(c.type === "alarm" && alarmSupported()){ // будильник: тап заводит, повторный — выключает (как нажатие в виджете); лицо меняет надпись «Не заведён» ↔ «Заведён»
-      refreshAlarms();
-      if(alarmInfo(runId(c))) stopAlarmForCard(c);
-      else { notifyWidgetFired(c); startAlarmForCard(c); }
+    if(c.type === "alarm" && alarmSupported()){ // будильник — как в виджете: не заведён — заводим (одним или двумя нажатиями); заведён — одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем; лицо меняет надпись «Не заведён» ↔ «Заведён»
+      var ad = alarmTapDecision(runId(c));
+      if(ad === 0){ notifyWidgetFired(c); startAlarmForCard(c); }
+      else if(ad === 1) silenceAlarmForCard(c);
+      else if(ad === 2) stopAlarmForCard(c);
       return;
     }
     notifyWidgetFired(c);
@@ -2422,6 +2424,24 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
     }
     syncAlarmsView();
     return at;
+  }
+  // решение по нажатию на карточку-будильник (оболочка, мост ≥41, общее с виджетом): 0 завести, 1 заглушить звонок, 2 выключить совсем, 3 ничего
+  var lastAlarmTap = {};
+  function alarmTapDecision(id){
+    var N = window.LifeTrackerNative;
+    if(N && typeof N.cardAlarmTap === "function"){
+      try{ var d = Number(N.cardAlarmTap(id)); if(d >= 0 && d <= 3) return d; }catch(e){}
+    }
+    // оболочка старше моста 41: то же правило здесь (заведён — первое нажатие глушит, второе в течение 400 мс выключает)
+    refreshAlarms();
+    var now = Date.now(), last = lastAlarmTap[id];
+    if(last && now - last.t <= 400){ delete lastAlarmTap[id]; return last.d === 0 ? 3 : 2; }
+    var d2 = alarmInfo(id) ? 1 : 0;
+    lastAlarmTap[id] = { t: now, d: d2 };
+    return d2;
+  }
+  function silenceAlarmForCard(c){
+    try{ var N = window.LifeTrackerNative; if(N && typeof N.silenceCardAlarm === "function") N.silenceCardAlarm(runId(c)); }catch(e){}
   }
   function stopAlarmForCard(c){
     if(!c || c.type !== "alarm") return;

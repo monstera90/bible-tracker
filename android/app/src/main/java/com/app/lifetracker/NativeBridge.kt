@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.4 (21.11) — мост версии 41: `cardAlarmTap(id)` (решение по нажатию на карточку-будильник: 0 завести, 1 заглушить, 2 выключить, 3 ничего — одно для виджета и приложения) и `silenceCardAlarm(id)`. Откат: NativeBridge.kt 30.3.
 // Версия: 30.3 (21.11) — мост версии 40: `widgetNoteTake` / `widgetNoteAck` (заметки, снятые с виджета двойным нажатием на карточку «Заметки»; QrWidgets.takeNoteRemove/ackNoteRemove). Откат: NativeBridge.kt 30.2.
 // Версия: 30.2 (20.11) — `claudeHoles(spec)`: окна под кнопки страницы в WebView вкладки Claude (claude.ai растянут под нижний ряд кнопок; Android 10+). Версию моста не меняет — страница проверяет наличие метода.
 // Версия: 30.1 (19.11) — `widgetDiagLog()`: журнал диагностики виджетов для кнопки панели отладки (версию моста не меняет).
@@ -74,7 +75,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 40
+        const val BRIDGE_VERSION = 41
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -589,6 +590,20 @@ class NativeBridge(private val activity: MainActivity) {
     fun setCardAlarm(id: String?, title: String?, hour: Int, minute: Int, everyMin: Int, times: Int): Long {
         if (!activity.pageTrusted || id == null) return 0L
         return CardAlarms.set(activity.applicationContext, id, title ?: "", hour, minute, everyMin, times)
+    }
+
+    /** Нажатие на карточку-будильник: что делать — 0 завести, 1 заглушить звонок (повторы остаются), 2 выключить совсем, 3 ничего ([CardAlarms.tapDecision]). */
+    @JavascriptInterface
+    fun cardAlarmTap(id: String?): Int {
+        if (!activity.pageTrusted || id == null) return CardAlarms.TAP_ARM
+        return CardAlarms.tapDecision(activity.applicationContext, id)
+    }
+
+    /** Заглушить звонок будильника, не выключая его и повторы. */
+    @JavascriptInterface
+    fun silenceCardAlarm(id: String?) {
+        if (!activity.pageTrusted || id == null) return
+        CardAlarms.silence(activity.applicationContext, id)
     }
 
     @JavascriptInterface
