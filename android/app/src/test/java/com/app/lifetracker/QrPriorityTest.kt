@@ -361,14 +361,15 @@ class QrPriorityTest {
         assertEquals(QrBattery.KEY, r.topKey)
         assertEquals(QrBattery.KEY, r.anchorKey)
         // заряд не низкий — «Как тренировка?» наверху, как прежде
-        val calm = run(cfg(cards, false, rpeAsk = true, moodAsk = true), snap(cal(12), rpe = true, mood = true, battery = 30))
+        val calm = run(cfg(cards, false, rpeAsk = true, moodAsk = true), snap(cal(12), rpe = true, mood = true, battery = 31))
         assertEquals(listOf(QrRpe.KEY, QrMood.KEY, "a", QrBattery.KEY), keys(calm))
         assertEquals(QrRpe.KEY, calm.topKey)
     }
 
-    @Test fun batteryAlertKind_orangeBelow30_redAtOrBelow20() {
+    @Test fun batteryAlertKind_orangeAtOrBelow30_redAtOrBelow20() {
         assertEquals(0, QrPriority.batteryAlertKind(-1))
-        assertEquals(0, QrPriority.batteryAlertKind(30))
+        assertEquals(0, QrPriority.batteryAlertKind(31))
+        assertEquals(1, QrPriority.batteryAlertKind(30))
         assertEquals(1, QrPriority.batteryAlertKind(29))
         assertEquals(1, QrPriority.batteryAlertKind(21))
         assertEquals(2, QrPriority.batteryAlertKind(20))

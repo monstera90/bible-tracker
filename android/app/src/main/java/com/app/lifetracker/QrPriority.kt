@@ -82,9 +82,9 @@ object QrPriority {
     /** Сколько каждая карточка круга равных остаётся наверху. */
     const val CYCLE_MS = 60_000L
     /**
-     * Низкий заряд: наименьший заряд среди телефона и подключённых устройств, которые его отдают ([Snapshot.batteryLowest]), ниже [BATTERY_ALERT_PERCENT] —
+     * Низкий заряд: наименьший заряд среди телефона и подключённых устройств, которые его отдают ([Snapshot.batteryLowest]), не выше [BATTERY_ALERT_PERCENT] —
      * карточки заряда ([QrBattery.KEY], [QrBattery.KEY2]) встают наверх стопки, выше «Как тренировка?» и «Как настроение?» (под идущим таймером), при любом режиме,
-     * даже без «релевантности». Цвет карточки меняется: оранжевый ниже [BATTERY_ALERT_PERCENT], красный при [BATTERY_CRITICAL_PERCENT] и ниже ([batteryAlertKind]).
+     * даже без «релевантности». Цвет карточки меняется: оранжевый при [BATTERY_ALERT_PERCENT] и ниже, красный при [BATTERY_CRITICAL_PERCENT] и ниже ([batteryAlertKind]).
      */
     const val BATTERY_ALERT_PERCENT = 30
     const val BATTERY_CRITICAL_PERCENT = 20
@@ -399,12 +399,12 @@ object QrPriority {
     /** Карточка заряда (константы ключей подставляются при сборке — класс QrBattery в JVM-тестах не загружается). */
     private fun isBattery(key: String): Boolean = key == QrBattery.KEY || key == QrBattery.KEY2
 
-    /** Заряд низкий: наименьший заряд устройств ниже [BATTERY_ALERT_PERCENT] — карточки заряда стоят наверху стопки. */
-    fun batteryAlert(s: Snapshot): Boolean = s.batteryLowest in 0 until BATTERY_ALERT_PERCENT
+    /** Заряд низкий: наименьший заряд устройств не выше [BATTERY_ALERT_PERCENT] — карточки заряда стоят наверху стопки. */
+    fun batteryAlert(s: Snapshot): Boolean = s.batteryLowest in 0..BATTERY_ALERT_PERCENT
 
-    /** Вид низкого заряда по наименьшему заряду [percent]: 0 — не низкий (цвет выбран пользователем), 1 — ниже [BATTERY_ALERT_PERCENT] (оранжевый), 2 — [BATTERY_CRITICAL_PERCENT] и ниже (красный). */
+    /** Вид низкого заряда по наименьшему заряду [percent]: 0 — не низкий (цвет выбран пользователем), 1 — не выше [BATTERY_ALERT_PERCENT] (оранжевый), 2 — [BATTERY_CRITICAL_PERCENT] и ниже (красный). */
     fun batteryAlertKind(percent: Int): Int = when {
-        percent !in 0 until BATTERY_ALERT_PERCENT -> 0
+        percent !in 0..BATTERY_ALERT_PERCENT -> 0
         percent <= BATTERY_CRITICAL_PERCENT -> 2
         else -> 1
     }
