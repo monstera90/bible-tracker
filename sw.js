@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.313";
+const APP_VERSION = "v0.39.314";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"

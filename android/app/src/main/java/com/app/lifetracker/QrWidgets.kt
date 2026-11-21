@@ -4,6 +4,7 @@ package com.app.lifetracker
 // Версия: 16.5 (19.11)
 // Версия: 16.4 (19.11) — ТОЛЬКО ДИАГНОСТИКА (поведение не меняется): журнал `QrDiag` пишется ещё и в файл `qrdiag.log` (до ~16 КБ; читается кнопкой «▶ Виджеты: журнал оболочки» в панели отладки, мост `widgetDiagLog`) — компьютер не нужен; ([diag], пишет только при изменении сообщения) — разбор настроек (сколько заметок пришло и принято), приём картинок лиц (ключ, размер), разбор файла лица книги/заметки в [bitmapFor] (размер, декодируется ли, сколько точек непрозрачных), итог [update]. Ищем, почему виджет только с карточкой заметки прозрачный. Откат: QrWidgets.kt 16.3.
 // Версия: 16.3 (17.11) — лицо книги больше не мельче слота: StackView замеряет карточку с запасом AT_MOST, а ImageView не вырастает больше своей картинки, и лицо книги шириной 400 px оставалось меньше и сдвинутым (из-за него выглядывала задняя карточка). Теперь любое лицо уже шириной [FACE_MIN_PX] растягивается до неё ([normalizeFace]), как остальные лица (480 px). Откат: QrWidgets.kt 16.2.
+// Версия: 16.4 (21.11) — двойное нажатие на заметку в карточке «Заметки» снимает её с виджета: очередь `noteRemove` (`removeNote`/`takeNoteRemove`/`ackNoteRemove`), скрытые `noteHide` (фильтр в `parse`, чистка `pruneHiddenNotes`). Откат: QrWidgets.kt 16.3.
 // Версия: 16.3 (18.11) — галочка «Отображать заметки» (`notes`, список `nts`: ключ, название и `times` — время суток заметки): карточка-группа «Заметки» ([QrPriority.NOTE_SLOT_KEY]) отдельно от карточки «Книги»; лицо заметки — картинка `<ключ>.png` от страницы; заметка «в своё время» встаёт в круг равных ([QrPriority.noteList]). Откат: QrWidgets.kt 16.2.
 // Версия: 16.2 (17.11) — галочка «Отображать книги» (`books`, список `bks`: ключ и название): карточка-группа «Книги» ([QrPriority.BOOK_SLOT_KEY]) с книгами виджета; лицо книги — картинка `<ключ>.png`, присланная страницей (обложка с выступом), нет её — запасная с названием; листание краями и точки — как у других групп, нажатие по центру ничего не делает. Откат: QrWidgets.kt 16.1.
 // Версия: 16.2 (19.11) — один таймер на всех виджетах: обычная карточка-таймер стопки (не группа «Таймеры») рисует кольцо с минутами ([QrTimerFace]), пока её таймер идёт или на паузе — запущен ли он в этом виджете, в другом или в приложении (общее хранилище [CardTimers], оба id карточки — [timerStateOf]); не запущен — прежнее лицо. Поля `tsec`/`tcol`/`thid` в `cards` (widgets.js 7.8); [isTimerCard] / [hasTimerCards] включают такие виджеты в перерисовку при старте/остановке ([onActivityChanged]), минутное обновление ([armCycle], [nextTimerFlip]) и пересчёт после сна ([refreshTimerFaces]). Откат: QrWidgets.kt 16.1.
@@ -173,7 +174,9 @@ object QrWidgets {
     private const val K_TKIDX = "tkidx"         // id виджета конструктора → {i: номер задачи в ряду карточки задач, t: время последнего нажатия, мс}
     private const val K_EVIDX = "evidx"         // id виджета конструктора → {i: номер события в ряду карточки события, t: время последнего нажатия, мс}
     private const val K_HABIDX = "habidx"       // id виджета конструктора → {ключ карточки-группы («hab_0», «alm_0»): {h: ключ выбранного элемента, t: время последнего нажатия, мс}}
-    private const val K_LASTOPEN = "lastopen"   // id виджета конструктора → {ключ карточки-группы («bk_0», «nt_0»): ключ элемента, открытого последним нажатием на карточку}
+    private const val K_NREM = "noteRemove"   // очередь: пары «id виджета конструктора + ключ заметки», снятые двойным нажатием на карточку «Заметки», ещё не применённые страницей
+private const val K_NHIDE = "noteHide"    // те же пары, уже забранные страницей: заметка скрыта, пока `sync` не пришлёт состав без неё
+private const val K_LASTOPEN = "lastopen"   // id виджета конструктора → {ключ карточки-группы («bk_0», «nt_0»): ключ элемента, открытого последним нажатием на карточку}
     private const val AEV_MAX = 50
     private const val K_TEV = "timerEv"       // очередь: таймеры, запущенные нажатием в виджете без окна — страница запишет их в журнал событий
     private const val K_TEVSEQ = "timerEvSeq"
@@ -312,7 +315,7 @@ object QrWidgets {
         return m.groupValues[1].toInt() * 10000 + m.groupValues[2].toInt() * 100 + m.groupValues[3].toInt()
     }
 
-    private fun parse(text: String?): List<Cfg> {
+    private fun parse(text: String?, hiddenNotes: Set<String> = emptySet()): List<Cfg> {
         if (text.isNullOrEmpty()) return emptyList()
         return try {
             val arr = JSONObject(text).optJSONArray("widgets") ?: return emptyList()
@@ -447,7 +450,7 @@ object QrWidgets {
                     for (j in 0 until nts.length()) {
                         val d = nts.optJSONObject(j) ?: continue
                         val key = d.optString("key", "")
-                        if (!KEY_RE.matches(key) || noteList.any { it.key == key }) continue
+                        if (!KEY_RE.matches(key) || noteList.any { it.key == key } || (id + "\t" + key) in hiddenNotes) continue // снятые двойным нажатием в виджете — не показываем, пока страница не пришлёт состав без них
                         val nTimes = HashSet<String>()
                         val nta = d.optJSONArray("times")
                         if (nta != null) for (x in 0 until nta.length()) nta.optString(x)?.let { if (QrPriority.WINDOWS.containsKey(it)) nTimes.add(it) }
@@ -478,7 +481,7 @@ object QrWidgets {
 
     fun configs(ctx: Context): List<Cfg> {
         diagInit(ctx)
-        return parse(prefs(ctx).getString(K_CFG, null))
+        return parse(prefs(ctx).getString(K_CFG, null), noteHiddenSet(ctx))
     }
 
     private fun jmap(ctx: Context, key: String): JSONObject = try {
@@ -617,6 +620,7 @@ object QrWidgets {
             }
             // положение стопки сбрасываем, только если поменялись настройки виджета; новые задачи/события и перерисовка лиц стопку не двигают
             pruneHiddenTasks(app)
+            pruneHiddenNotes(app)
             refreshAll(app, structChanged, true)
             true
         } catch (e: Exception) {
@@ -1004,6 +1008,75 @@ object QrWidgets {
             per.put(slotKey, itemKey)
             all.put(cfg.id, per)
             prefs(app).edit().putString(K_LASTOPEN, all.toString()).apply()
+        }
+    }
+
+    /** Пары «виджет + заметка», которые сняты двойным нажатием: ждут страницу ([K_NREM]) или уже забраны ею ([K_NHIDE]), но состав карточек ещё старый. */
+    private fun noteHiddenSet(ctx: Context): Set<String> = synchronized(LOCK) { idSet(ctx, K_NREM) + idSet(ctx, K_NHIDE) }
+
+    /**
+     * Двойное нажатие на карточку «Заметки» виджета [widgetId] (ScanActivity): заметка [itemKey] снимается с этого виджета. Пара встаёт в очередь
+     * (страница уберёт заметку из списка виджета — `widgetNoteTake`/`widgetNoteAck`, мост ≥40), показанная заметка сразу уходит с карточки,
+     * стопка остаётся на карточке «Заметки» (заметок больше нет — карточка пропадает).
+     */
+    fun removeNote(ctx: Context, widgetId: Int, itemKey: String) {
+        if (!KEY_RE.matches(itemKey)) return
+        val app = ctx.applicationContext
+        val cfg = cfgFor(app, widgetId) ?: return
+        if (cfg.noteCards.none { it.key == itemKey }) return
+        synchronized(LOCK) {
+            val q = idSet(app, K_NREM)
+            q.add(cfg.id + "\t" + itemKey)
+            putIdSet(app, K_NREM, q)
+        }
+        pinSlot(cfg.id, QrPriority.NOTE_SLOT_KEY)
+        refreshAll(app, true, false, setOf(cfg.id))
+    }
+
+    /** JSON-массив {w: id виджета конструктора, k: ключ заметки} — заметки, снятые в виджете и ещё не применённые страницей. */
+    fun takeNoteRemove(ctx: Context): String = synchronized(LOCK) {
+        val out = JSONArray()
+        for (p in idSet(ctx, K_NREM)) {
+            val i = p.indexOf('\t')
+            if (i <= 0) continue
+            out.put(JSONObject().put("w", p.substring(0, i)).put("k", p.substring(i + 1)))
+        }
+        out.toString()
+    }
+
+    /** Страница убрала эти заметки из своих виджетов (тот же JSON, что отдал [takeNoteRemove]): из очереди они уходят в «скрытые» до новой отправки состава карточек. */
+    fun ackNoteRemove(ctx: Context, json: String?) {
+        val app = ctx.applicationContext
+        val pairs = HashSet<String>()
+        try {
+            val a = JSONArray(json ?: "[]")
+            for (i in 0 until a.length()) {
+                val o = a.optJSONObject(i) ?: continue
+                val w = o.optString("w", "")
+                val k = o.optString("k", "")
+                if (w.isNotEmpty() && k.isNotEmpty()) pairs.add(w + "\t" + k)
+            }
+        } catch (e: Exception) {
+            return
+        }
+        if (pairs.isEmpty()) return
+        synchronized(LOCK) {
+            val q = idSet(app, K_NREM)
+            val h = idSet(app, K_NHIDE)
+            for (p in pairs) if (q.remove(p)) h.add(p)
+            putIdSet(app, K_NREM, q)
+            putIdSet(app, K_NHIDE, h)
+        }
+    }
+
+    /** После отправки состава карточек: в «скрытых» остаются только заметки, которые в нём всё ещё есть (иначе заметку, добавленную в виджет заново, не было бы видно). */
+    private fun pruneHiddenNotes(app: Context) {
+        synchronized(LOCK) {
+            val h = idSet(app, K_NHIDE)
+            if (h.isEmpty()) return
+            val present = HashSet<String>()
+            for (cfg in parse(prefs(app).getString(K_CFG, null))) for (c in cfg.noteCards) present.add(cfg.id + "\t" + c.key)
+            if (h.retainAll(present)) putIdSet(app, K_NHIDE, h)
         }
     }
 

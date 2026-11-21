@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.3 (21.11) — мост версии 40: `widgetNoteTake` / `widgetNoteAck` (заметки, снятые с виджета двойным нажатием на карточку «Заметки»; QrWidgets.takeNoteRemove/ackNoteRemove). Откат: NativeBridge.kt 30.2.
 // Версия: 30.2 (20.11) — `claudeHoles(spec)`: окна под кнопки страницы в WebView вкладки Claude (claude.ai растянут под нижний ряд кнопок; Android 10+). Версию моста не меняет — страница проверяет наличие метода.
 // Версия: 30.1 (19.11) — `widgetDiagLog()`: журнал диагностики виджетов для кнопки панели отладки (версию моста не меняет).
 // Версия: 30.0 (15.11) — мост версии 38: `apkGetState` / `apkCheckNow` / `apkInstall` (обновление самого APK из GitHub Releases, ApkUpdater; вкладка «Проверка обновлений»).
@@ -73,7 +74,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 39
+        const val BRIDGE_VERSION = 40
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1270,6 +1271,28 @@ class NativeBridge(private val activity: MainActivity) {
         if (!activity.pageTrusted) return
         try {
             QrWidgets.ackTaskDone(activity.applicationContext, idsJson)
+        } catch (e: Exception) {
+            // повторится
+        }
+    }
+
+    /** JSON-массив {w, k}: заметки, снятые с виджета двойным нажатием на карточку «Заметки» (w — id виджета конструктора, k — ключ заметки), которые страница ещё не применила. */
+    @JavascriptInterface
+    fun widgetNoteTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            QrWidgets.takeNoteRemove(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница убрала эти заметки из виджетов (JSON-массив {w, k}) — убрать их из очереди. */
+    @JavascriptInterface
+    fun widgetNoteAck(json: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            QrWidgets.ackNoteRemove(activity.applicationContext, json)
         } catch (e: Exception) {
             // повторится
         }

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 13.11 (21.11) — двойное нажатие на заметку в карточке «Заметки» снимает её с виджета (`isNoteTap`/`beginNoteWait`/`noteDouble` → QrWidgets.removeNote), одно нажатие открывает заметку после ожидания HABIT_DOUBLE_MS (`noteSingle`). Откат: ScanActivity.kt 13.10.
 // Версия: 13.10 (20.11) — `booktap` теперь запоминает открытую книгу/заметку (extra `wid`, `slot`, `bkey` → QrWidgets.groupOpened). Откат: ScanActivity.kt 13.9.
 // Версия: 13.9 (17.11) — `booktap` (id книги): нажатие на карточку «Книги» в виджете открывает приложение на этой книге (MainActivity.ACTION_OPEN_BOOK), окно сканера не нужно. Откат: ScanActivity.kt 13.7.
 // Версия: 13.7 (16.11) — одно нажатие на карточку задачи в виджете открывает приложение на форме задачи (MainActivity.ACTION_OPEN_WIDGET_TASK), двойное по-прежнему отмечает выполненной. Откат: ScanActivity.kt 13.6.
@@ -272,6 +273,70 @@ class ScanActivity : ComponentActivity() {
         overridePendingTransition(0, 0)
     }
 
+    private var noteWaiting = false
+    private var noteBid = ""
+    private var noteWid = -1
+    private var noteBkey = ""
+    private val noteSingleRun = Runnable { noteSingle() }
+
+    /** Нажатие по центру карточки «Заметки» в виджете (extra `booktap` с `slot` = «nt_0», тот же `tok`): заметку ждёт либо открытие, либо снятие с виджета. */
+    private fun isNoteTap(i: Intent?): Boolean {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("booktap")) return false
+        if (i.getStringExtra("slot") != QrPriority.NOTE_SLOT_KEY) return false
+        if (!QrWidgets.tokenOk(this, i.getStringExtra("tok"))) return false
+        return BOOK_ID_RE.matches(i.getStringExtra("booktap") ?: "") && (i.getStringExtra("bkey") ?: "").isNotEmpty() && i.getIntExtra("wid", -1) >= 0
+    }
+
+    /** Первое нажатие на заметку: окно прозрачное, ждём второго (как у задачи). Второе нажатие на ту же заметку — двойное. */
+    private fun beginNoteWait(i: Intent) {
+        val bid = i.getStringExtra("booktap") ?: ""
+        val wid = i.getIntExtra("wid", -1)
+        val bkey = i.getStringExtra("bkey") ?: ""
+        if (noteWaiting && noteBkey == bkey && noteWid == wid) {
+            noteDouble()
+            return
+        }
+        noteBid = bid
+        noteWid = wid
+        noteBkey = bkey
+        noteWaiting = true
+        habitHandler.removeCallbacks(noteSingleRun)
+        habitHandler.postDelayed(noteSingleRun, HABIT_DOUBLE_MS)
+    }
+
+    /** Второго нажатия не было: заметка запоминается открытой и открывается в приложении (как раньше при одном нажатии). */
+    private fun noteSingle() {
+        if (!noteWaiting) return
+        noteWaiting = false
+        try {
+            QrWidgets.groupOpened(applicationContext, noteWid, QrPriority.NOTE_SLOT_KEY, noteBkey)
+            val open = Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_OPEN_BOOK
+                putExtra(MainActivity.EXTRA_BOOK_ID, noteBid)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(open)
+        } catch (e: Exception) {
+            // приложение не запустилось — просто закрываем окно
+        }
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
+    }
+
+    /** Двойное нажатие: заметка снимается с этого виджета (очередь оболочки → страница), карточка уходит из стопки или показывает следующую заметку. */
+    private fun noteDouble() {
+        if (!noteWaiting) return
+        noteWaiting = false
+        habitHandler.removeCallbacks(noteSingleRun)
+        try {
+            QrWidgets.removeNote(applicationContext, noteWid, noteBkey)
+        } catch (e: Exception) {
+            // виджет не должен ронять окно
+        }
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
+    }
+
     private val habitHandler = Handler(Looper.getMainLooper())
     private val habitSingleRun = Runnable { habitSingle() }
     private var habitWaiting = false
@@ -324,6 +389,10 @@ class ScanActivity : ComponentActivity() {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) taskDouble()
             return true
         }
+        if (noteWaiting) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) noteDouble()
+            return true
+        }
         if (habitWaiting) {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) habitDouble()
             return true
@@ -369,7 +438,7 @@ class ScanActivity : ComponentActivity() {
         noteWidgetTouch(intent)
 
         // Кнопка оценки с карточки «Как тренировка?»: без окна — сохранили и сразу закрылись (webView и сервер не создаются)
-        if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleTimerStop(intent) || handleEvent(intent)) {
+        if (handleRpe(intent) || handleMood(intent) || handleAlarm(intent) || handleTimerStop(intent) || (!isNoteTap(intent) && handleEvent(intent))) {
             finishAndRemoveTask()
             overridePendingTransition(0, 0)
             return
@@ -403,6 +472,12 @@ class ScanActivity : ComponentActivity() {
         val task = taskIdOf(intent)
         if (task != null) {
             beginTaskWait(task)
+            return
+        }
+
+        // Нажатие на карточку «Заметки» в виджете: страницу не строим, ждём второго нажатия (двойное снимает заметку с виджета, одно открывает её)
+        if (isNoteTap(intent)) {
+            beginNoteWait(intent)
             return
         }
 
@@ -450,7 +525,7 @@ class ScanActivity : ComponentActivity() {
             }
             return
         }
-        if (handleEvent(intent)) {
+        if (!isNoteTap(intent) && handleEvent(intent)) {
             if (!::webView.isInitialized) { // окна со страницей нет — просто закрываемся
                 finishAndRemoveTask()
                 overridePendingTransition(0, 0)
@@ -462,6 +537,11 @@ class ScanActivity : ComponentActivity() {
             beginTaskWait(task)
             return
         }
+        // Заметка в виджете: второе нажатие на ту же заметку, пока окно ждёт, — двойное; иначе новое ожидание
+        if (isNoteTap(intent)) {
+            beginNoteWait(intent)
+            return
+        }
         // Привычка в виджете: второе нажатие, пока окно ждёт, — двойное; иначе новое ожидание
         val habit = habitKeyOf(intent)
         if (habit != null) {
@@ -471,7 +551,9 @@ class ScanActivity : ComponentActivity() {
         // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
         habitWaiting = false
         taskWaiting = false
+        noteWaiting = false
         habitHandler.removeCallbacks(habitSingleRun)
+        habitHandler.removeCallbacks(noteSingleRun)
         initWeb()
         readCode(intent)
         webView.loadUrl(SCAN_URL)

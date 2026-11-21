@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 152.1 (21.11) — `drainWidgetNotes`: заметки, снятые с виджета двойным нажатием на карточку «Заметки» (мост ≥ 40, `widgetNoteTake`/`widgetNoteAck`), убираются из списка виджета (`WidgetsTab.dropNote`); вызывается рядом с `drainWidgetTasks`. Откат: my.js 152.0.
    Версия: 152.0 (19.11) — позиция вкладок задач и «Комментариев» («иногда открывается в самом верху»): прежний слушатель скролла писал в память любой scroll-event, в т.ч. сброс в 0 при перерисовке списка и в `layoutSettingsModal`, а восстановление шло, пока окно ещё скрыто. Теперь: в `tabScrollPercents` пишется только скролл от человека (`tabScrollUserAt`) и позиция, прочитанная ДО замены содержимого (`captureTabScroll`: уход с вкладки, закрытие окна, сворачивание); `restoreTabScroll` ждёт видимости контейнера и доводит место после загрузки картинок (250/800 мс); копия позиций в `state["__tabScroll"]` ({c:{вкладка: 0..1}, t}, пишется редко — `flushTabScrollState`) едет в облако и возвращает место после переустановки; запасная позиция — самый низ. Откат: my.js 151.9.
    Версия: 151.9 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
    Версия: 151.8 (19.11) — класс `fab-row-ext` на нижних рядах, где есть кнопка справа от «домика» (книги-карточки, ридер, PDF-ридер книги «на лету»): в полноэкранном режиме ряд сдвигается на её ширину (modals.css 22.5). Откат: my.js 151.7.
@@ -4601,6 +4602,7 @@
     try{ if(window.UserTabsMod && window.UserTabsMod.syncSoon) window.UserTabsMod.syncSoon(true); }catch(e){} // вкладки «Интернет» с других устройств
     try{ ensurePomodoroStore(); if(window.PomodoroTab) window.PomodoroTab.sync(); }catch(e){} // помодоро: состояние и «вкладка на экране» заново, законченные отрезки — в календарь и «Историю»
     try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете
+    try{ drainWidgetNotes(); }catch(e){} // заметки, снятые с виджета двойным нажатием
     try{ drainWidgetMood(); }catch(e){} // настроения, отмеченные кнопками карточки «Как настроение?» в виджете
     widgetsFeedTouch(); // карточки «задачи» и «события календаря» в виджетах: время ушло вперёд
   };
@@ -10500,6 +10502,25 @@
       }catch(e){}
     });
     if(ack.length){ try{ n.widgetTaskAck(JSON.stringify(ack)); }catch(e){} }
+    widgetsFeedTouch();
+  }
+  // Двойное нажатие на заметку в карточке «Заметки» виджета (мост ≥40): оболочка складывает пары {w: id виджета, k: ключ заметки} в очередь, страница снимает заметки с этих виджетов
+  function drainWidgetNotes(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.widgetNoteTake !== "function" || typeof n.widgetNoteAck !== "function") return;
+    var arr;
+    try{ arr = JSON.parse(String(n.widgetNoteTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var W = ensureWidgets();
+    if(!W || typeof W.dropNote !== "function") return; // конструктор недоступен — очередь остаётся до следующего раза
+    var ack = [];
+    arr.forEach(function(p){
+      if(!p || typeof p.w !== "string" || typeof p.k !== "string" || !p.w || !p.k) return;
+      try{
+        if(W.dropNote(p.w, p.k)) ack.push({ w: p.w, k: p.k });
+      }catch(e){}
+    });
+    if(ack.length){ try{ n.widgetNoteAck(JSON.stringify(ack)); }catch(e){} }
     widgetsFeedTouch();
   }
   function widgetsFeedTouch(){
@@ -27074,6 +27095,7 @@
   try{ pushQuickTaskTheme(); }catch(e){}
   try{ ensureItemCards().drainPendingTasks(true); }catch(e){ if(window.Debug) window.Debug.log("Очередь QR-задач: " + (e && e.message ? e.message : e)); }
   try{ drainWidgetTasks(); }catch(e){} // задачи, отмеченные двойным нажатием в виджете, пока приложение было закрыто
+  try{ drainWidgetNotes(); }catch(e){} // заметки, снятые с виджета двойным нажатием, пока приложение было закрыто
   try{ drainWidgetMood(); }catch(e){} // настроения, отмеченные в виджете, пока приложение было закрыто
   try{ if(localStorage.getItem("qrWidgets_v1")){ ensureWidgets(); window.WidgetsTab.scheduleSync(4000); } }catch(e){} // лица карточек в виджетах рабочего стола
   try{ handleCardLaunchParam(); }catch(e){ if(window.Debug) window.Debug.log("Карточка из оболочки: " + (e && e.message ? e.message : e)); }
