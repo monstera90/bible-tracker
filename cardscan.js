@@ -48,7 +48,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
   var COMBO_MAX = 10;
   var COMBO_MULTI = { timer: 1, task: 1 }; // категории, где действий может быть несколько; из остальных — не больше одного
   var TASK_PREFIX = "lt://v1/task/";
-  var TODAY_CODE = "lt://v1/today";       // «Сегодня»: один и тот же код у всех, заметку создаёт тот, кто сканирует
+  var TODAY_CODE = "lt://v1/today";       // «Мой дневник» (бывшая «Сегодня»): один и тот же код у всех, заметку создаёт тот, кто сканирует
   var REMINDER_CODE = "lt://v1/reminder"; // «Напоминалка»: один и тот же код у всех, напоминание берётся у того, кто сканирует
 
   // Разбор текста из QR:
@@ -61,7 +61,7 @@ var CLIMB_PREFIX = "lt://v1/climb/";   // «+ к высоте»: метры в �
   //   {kind:"habit", id, title} — привычка с названием в коде (lt://v1/habit/<id>/<название>)
   //   {kind:"combo", acts} — «Комбинированный»: до 10 действий в самом коде (lt://v1/combo/<JSON>, см. comboCode/parseCombo)
   //   {kind:"task", tab, tag, text} — задача, зашитая в код (lt://v1/task/<ключ вкладки>[#<тег>]/<текст>)
-  //   {kind:"today"} / {kind:"reminder"} — общие коды «Сегодня» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
+  //   {kind:"today"} / {kind:"reminder"} — общие коды «Мой дневник» и «Напоминалки» (lt://v1/today, lt://v1/reminder)
   //   {kind:"note", id}   — код заметки «Моего блокнота» (lt://v1/note/<id>)
   //   {kind:"unknown", text} — наша схема lt://, но другая версия/вид (не выполняется)
   //   {kind:"url", url}   — обычная ссылка http(s)

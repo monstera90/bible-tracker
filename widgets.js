@@ -106,7 +106,7 @@ var DAY_MS = 86400000;
     { k: "d", label: "Обед", hint: "11–15" },
     { k: "e", label: "Вечер", hint: "17–23" }
   ];
-  var WINDOW_ALL = { k: "a", label: "Целый день", hint: "0–24" }; // «Целый день»: только у привычек и карточки «Сегодня»; в оболочке — QrPriority.WINDOWS[\"a\"]
+  var WINDOW_ALL = { k: "a", label: "Целый день", hint: "0–24" }; // «Целый день»: только у привычек и карточки «Мой дневник»; в оболочке — QrPriority.WINDOWS[\"a\"]
   var AFTERS = [
     { k: "none", label: "Ничего не делать" },
     { k: "hide", label: "Скрывать карточку в стопке" },
