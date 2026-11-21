@@ -1,5 +1,6 @@
 /* ===========================================================================
    widgets.js
+   Версия: 7.11 (21.11) — `dropNoteEverywhere(id)`: двойное нажатие на карточку-заметку в приложении убирает её из всех виджетов, куда она добавлена. Откат: widgets.js 7.10.
    Версия: 7.10 (21.11) — `dropNote(widgetId, key)`: заметка, снятая с виджета двойным нажатием на карточку «Заметки» (мост ≥ 40), убирается из `noteList` этого виджета. Откат: widgets.js 7.9.
    Версия: 7.9 (19.11) — галочка «Показывать карточку о том, что заряд телефона достиг 80%» (`chargeDone`, цвет `chargeColor`, палитра `icfColors7`): служебная карточка «Заряд телефона» — пока телефон на зарядке и заряд 80…100 %, наверху стопки «Можно отключать от зарядки» (оболочка, QrCharge.kt; мост менять не нужно: страница шлёт флаг и цвет в `widgetsSync`); в форме образец лица — `chargeFaceHtml`, цвет по умолчанию `CHARGE_COLOR` (зелёный). Откат: widgets.js 7.8.
    Версия: 7.8 (19.11) — у обычной карточки-таймера в стопке (не группа «Таймеры») в `cards` передаются `tsec` (заданное время, с), `tcol` (цвет) и `thid` (скрытый): оболочка рисует на ней кольцо с минутами, пока этот таймер идёт или на паузе, так что таймер, запущенный в другом виджете (или в приложении), виден и здесь — это один и тот же таймер (общее хранилище `CardTimers`). Откат: widgets.js 7.7.
@@ -699,6 +700,17 @@ var DAY_MS = 86400000;
       return "added";
     }
 
+    // двойное нажатие на карточку-заметку в приложении («Заметки-карточки», mdeditor.js): заметка убирается из всех виджетов, куда добавлена; возвращает число таких виджетов
+    function dropNoteEverywhere(id){
+      if(!isNoteId(id)) return 0;
+      var n = 0;
+      data.list.forEach(function(w){
+        var i = bookIndex(w, id);
+        if(i >= 0){ w.noteList.splice(i, 1); n++; }
+      });
+      if(n){ changed(); say(TOAST_NOTE_OFF, 3400); }
+      return n;
+    }
     // заметку сняли с виджета двойным нажатием на карточку «Заметки» (оболочка → my.js drainWidgetNotes): убрать её из списка этого виджета; true — заметки там уже нет
     function dropNote(widgetId, key){
       var w = widgetById(widgetId);
@@ -1700,6 +1712,6 @@ var DAY_MS = 86400000;
     }
     try{ if(window.Debug && typeof window.Debug.registerAction === "function") window.Debug.registerAction("Виджеты: журнал оболочки", diagReport); }catch(e){}
 
-    return { render: renderTab, scheduleSync: scheduleSync, syncNow: syncNow, feedChanged: feedChanged, widgetsForBook: widgetsForBook, toggleBook: toggleBook, dropNote: dropNote, toast: say, noWidgetsText: TOAST_NO_WIDGETS, timeWindows: function(){ return WINDOWS.concat([WINDOW_ALL]); }, hasWidgets: function(){ return data.list.length > 0 || !!data.ever; } };
+    return { render: renderTab, scheduleSync: scheduleSync, syncNow: syncNow, feedChanged: feedChanged, widgetsForBook: widgetsForBook, toggleBook: toggleBook, dropNote: dropNote, dropNoteEverywhere: dropNoteEverywhere, toast: say, noWidgetsText: TOAST_NO_WIDGETS, timeWindows: function(){ return WINDOWS.concat([WINDOW_ALL]); }, hasWidgets: function(){ return data.list.length > 0 || !!data.ever; } };
   };
 })();

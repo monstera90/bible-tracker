@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.9 (21.11) — карточки-заметки: одно нажатие открывает заметку (после 400 мс), два подряд убирают её из всех виджетов (`noteCardTap`, `LTNoteCards.dropFromWidgets`). Откат: mdeditor.js 25.8.
    Версия: 25.8 (19.11) — «Заметки-карточки»: кнопка-воронка в нижнем ряду (`#mdNotesFilterBtn`, значок тот же, что у воронки вкладки «QR-коды»; сразу слева от кнопки режима) — фильтр заметок по цвету карточки: список раскрывается над кнопкой и показывает только те цвета, которые реально выбраны у заметок текущей папки (`LTNoteCards.getColor`), плюс «Все цвета»; выбранный цвет оставляет в списке только заметки этого цвета (папки остаются), кнопка при этом нажата. Выбор живёт до перезагрузки (`noteColorFilter`); если цвета в этой папке уже нет — фильтр не действует. Откат: mdeditor.js 25.7.
    Версия: 25.7 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
    Версия: 25.6 (19.11) — класс `fab-row-ext` на нижнем ряду, где есть кнопка справа от «домика» (в полноэкранном режиме ряд сдвигается на её ширину, modals.css 22.5). Откат: mdeditor.js 25.5.
@@ -4032,6 +4033,8 @@ window.initMdEditorModule = function(deps){
           pushMdNav(function(){ currentDirNode = prevDirNode; render(); });
           currentDirNode = it.node;
           render();
+        } else if(cardsMode && window.LTNoteCards && typeof window.LTNoteCards.dropFromWidgets === "function"){
+          noteCardTap(it); // «Заметки-карточки» — как в виджете: одно нажатие открывает, два подряд убирают из всех виджетов
         } else {
           openNoteById(it.id);
         }
@@ -4059,6 +4062,21 @@ window.initMdEditorModule = function(deps){
         scrollHost.addEventListener("scroll", mdListRevealScrollHandler, { passive: true });
       }
     }
+  }
+
+  // Нажатие на карточку-заметку (режим «Заметки-карточки»), как в виджете: одно нажатие (после ожидания NOTE_DOUBLE_MS) открывает заметку,
+  // два подряд — убирают её из всех виджетов, куда она добавлена (LTNoteCards.dropFromWidgets)
+  var NOTE_DOUBLE_MS = 400; // то же, что ScanActivity.HABIT_DOUBLE_MS в виджете
+  var noteTapWait = { id: "", timer: 0 };
+  function noteCardTap(it){
+    if(noteTapWait.timer && noteTapWait.id === it.id){
+      clearTimeout(noteTapWait.timer); noteTapWait.timer = 0; noteTapWait.id = "";
+      try{ window.LTNoteCards.dropFromWidgets(it.id); }catch(e){}
+      return;
+    }
+    if(noteTapWait.timer) clearTimeout(noteTapWait.timer);
+    noteTapWait.id = it.id;
+    noteTapWait.timer = setTimeout(function(){ noteTapWait.timer = 0; noteTapWait.id = ""; openNoteById(it.id); }, NOTE_DOUBLE_MS);
   }
 
   // Диалог ручного имени книжной закладки (ТЗ 20.09) — тот же вид карточки,

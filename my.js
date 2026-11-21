@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 152.2 (21.11) — `LTNoteCards.dropFromWidgets(noteId)`: двойное нажатие на карточку-заметку в приложении убирает её из всех виджетов (`WidgetsTab.dropNoteEverywhere`). Откат: my.js 152.1.
    Версия: 152.1 (21.11) — `drainWidgetNotes`: заметки, снятые с виджета двойным нажатием на карточку «Заметки» (мост ≥ 40, `widgetNoteTake`/`widgetNoteAck`), убираются из списка виджета (`WidgetsTab.dropNote`); вызывается рядом с `drainWidgetTasks`. Откат: my.js 152.0.
    Версия: 152.0 (19.11) — позиция вкладок задач и «Комментариев» («иногда открывается в самом верху»): прежний слушатель скролла писал в память любой scroll-event, в т.ч. сброс в 0 при перерисовке списка и в `layoutSettingsModal`, а восстановление шло, пока окно ещё скрыто. Теперь: в `tabScrollPercents` пишется только скролл от человека (`tabScrollUserAt`) и позиция, прочитанная ДО замены содержимого (`captureTabScroll`: уход с вкладки, закрытие окна, сворачивание); `restoreTabScroll` ждёт видимости контейнера и доводит место после загрузки картинок (250/800 мс); копия позиций в `state["__tabScroll"]` ({c:{вкладка: 0..1}, t}, пишется редко — `flushTabScrollState`) едет в облако и возвращает место после переустановки; запасная позиция — самый низ. Откат: my.js 151.9.
    Версия: 151.9 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
@@ -14260,6 +14261,8 @@
     setTime: setNoteCardTime,
     timeOptions: noteTimeOptions,
     pickWidget: openNoteWidgetPicker,
+    // двойное нажатие на карточку-заметку (mdeditor.js): убрать из всех виджетов, куда добавлена; число виджетов
+    dropFromWidgets: function(noteId){ var W = ensureWidgets(); return W && typeof W.dropNoteEverywhere === "function" ? W.dropNoteEverywhere(noteWidgetId(noteId)) : 0; },
     // палитра — ровно та же, что в формах карточек QR и в конструкторе виджетов (itemcards.js CARD_PALETTE_COLS): правка палитры там меняет и эту форму
     paletteHtml: function(){ var ic = ensureItemCards(); return ic && typeof ic.colorPalette === "function" ? ic.colorPalette("notecard", "noteCardColors") : ""; },
     paletteColor: function(hex){ var ic = ensureItemCards(); return ic && typeof ic.paletteColor === "function" ? ic.paletteColor(hex) : hex; }
