@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 152.3 (21.11) — задачи: кнопки «крестик», «карандаш», «галочка» и «шеврон» убраны из всех строк (вкладки задач, «Все задачи проекта», поиск, ревью, архив). Вместо них жесты на самой строке (`bindTaskRowGestures`): один тап — развернуть и редактировать (потеря фокуса сохраняет, сворачивает и выключает редактирование), два тапа — выполнено (в архив), долгое нажатие — плашка только с крестиком, он удаляет задачу (`openTaskDeleteBubble`, `openAppBubbleGrid` с `opts.single`); в архиве тап разворачивает/сворачивает запись, долгое нажатие — удаление. Признак «строку можно править» теперь `data-editable` на `.task-body` (раньше — наличие карандаша, см. `taskHoldTarget`). Экран «Кнопки задач» переписан под жесты. Откат: my.js 152.2.
    Версия: 152.2 (21.11) — `LTNoteCards.dropFromWidgets(noteId)`: двойное нажатие на карточку-заметку в приложении убирает её из всех виджетов (`WidgetsTab.dropNoteEverywhere`). Откат: my.js 152.1.
    Версия: 152.1 (21.11) — `drainWidgetNotes`: заметки, снятые с виджета двойным нажатием на карточку «Заметки» (мост ≥ 40, `widgetNoteTake`/`widgetNoteAck`), убираются из списка виджета (`WidgetsTab.dropNote`); вызывается рядом с `drainWidgetTasks`. Откат: my.js 152.0.
    Версия: 152.0 (19.11) — позиция вкладок задач и «Комментариев» («иногда открывается в самом верху»): прежний слушатель скролла писал в память любой scroll-event, в т.ч. сброс в 0 при перерисовке списка и в `layoutSettingsModal`, а восстановление шло, пока окно ещё скрыто. Теперь: в `tabScrollPercents` пишется только скролл от человека (`tabScrollUserAt`) и позиция, прочитанная ДО замены содержимого (`captureTabScroll`: уход с вкладки, закрытие окна, сворачивание); `restoreTabScroll` ждёт видимости контейнера и доводит место после загрузки картинок (250/800 мс); копия позиций в `state["__tabScroll"]` ({c:{вкладка: 0..1}, t}, пишется редко — `flushTabScrollState`) едет в облако и возвращает место после переустановки; запасная позиция — самый низ. Откат: my.js 151.9.
@@ -16778,7 +16779,7 @@
     var view = tg.closest(".task-text-view");
     if(!view || view.classList.contains("task-archive-text") || view.classList.contains("task-has-img")) return null;
     var body = view.closest(".task-body");
-    if(!body || !body.querySelector(".task-edit-btn")) return null; // чужая/общая только для чтения или не задача
+    if(!body || !body.hasAttribute("data-editable")) return null; // чужая/общая только для чтения или не задача
     var id = body.getAttribute("data-id");
     var task = id ? getTaskById(id) : null;
     if(!task || !task.c || !task.c.text) return null;
@@ -24510,13 +24511,11 @@
       var rows = byDay[day].map(function(t){
         var labelInner = t.c.text ? taskTextInner(t.c.text, escapeHtml) : null; // картинки — слева от текста (ТЗ 05.10)
         var label = labelInner ? labelInner.html : "Без названия";
-        var isExpanded = !!expandedTaskIds[t.id];
+        var isExpanded = false; // разворачивается только на время правки (тап по записи)
         return '<div class="task-row" data-id="' + t.id + '">' +
           '<div class="task-body task-archive-body" data-id="' + t.id + '">' +
             '<span class="task-text-view task-archive-text' + (labelInner && labelInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
             '<span class="task-actions">' +
-              '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
-              '<button type="button" class="task-icon-btn review-task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
               '<button type="button" class="task-icon-btn review-task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
               '<button type="button" class="task-icon-btn review-task-restore-btn" title="' + (isGroupTaskId(t.id) ? 'Вернуть в общие задачи' : 'Вернуть во Входящие') + '">' + RESTORE_ICON_SVG + '</button>' +
             '</span>' +
@@ -24532,27 +24531,14 @@
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
       var id = body.getAttribute("data-id");
       var textEl = body.querySelector(".task-archive-text");
-      var expandBtn = body.querySelector(".task-expand-btn");
-      var editBtn = body.querySelector(".review-task-edit-btn");
       var copyBtn = body.querySelector(".review-task-copy-btn");
       var restoreBtn = body.querySelector(".review-task-restore-btn");
       var editing = false;
 
       // кнопки не отнимают фокус у редактируемого текста (как в строках задач)
-      [expandBtn, editBtn, copyBtn, restoreBtn].forEach(function(b){
+      [copyBtn, restoreBtn].forEach(function(b){
         if(b) b.addEventListener("mousedown", function(e){ e.preventDefault(); });
       });
-
-      if(expandBtn){
-        expandBtn.addEventListener("click", function(e){
-          e.stopPropagation();
-          if(expandedTaskIds[id]) delete expandedTaskIds[id];
-          else expandedTaskIds[id] = true;
-          if(textEl) textEl.classList.toggle("task-text-clamped", !expandedTaskIds[id]);
-          updateTaskExpandBtn(body, id);
-          fitTaskActions(body);
-        });
-      }
 
       function commit(){
         if(!editing) return;
@@ -24562,9 +24548,11 @@
         if(cur && (cur.c.text || "") !== newText) setDoneTaskText(id, newText);
         renderReviewTabContent();
       }
-      if(editBtn){
-        editBtn.addEventListener("click", function(){
-          if(editing){ reviewPendingEdit = null; commit(); return; }
+      // тап по записи — развернуть и править на месте; потеря фокуса (blur ниже) сохраняет правку и
+      // сворачивает запись обратно (renderReviewTabContent перерисовывает список)
+      bindTaskRowGestures(body, id, {
+        onTap: function(){
+          if(editing) return;
           flushReviewEdit();
           var cur = getAnyTaskById(id);
           if(!cur) return;
@@ -24575,9 +24563,6 @@
           textEl.classList.add("task-editable");
           textEl.style.display = "block";
           textEl.setAttribute("contenteditable", "true");
-          editBtn.innerHTML = CHECK_ICON_SVG;
-          editBtn.title = "Сохранить";
-          if(expandBtn) expandBtn.style.display = "none";
           textEl.focus();
           try{
             var range = document.createRange();
@@ -24588,8 +24573,8 @@
             sel.addRange(range);
           }catch(e){}
           fitTaskActions(body);
-        });
-      }
+        }
+      });
       if(textEl){
         textEl.addEventListener("input", function(){ fitTaskActions(body); });
         textEl.addEventListener("blur", function(){
@@ -25103,11 +25088,11 @@
     var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
     var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">' + placeholder + '</span>';
     var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
-    // Развёрнутые задачи (expandedTaskIds) рисуются без обрезки — иначе нельзя ни прочитать текст
-    // целиком, ни (что важнее) корректно определить через scrollHeight/clientHeight, что обрезка
-    // больше не нужна, когда задачу укоротили редактированием (см. updateTaskExpandBtn).
-    var isExpanded = !!expandedTaskIds[id];
-    setTaskRowWide(body, isExpanded);
+    // В обычном виде строка ВСЕГДА обрезана по TASK_CLAMP_LINES: разворачивается задача только на
+    // время редактирования (тап, см. bindTaskRowGestures), а выйдя из него — сворачивается обратно.
+    var isExpanded = false;
+    taskCollapse(id);
+    setTaskRowWide(body, false);
     var jointSignatureHtml = buildTaskJointSignatureHtml(task.c, id);
     // не только вкладка «Общие задачи»: общая задача может лежать и на Red
     var isJointReadOnlyRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
@@ -25115,10 +25100,6 @@
       jointSignatureHtml +
       '<span class="task-text-view' + (showRed ? ' task-text-red' : '') + (taskInner && taskInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
       '<span class="task-actions">' +
-        '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
-        (isJointReadOnlyRow ? '' : taskDeleteBtnHtml()) +
-        (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>') +
-        (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>') +
         (isJointReadOnlyRow ? '' : '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>') +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
@@ -25128,10 +25109,10 @@
         '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
         taskReminderBtnHtml(task) +
       '</span>';
-    var editBtn = body.querySelector(".task-edit-btn");
-    if(editBtn) editBtn.addEventListener("click", function(){ renderTaskRowEdit(id, tabKey, onAfterAction); });
+    // строка, которую можно править (не чужая/общая «только для чтения») — по этому признаку
+    // taskHoldTarget (маркер удержанием в режиме чтения) отличает её от остальных
+    if(isJointReadOnlyRow) body.removeAttribute("data-editable"); else body.setAttribute("data-editable", "1");
     bindTaskRowActions(body, id, tabKey, onAfterAction);
-    updateTaskExpandBtn(body, id);
     fitTaskActions(body);
   }
 
@@ -25182,10 +25163,13 @@
     }).join("") + '</div>';
 
     var html = '';
-    html += iconRow(CHEVRON_DOWN_ICON_SVG, false, "Разворачивает длинную задачу целиком (у коротких задач не появляется). Повторное нажатие сворачивает обратно.");
-    html += iconRow(CROSS_SMALL_ICON_SVG, false, "Удаляет задачу насовсем — только после подтверждения: плашка «Удалить задачу?» с крестиком (отмена) и галочкой (удалить). Из архива задачу удаляет отдельный крестик.");
-    html += iconRow(PENCIL_ICON_SVG, false, "Открывает текст задачи для редактирования.");
-    html += iconRow(CHECK_ICON_SVG, false, "Отмечает задачу выполненной и переносит её в архив.");
+    function gestureRow(html2){
+      return '<div class="task-info-item"><div class="task-info-text"><b>' + html2[0] + '</b> ' + html2[1] + '</div></div>';
+    }
+    html += gestureRow(["Один тап по задаче", "— разворачивает её целиком (если текст длинный) и включает редактирование. Когда фокус уходит с задачи (тап в другое место), правка сохраняется, задача сворачивается и редактирование выключается."]);
+    html += gestureRow(["Два тапа подряд", "— отмечают задачу выполненной и переносят её в архив."]);
+    html += gestureRow(["Долгое нажатие", "— показывает плашку с крестиком: нажатие на крестик удаляет задачу насовсем, тап мимо плашки закрывает её. Так же удаляется запись из архива. В полноэкранном режиме долгое нажатие ставит маркер на слово, поэтому удалить задачу там нельзя."]);
+    html += gestureRow(["В архиве", "тап по записи разворачивает и сворачивает её; кнопка со стрелкой возвращает задачу из архива."]);
     html += iconRow(ARROW_MOVE_ICON_SVG, true, "Открывает плашку с пиктограммами вкладок — нажатие на пиктограмму переносит задачу сразу. Перенос задач работает между вкладками:" + moveTabsHtml);
     html += iconRow(ARROW_TOP_ICON_SVG, false, "Переносит задачу в самое начало списка.");
     html += iconRow(ARROW_BOTTOM_ICON_SVG, false, "Переносит задачу в самый конец списка.");
@@ -25246,41 +25230,33 @@
   function bindTaskRowActions(body, id, tabKey, onAfterAction){
     var task = getTaskById(id);
     if(!task) return;
-    // шеврон "показать полностью"/"свернуть" (см. renderTaskRowView/updateTaskExpandBtn) — просто
-    // переключает expandedTaskIds и перерисовывает СВОЮ же строку; никакого влияния на остальной
-    // список (в отличие от done/move/flag) — полная пересборка тут не нужна
-    var expandBtn = body.querySelector(".task-expand-btn");
-    if(expandBtn){
-      expandBtn.addEventListener("click", function(e){
-        e.stopPropagation();
-        if(expandedTaskIds[id]) delete expandedTaskIds[id];
-        else expandedTaskIds[id] = true;
-        renderTaskRowView(id, tabKey, onAfterAction);
-      });
-    }
-    // галочка "в архив" — делает ровно то же.
-    var doneBtn = body.querySelector(".task-done-btn");
-    if(doneBtn){
-      doneBtn.addEventListener("click", function(){
+    // жесты строки (см. bindTaskRowGestures): тап — развернуть и редактировать, двойной тап —
+    // выполнено (в архив), долгое нажатие — плашка с крестиком «удалить». Чужая/общая задача «только
+    // для чтения» жестов не получает.
+    var isRoRow = (tabKey === "jointtasks" || isGroupTaskId(id)) && isGroupTasksReadOnly();
+    bindTaskRowGestures(body, id, isRoRow ? null : {
+      onTap: function(){
+        taskExpandIfClamped(body, id);
+        renderTaskRowEdit(id, tabKey, onAfterAction);
+      },
+      onDone: function(){
         flushPendingTaskEdits();
+        taskCollapse(id);
         checkTaskDone(id); // одна и та же задача — закрывается везде разом
         if(onAfterAction) onAfterAction();
         else renderTaskTabList(tabKey || task.c.tab);
-      });
-    }
-    // крестик «удалить задачу» (с подтверждением, см. openTaskDeleteConfirm)
-    var deleteBtn = body.querySelector(".task-delete-btn");
-    if(deleteBtn){
-      bindTaskDeleteBtn(deleteBtn, function(){
+      },
+      onDelete: function(){
+        flushPendingTaskEdits();
         deleteTaskPermanently(id);
         if(onAfterAction) onAfterAction();
         else renderTaskTabList(tabKey || task.c.tab);
-      });
-    }
+      }
+    });
     var moveBtn = body.querySelector(".task-move-btn");
     if(moveBtn){
-      // как у крестика: нажатие не отнимает фокус у редактируемой строки (плашка встанет над
-      // клавиатурой, а строка не перерисуется из-под неё)
+      // нажатие не отнимает фокус у редактируемой строки (плашка встанет над клавиатурой, а строка
+      // не перерисуется из-под неё)
       moveBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
       moveBtn.addEventListener("click", function(){ openTaskMovePicker(id, tabKey, onAfterAction, moveBtn); });
     }
@@ -25413,8 +25389,6 @@
     body.innerHTML =
       '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
       '<span class="task-actions">' +
-        taskDeleteBtnHtml() +
-        '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
         '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
@@ -25473,6 +25447,7 @@
       if(window.Debug) window.Debug.log("renderTaskRowEdit(blur): setTaskText(" + id + "), длина=" + newText.trim().length + ", есть картинка=" + (newText.indexOf("![[") !== -1));
       setTaskText(id, newText.trim());
       editable.contentEditable = "false";
+      taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
       setTimeout(function(){
         if(document.body.contains(body)) renderTaskRowView(id, tabKey, onAfterAction);
         restoreScroll();
@@ -25893,17 +25868,13 @@
       var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
       var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">Новая задача</span>';
       var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
-      // Обрезка по строкам + шеврон "показать полностью" — та же карта expandedTaskIds, что и в
-      // обычных вкладках задач (см. renderTaskRowView): это те же самые задачи, тот же id, так что
-      // развёрнутость здесь и там — одно и то же состояние.
-      var isExpanded = !!expandedTaskIds[id];
+      // Обрезка по строкам — та же, что в обычных вкладках задач (см. renderTaskRowView): в обычном
+      // виде строка всегда обрезана, разворачивается только на время редактирования (тап).
+      var isExpanded = false;
+      taskCollapse(id);
       body.innerHTML =
         '<span class="task-text-view' + (taskInner && taskInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + textHtml + '</span>' +
         '<span class="task-actions">' +
-          '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
-          taskDeleteBtnHtml() +
-          '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + PENCIL_ICON_SVG + '</button>' +
-          '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
@@ -25912,36 +25883,33 @@
           '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
           taskReminderBtnHtml(task) +
         '</span>';
-      body.querySelector(".task-expand-btn").addEventListener("click", function(e){
-        e.stopPropagation();
-        if(expandedTaskIds[id]) delete expandedTaskIds[id];
-        else expandedTaskIds[id] = true;
-        renderRowView(id);
-      });
-      body.querySelector(".task-edit-btn").addEventListener("click", function(){ renderRowEdit(id); });
+      body.setAttribute("data-editable", "1");
       bindRowActions(body, id);
-      updateTaskExpandBtn(body, id);
       fitTaskActions(body);
     }
 
     // кнопки архива/переноса/приоритета — общие для обычного вида и режима редактирования, чтобы
     // они не пропадали, пока идёт ввод текста (см. renderRowEdit)
     function bindRowActions(body, id){
-      var doneBtn = body.querySelector(".task-done-btn");
-      if(doneBtn){
-        doneBtn.addEventListener("click", function(){
+      // жесты строки — те же, что в обычных вкладках (bindTaskRowGestures): тап — развернуть и
+      // редактировать, двойной тап — выполнено, долгое нажатие — плашка с крестиком «удалить»
+      bindTaskRowGestures(body, id, {
+        onTap: function(){
+          taskExpandIfClamped(body, id);
+          renderRowEdit(id);
+        },
+        onDone: function(){
           flushPendingTaskEdits();
+          taskCollapse(id);
           checkTaskDone(id);
           render();
-        });
-      }
-      var deleteBtn = body.querySelector(".task-delete-btn");
-      if(deleteBtn){
-        bindTaskDeleteBtn(deleteBtn, function(){
+        },
+        onDelete: function(){
+          flushPendingTaskEdits();
           deleteTaskPermanently(id);
           render();
-        });
-      }
+        }
+      });
       var moveBtn = body.querySelector(".task-move-btn");
       if(moveBtn){
         moveBtn.addEventListener("mousedown", function(e){ e.preventDefault(); });
@@ -26030,8 +25998,6 @@
       body.innerHTML =
         '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
         '<span class="task-actions">' +
-          taskDeleteBtnHtml() +
-          '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + CHECK_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + ARROW_MOVE_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-top-btn" title="В начало списка">' + ARROW_TOP_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
@@ -26093,6 +26059,7 @@
         if(window.Debug) window.Debug.log("renderRowEdit(blur): setTaskText(" + id + "), длина=" + newText.trim().length + ", есть картинка=" + (newText.indexOf("![[") !== -1));
         setTaskText(id, newText.trim());
         editable.contentEditable = "false";
+        taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
         setTimeout(function(){
           if(document.body.contains(body)) renderRowView(id);
           restoreScroll();
@@ -26164,9 +26131,7 @@
           archiveJointSignatureHtml +
           '<span class="task-text-view task-archive-text' + (labelInner && labelInner.hasImg ? ' task-has-img' : '') + (isExpanded ? '' : ' task-text-clamped') + '">' + label + '</span>' +
           '<span class="task-actions">' +
-            '<button type="button" class="task-icon-btn task-expand-btn" title="Показать полностью" style="display:none">' + CHEVRON_DOWN_ICON_SVG + '</button>' +
             '<button type="button" class="task-icon-btn task-restore-btn" data-id="' + t.id + '" title="Извлечь из архива">' + RESTORE_ICON_SVG + '</button>' +
-            '<button type="button" class="task-icon-btn task-delete-btn" data-id="' + t.id + '" title="Удалить навсегда">' + DELETE_ICON_SVG + '</button>' +
           '</span>' +
         '</div>' +
       '</div>';
@@ -26182,19 +26147,22 @@
     container.scrollTop = preservedScrollTop;
     Array.prototype.forEach.call(container.querySelectorAll(".task-archive-body"), function(body){
       var id = body.getAttribute("data-id");
-      var expandBtn = body.querySelector(".task-expand-btn");
-      if(expandBtn){
-        expandBtn.addEventListener("click", function(e){
-          e.stopPropagation();
+      // тап по архивной записи разворачивает/сворачивает её (редактировать и «выполнять» тут нечего),
+      // долгое нажатие — плашка с крестиком: удаляет запись насовсем (как раньше крестик, только теперь
+      // с подтверждением)
+      bindTaskRowGestures(body, id, {
+        onTap: function(){
           if(expandedTaskIds[id]) delete expandedTaskIds[id];
           else expandedTaskIds[id] = true;
           var textEl = body.querySelector(".task-archive-text");
           if(textEl) textEl.classList.toggle("task-text-clamped", !expandedTaskIds[id]);
-          updateTaskExpandBtn(body, id);
           fitTaskActions(body);
-        });
-      }
-      updateTaskExpandBtn(body, id);
+        },
+        onDelete: function(){
+          if(isGroup) deleteGroupArchivedTaskPermanently(id); else deleteTaskPermanently(id);
+          renderTaskArchiveTab(isGroup);
+        }
+      });
       fitTaskActions(body);
     });
     Array.prototype.forEach.call(container.querySelectorAll(".task-restore-btn"), function(btn){
@@ -26204,24 +26172,12 @@
         renderTaskArchiveTab(isGroup);
       });
     });
-    Array.prototype.forEach.call(container.querySelectorAll(".task-delete-btn"), function(btn){
-      btn.addEventListener("click", function(){
-        var id = btn.getAttribute("data-id");
-        if(isGroup) deleteGroupArchivedTaskPermanently(id); else deleteTaskPermanently(id);
-        renderTaskArchiveTab(isGroup);
-      });
-    });
   }
 
-  // ===================== УДАЛЕНИЕ ЗАДАЧИ С ПОДТВЕРЖДЕНИЕМ =====================
-  // Крестик слева от карандаша (.task-delete-btn) во всех строках задач на любых вкладках (обычные
-  // вкладки, «Все задачи проекта», результаты поиска; в режиме редактирования — крайний слева)
-  // удаляет задачу НАСОВСЕМ, но только после подтверждения: плашка «Удалить задачу?» + крестик
-  // (отмена) + галочка (удалить), один ряд, по центру экрана по горизонтали. Стоит не посреди
-  // экрана, а у самого низа — над клавиатурой, если она открыта (верх клавиатуры —
-  // window.AppKeyboard.getTop(), см. initTaskKeyboardLift), а если нет — на том же уровне у нижнего
-  // края (над системной плашкой). Крестик архива (полное удаление из архива) остаётся без
-  // подтверждения.
+  // ===================== УДАЛЕНИЕ ЗАДАЧИ (ЕДИНАЯ ПЛАШКА-ПОДТВЕРЖДЕНИЕ НИЖЕ) =====================
+  // Кнопки-крестика в строках задач больше нет: задача удаляется долгим нажатием на неё — появляется
+  // плашка только с крестиком (openTaskDeleteBubble ниже), нажатие на него удаляет задачу насовсем
+  // (то же в архиве). Сама общая плашка «да/нет» (openAppConfirmBar) осталась для остальных мест.
   // ===================== ЕДИНАЯ ПЛАШКА-ПОДТВЕРЖДЕНИЕ =====================
   // Общий на всё приложение диалог "да/нет": одна плашка (перенос на 2-3 строки, если текст
   // длинный) с иконками крестик-отмена/галочка-да, затемнение всего экрана позади (клик по нему =
@@ -26428,7 +26384,7 @@
     }else if(opts.text){
       box.innerHTML = '<span class="app-confirm-bar-text">' + escapeHtml(opts.text) + '</span><span class="app-confirm-bar-btns">' + bubblesHtml + '</span>';
     }else{
-      box.classList.add("app-bubble-grid");
+      if(!opts.single) box.classList.add("app-bubble-grid"); // opts.single — один пузырь (удаление задачи), сетка из 5 колонок не нужна
       box.innerHTML = bubblesHtml;
     }
     appConfirmBarEl = box;
@@ -26476,22 +26432,121 @@
   }
   window.AppConfirmBar = { open: openAppConfirmBar, close: closeAppConfirmBar, openGrid: openAppBubbleGrid };
 
-  function taskDeleteBtnHtml(){
-    return '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + CROSS_SMALL_ICON_SVG + '</button>';
+  // ===================== ЖЕСТЫ СТРОКИ ЗАДАЧИ =====================
+  // Кнопок «крестик», «карандаш», «галочка» и «развернуть» в строках задач больше нет — всё делают
+  // жесты на самой строке:
+  //   • одинарный тап — развернуть задачу и включить редактирование (cfg.onTap); сворачивается и
+  //     редактирование выключается, когда поле теряет фокус (blur в renderTaskRowEdit/renderRowEdit);
+  //   • двойной тап — задача выполнена, уходит в архив (cfg.onDone). Считается только если ПЕРВЫЙ тап
+  //     был по строке в обычном виде (он и включил редактирование), второй пришёл в течение
+  //     TASK_DOUBLE_TAP_MS — двойной тап по слову в уже редактируемой строке задачу не закрывает;
+  //   • долгое нажатие — плашка только с крестиком над пальцем (cfg.onDelete); нажатие на крестик
+  //     удаляет задачу насовсем, тап мимо плашки её закрывает. Не работает в режиме чтения (там
+  //     удержание ставит маркер, см. taskHoldTarget) и в строке, которая сейчас редактируется
+  //     (там удержание — системное выделение текста).
+  // cfg обновляется при каждой перерисовке строки, а слушатели вешаются на .task-body один раз
+  // (body.__taskGestBound), потому что сам .task-body при перерисовке строки не пересоздаётся.
+  var TASK_DOUBLE_TAP_MS = 350;
+  var TASK_LONG_PRESS_MS = 500;
+  var taskLastViewTap = null; // {id, t} — последний тап по строке в обычном виде
+  var TASK_GESTURE_IGNORE_SEL = "a, button, input, textarea, .task-actions, .task-img-wrap, .task-flag-dot";
+  function taskGestureReadingMode(){
+    var ov = document.getElementById("settingsModalOverlay");
+    return !!(ov && ov.classList.contains("reading-mode-active"));
   }
-  // если правилась именно эта строка — сначала штатно снимаем фокус (сохранение/снятие подъёма над
-  // клавиатурой), потом удаляем
-  function openTaskDeleteConfirm(onYes, anchorEl){
-    openAppConfirmBar("Удалить задачу?", onYes, { yesTitle:"Удалить", blurBeforeYes:true, anchorEl:anchorEl });
+  // плашка с одним крестиком над точкой касания (x, y); следует за прокруткой вместе со строкой rowEl
+  function openTaskDeleteBubble(x, y, rowEl, onYes){
+    var rr0 = rowEl.getBoundingClientRect();
+    var dy = y - rr0.top - 44; // пузырь чуть выше пальца
+    var anchor = {
+      get isConnected(){ return rowEl.isConnected; },
+      getBoundingClientRect: function(){
+        var rr = rowEl.getBoundingClientRect();
+        var top = rr.top + dy;
+        return { left: x, right: x + 1, width: 1, height: 1, top: top, bottom: top + 1 };
+      }
+    };
+    openAppBubbleGrid(anchor, [{ key: "del", svg: CROSS_SMALL_ICON_SVG, title: "Удалить задачу" }], function(){
+      onYes();
+    }, { label: "Удалить задачу", single: true });
   }
-  // крестик в строке: mousedown не отнимает фокус у редактируемого поля (клавиатура остаётся
-  // открытой — плашка встанет над ней)
-  function bindTaskDeleteBtn(btn, onYes){
-    btn.addEventListener("mousedown", function(e){ e.preventDefault(); });
-    btn.addEventListener("click", function(e){
-      e.stopPropagation();
-      openTaskDeleteConfirm(onYes, btn);
+  function bindTaskRowGestures(body, id, cfg){
+    if(!body) return;
+    body.__taskGest = cfg || null;
+    if(body.__taskGestBound) return;
+    body.__taskGestBound = true;
+    var press = LTPress.bind(body, {
+      ms: TASK_LONG_PRESS_MS,
+      accept: function(el, target){
+        var g = body.__taskGest;
+        if(!g || !g.onDelete) return false;
+        if(body.querySelector(".task-editable")) return false;
+        if(taskGestureReadingMode()) return false;
+        if(target && target.closest && target.closest(TASK_GESTURE_IGNORE_SEL)) return false;
+        return true;
+      },
+      onLong: function(info){
+        var g = body.__taskGest;
+        if(!g || !g.onDelete) return;
+        try{ if(navigator.vibrate) navigator.vibrate(12); }catch(e){}
+        var open = function(){
+          if(!body.isConnected) return;
+          openTaskDeleteBubble(info.x, info.y, body, g.onDelete);
+        };
+        if(info.via === "context"){ open(); return; }
+        // плашку открываем, когда палец уже отпущен: иначе «клик» от отпускания сочтётся тапом мимо
+        // плашки и тут же её закроет
+        var endEv = info.via === "touch" ? "touchend" : "mouseup";
+        var finished = false, safety = null;
+        var finish = function(cancelled){
+          if(finished) return;
+          finished = true;
+          document.removeEventListener(endEv, onEnd, true);
+          document.removeEventListener("touchcancel", onCancel, true);
+          clearTimeout(safety);
+          if(!cancelled) setTimeout(open, 80);
+        };
+        var onEnd = function(){ finish(false); };
+        var onCancel = function(){ finish(true); };
+        safety = setTimeout(function(){ finish(true); }, 10000);
+        document.addEventListener(endEv, onEnd, true);
+        document.addEventListener("touchcancel", onCancel, true);
+      }
     });
+    body.addEventListener("click", function(e){
+      var g = body.__taskGest;
+      if(!g) return;
+      var tg = e.target;
+      if(tg && tg.closest && tg.closest(TASK_GESTURE_IGNORE_SEL)) return;
+      if(press.consume()) return;
+      var now = Date.now();
+      var last = taskLastViewTap;
+      taskLastViewTap = null;
+      // второй тап вслед за тапом, включившим редактирование, — «выполнено»
+      if(g.onDone && last && last.id === id && now - last.t < TASK_DOUBLE_TAP_MS){
+        e.preventDefault();
+        e.stopPropagation();
+        g.onDone();
+        return;
+      }
+      if(body.querySelector(".task-editable")) return; // строка уже редактируется — обычные тапы по тексту
+      var sel = window.getSelection ? window.getSelection() : null;
+      if(sel && !sel.isCollapsed && String(sel).length) return; // человек выделяет текст, а не тапает
+      if(g.onTap){
+        if(g.onDone) taskLastViewTap = { id: id, t: now };
+        g.onTap();
+      }
+    });
+  }
+  // свернуть задачу (после выхода из редактирования): в обычном виде строка всегда обрезана
+  function taskCollapse(id){ delete expandedTaskIds[id]; }
+  // развернуть перед включением редактирования, только если текст реально обрезан (раньше то же
+  // самое показывал значок-шеврон): иначе короткие задачи в сетке колонок растягивались бы на всю строку
+  function taskExpandIfClamped(body, id){
+    var textEl = body ? body.querySelector(".task-text-view") : null;
+    if(textEl && textEl.classList.contains("task-text-clamped") && textEl.scrollHeight > textEl.clientHeight + 1){
+      expandedTaskIds[id] = true;
+    }
   }
 
   // ===================== ПОДЪЁМ ЗАДАЧИ НАД КЛАВИАТУРОЙ =====================

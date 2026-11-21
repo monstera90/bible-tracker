@@ -1,5 +1,6 @@
 /* ===========================================================================
    search.js
+   Версия: 4.2 (21.11) — в строке результата по задачам нет кнопок «крестик/карандаш/галочка»: правка, «выполнено» и удаление — жестами на строке (тап, два тапа, долгое нажатие; их вешает bindTaskRowActions из my.js). Строка получает признак `data-editable`. Откат: search.js 4.1.
    Версия: 4.1 (13.11)
    Версия: 2.5 (19.09) — в строке результата по задачам добавлена пиктограмма-часы
    «напоминание» (крайняя справа, правее кружка приоритета; ТЗ пользователя от
@@ -879,19 +880,16 @@ window.initSearchModule = function(deps){
     body.innerHTML =
       '<span class="task-text-view">' + (text ? html : '<span class="task-text-placeholder">Новая задача</span>') + '</span>' +
       '<span class="task-actions">' +
-        (ro ? '' : '<button type="button" class="task-icon-btn task-delete-btn" title="Удалить">' + getCrossIcon() + '</button>') +
-        (ro ? '' : '<button type="button" class="task-icon-btn task-edit-btn" title="Редактировать">' + getPencilIcon() + '</button>') +
-        (ro ? '' : '<button type="button" class="task-icon-btn task-done-btn" title="В архив">' + getCheckIcon() + '</button>') +
         (ro ? '' : '<button type="button" class="task-icon-btn task-move-btn" title="Перенести">' + getMoveIcon() + '</button>') +
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + getNextIcon() + '</button>' : '') +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
         getReminderBtnHtml(found) +
       '</span>';
     var onAfterAction = function(){ removeSearchTaskRow(id); };
-    var editBtn = body.querySelector(".task-edit-btn");
-    if(editBtn) editBtn.addEventListener("click", function(){
-      renderTaskRowEdit(id, found.c.tab, onAfterAction);
-    });
+    // правка/«выполнено»/удаление — жестами на самой строке (тап, двойной тап, долгое нажатие), их
+    // вешает bindTaskRowActions (my.js, bindTaskRowGestures); признак «строку можно править» —
+    // для маркера удержанием в режиме чтения (taskHoldTarget)
+    if(ro) body.removeAttribute("data-editable"); else body.setAttribute("data-editable", "1");
     bindTaskRowActions(body, id, found.c.tab, onAfterAction);
     fitTaskActions(body);
   }
