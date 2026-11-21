@@ -25167,8 +25167,8 @@
       return '<div class="task-info-item"><div class="task-info-text"><b>' + html2[0] + '</b> ' + html2[1] + '</div></div>';
     }
     html += gestureRow(["Один тап по задаче", "— разворачивает её целиком (если текст длинный) и включает редактирование. Когда фокус уходит с задачи (тап в другое место), правка сохраняется, задача сворачивается и редактирование выключается."]);
-    html += gestureRow(["Два тапа подряд", "— отмечают задачу выполненной и переносят её в архив."]);
-    html += gestureRow(["Долгое нажатие", "— показывает плашку с крестиком: нажатие на крестик удаляет задачу насовсем, тап мимо плашки закрывает её. Так же удаляется запись из архива. В полноэкранном режиме долгое нажатие ставит маркер на слово, поэтому удалить задачу там нельзя."]);
+    html += gestureRow(["Два тапа подряд по свёрнутой задаче", "— отмечают её выполненной и переносят в архив."]);
+    html += gestureRow(["Долгое нажатие", "— показывает плашку с крестиком: нажатие на крестик удаляет задачу насовсем, тап мимо плашки закрывает её. Работает только по свёрнутой задаче. Так же удаляется запись из архива. В полноэкранном режиме долгое нажатие ставит маркер на слово, поэтому удалить задачу там нельзя."]);
     html += gestureRow(["В архиве", "тап по записи разворачивает и сворачивает её; кнопка со стрелкой возвращает задачу из архива."]);
     html += iconRow(ARROW_MOVE_ICON_SVG, true, "Открывает плашку с пиктограммами вкладок — нажатие на пиктограмму переносит задачу сразу. Перенос задач работает между вкладками:" + moveTabsHtml);
     html += iconRow(ARROW_TOP_ICON_SVG, false, "Переносит задачу в самое начало списка.");
@@ -26437,9 +26437,9 @@
   // жесты на самой строке:
   //   • одинарный тап — развернуть задачу и включить редактирование (cfg.onTap); сворачивается и
   //     редактирование выключается, когда поле теряет фокус (blur в renderTaskRowEdit/renderRowEdit);
-  //   • двойной тап — задача выполнена, уходит в архив (cfg.onDone). Считается только если ПЕРВЫЙ тап
-  //     был по строке в обычном виде (он и включил редактирование), второй пришёл в течение
-  //     TASK_DOUBLE_TAP_MS — двойной тап по слову в уже редактируемой строке задачу не закрывает;
+  //   • двойной тап — задача выполнена, уходит в архив (cfg.onDone). Работает только по СВЁРНУТОЙ
+  //     задаче: поэтому одинарный тап ждёт TASK_DOUBLE_TAP_MS (второй тап за это время — «выполнено»,
+  //     иначе — развернуть и редактировать); в развёрнутой строке двойной тап — обычная работа с текстом;
   //   • долгое нажатие — плашка только с крестиком над пальцем (cfg.onDelete); нажатие на крестик
   //     удаляет задачу насовсем, тап мимо плашки её закрывает. Не работает в режиме чтения (там
   //     удержание ставит маркер, см. taskHoldTarget) и в строке, которая сейчас редактируется
@@ -26448,8 +26448,7 @@
   // (body.__taskGestBound), потому что сам .task-body при перерисовке строки не пересоздаётся.
   var TASK_DOUBLE_TAP_MS = 350;
   var TASK_LONG_PRESS_MS = 500;
-  var taskLastViewTap = null; // {id, t} — последний тап по строке в обычном виде
-  var TASK_GESTURE_IGNORE_SEL = "a, button, input, textarea, .task-actions, .task-img-wrap, .task-flag-dot";
+    var TASK_GESTURE_IGNORE_SEL = "a, button, input, textarea, .task-actions, .task-img-wrap, .task-flag-dot";
   function taskGestureReadingMode(){
     var ov = document.getElementById("settingsModalOverlay");
     return !!(ov && ov.classList.contains("reading-mode-active"));
@@ -26519,23 +26518,29 @@
       var tg = e.target;
       if(tg && tg.closest && tg.closest(TASK_GESTURE_IGNORE_SEL)) return;
       if(press.consume()) return;
-      var now = Date.now();
-      var last = taskLastViewTap;
-      taskLastViewTap = null;
-      // второй тап вслед за тапом, включившим редактирование, — «выполнено»
-      if(g.onDone && last && last.id === id && now - last.t < TASK_DOUBLE_TAP_MS){
+      // двойной тап и долгое нажатие — только по свёрнутой задаче; в развёрнутой (редактируемой) строке
+      // тапы — это работа с текстом
+      if(body.querySelector(".task-editable")) return;
+      var sel = window.getSelection ? window.getSelection() : null;
+      if(sel && !sel.isCollapsed && String(sel).length) return; // человек выделяет текст, а не тапает
+      if(!g.onTap) return;
+      if(!g.onDone){ g.onTap(); return; } // нет «выполнено» (архив, ревью) — ждать второго тапа незачем
+      // первый тап ждёт TASK_DOUBLE_TAP_MS: второй тап за это время — «выполнено», иначе — развернуть
+      // и редактировать
+      if(body.__taskTapTimer){
+        clearTimeout(body.__taskTapTimer);
+        body.__taskTapTimer = null;
         e.preventDefault();
         e.stopPropagation();
         g.onDone();
         return;
       }
-      if(body.querySelector(".task-editable")) return; // строка уже редактируется — обычные тапы по тексту
-      var sel = window.getSelection ? window.getSelection() : null;
-      if(sel && !sel.isCollapsed && String(sel).length) return; // человек выделяет текст, а не тапает
-      if(g.onTap){
-        if(g.onDone) taskLastViewTap = { id: id, t: now };
-        g.onTap();
-      }
+      body.__taskTapTimer = setTimeout(function(){
+        body.__taskTapTimer = null;
+        var g2 = body.__taskGest;
+        if(!body.isConnected || !g2 || !g2.onTap || body.querySelector(".task-editable")) return;
+        g2.onTap();
+      }, TASK_DOUBLE_TAP_MS);
     });
   }
   // свернуть задачу (после выхода из редактирования): в обычном виде строка всегда обрезана
