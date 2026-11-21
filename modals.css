@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.4 (22.11) — полоса приоритета карточки задачи: цвета gold/green/cyan/blue/purple (`--tc-flag-gold` #ffc933, `-green` #3fcf6b, `-cyan` #2ec4f1, `-blue` #3d6bff, `-purple` #8000ff) и образцы на экране «Кнопки задач». Откат: modals.css 23.3.
    Версия: 23.3 (22.11) — полноэкранный режим и режим чтения: полоса приоритета карточки задачи больше не скрывается (`.reading-mode-active .task-card > .task-flag-dot{display:block}`). Откат: modals.css 23.2.
    Версия: 23.2 (21.11) — задачи: `.task-body` берёт размер из `--task-font-size` (свой шаг «Аа» задач); `.task-card > .task-actions` с `margin-top:auto` — кнопки свёрнутой карточки не зависят от размера шрифта. Откат: modals.css 23.1.
    Версия: 23.1 (21.11) — карточки задач: --tc-ratio 2,113 (виджет 4×2, 1063×503 px); `.task-card-open` растёт по тексту при редактировании (как в 23.0). Откат: modals.css 23.0.
@@ -1675,7 +1676,12 @@
     --task-circle-pad:calc((var(--task-btn) - var(--task-circle)) / 2);
   }
   .task-flag-dot.flag-red .task-flag-dot-inner,
-  .task-flag-dot.flag-yellow .task-flag-dot-inner{
+  .task-flag-dot.flag-yellow .task-flag-dot-inner,
+  .task-flag-dot.flag-gold .task-flag-dot-inner,
+  .task-flag-dot.flag-green .task-flag-dot-inner,
+  .task-flag-dot.flag-cyan .task-flag-dot-inner,
+  .task-flag-dot.flag-blue .task-flag-dot-inner,
+  .task-flag-dot.flag-purple .task-flag-dot-inner{
     box-sizing:border-box;
     width:var(--task-circle);height:var(--task-circle);
     border-color:transparent;
@@ -3000,6 +3006,11 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
   --tc-btn:calc(28px * var(--task-ico-scale, 1));
   --tc-flag-red:#ff4d52;
   --tc-flag-orange:#ff8a3d;
+  --tc-flag-gold:#ffc933;
+  --tc-flag-green:#3fcf6b;
+  --tc-flag-cyan:#2ec4f1;
+  --tc-flag-blue:#3d6bff;
+  --tc-flag-purple:#8000ff;
   --tc-line:var(--parchment-dark, #e9e0f1);
 }
 .task-row.task-row-card,
@@ -3061,6 +3072,11 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-body.task-card.task-card-open > .task-flag-dot{ border-radius:12px 0 0 12px; }
 .task-body.task-card > .task-flag-dot.flag-red{ background:var(--tc-flag-red); }
 .task-body.task-card > .task-flag-dot.flag-yellow{ background:var(--tc-flag-orange); }
+.task-body.task-card > .task-flag-dot.flag-gold{ background:var(--tc-flag-gold); }
+.task-body.task-card > .task-flag-dot.flag-green{ background:var(--tc-flag-green); }
+.task-body.task-card > .task-flag-dot.flag-cyan{ background:var(--tc-flag-cyan); }
+.task-body.task-card > .task-flag-dot.flag-blue{ background:var(--tc-flag-blue); }
+.task-body.task-card > .task-flag-dot.flag-purple{ background:var(--tc-flag-purple); }
 .task-body.task-card > .task-flag-dot .task-flag-dot-inner{ display:none; }
 /* область нажатия шире видимой полосы — заходит на поле слева от текста */
 .task-body.task-card > .task-flag-dot::after{
@@ -3160,3 +3176,8 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 /* экран «Кнопки задач»: образцы кружков приоритета — те же цвета, что у полосы */
 .task-info-item .task-flag-dot.flag-red .task-flag-dot-inner{ background:var(--tc-flag-red, #ff4d52); }
 .task-info-item .task-flag-dot.flag-yellow .task-flag-dot-inner{ background:var(--tc-flag-orange, #ff8a3d); }
+.task-info-item .task-flag-dot.flag-gold .task-flag-dot-inner{ background:var(--tc-flag-gold, #ffc933); }
+.task-info-item .task-flag-dot.flag-green .task-flag-dot-inner{ background:var(--tc-flag-green, #3fcf6b); }
+.task-info-item .task-flag-dot.flag-cyan .task-flag-dot-inner{ background:var(--tc-flag-cyan, #2ec4f1); }
+.task-info-item .task-flag-dot.flag-blue .task-flag-dot-inner{ background:var(--tc-flag-blue, #3d6bff); }
+.task-info-item .task-flag-dot.flag-purple .task-flag-dot-inner{ background:var(--tc-flag-purple, #8000ff); }

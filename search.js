@@ -875,7 +875,7 @@ window.initSearchModule = function(deps){
     });
     html += escapeHtml(text.slice(last));
     var isProjectsTab = found.c.tab === "projects";
-    var flagClass = found.c.flag === "red" ? " flag-red" : (found.c.flag === "yellow" ? " flag-yellow" : "");
+    var flagClass = /^(red|yellow|gold|green|cyan|blue|purple)$/.test(found.c.flag) ? " flag-" + found.c.flag : ""; // 7 цветов приоритета, как taskFlagClass в my.js
     var ro = !!(isTaskReadOnly && isTaskReadOnly(id));
     body.innerHTML =
       '<span class="task-text-view">' + (text ? html : '<span class="task-text-placeholder">Новая задача</span>') + '</span>' +

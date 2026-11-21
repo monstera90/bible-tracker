@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.3 (22.11) — приоритет задачи: 7 цветов по кругу (красный, оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый; в данных red/yellow(=оранжевый)/gold/green/cyan/blue/purple), долгое нажатие — цвет темы; на вкладку «Red» по-прежнему попадают только красные и оранжевые (`taskFlagList`/`taskFlagClass`/`cycleTaskFlag`). Откат: my.js 153.2.
    Версия: 153.2 (21.11) — задачи: размер шрифта («Аа») отвязан от остального приложения (свой шаг `taskFontSizeStep`, переменная `--task-font-size`, mdeditor.js); кнопки свёрнутой карточки всегда прижаты к низу (не «ползут» при смене шрифта). Откат: my.js 153.1.
    Версия: 153.1 (21.11) — карточки задач: соотношение сторон 2,113:1 (как у виджета 4×2: 1063×503 px по скриншоту) вместо 1,864:1; в свёрнутом виде размер не зависит от размера шрифта и длины текста; в режиме редактирования карточка растёт по тексту (не ниже свёрнутой). Откат: my.js 153.0.
    Версия: 153.0 (21.11) — карточки задач (все вкладки задач, «Все задачи проекта», поиск): строка задачи — карточка с фиксированным соотношением сторон 1,864:1 в свёрнутом виде (от текста и размера шрифта не зависит: влезающее число строк считает `fitTaskCard`, остальное обрезается), в развёрнутом (редактирование) карточка растёт. Цветная полоса слева заменила кружок приоритета (кнопка `.task-flag-dot` — та же, обработчики те же): цвет темы → красная #ff4d52 → оранжевая #ff8a3d (в данных по-прежнему `flag:"yellow"`). Внизу слева «перенос / в начало / в конец / [ссылка] / копировать», справа «чемоданчик / напоминание» (часы + время). Разметка строк не менялась: `taskCardize` (вызывается из `fitTaskActions`) превращает готовую строку в карточку. Откат: my.js 152.3.
@@ -23421,12 +23422,18 @@
   // цветная полоса слева от текста карточки (оранжевая — в данных "yellow"). (из null клик даёт red, но обратно в null кликом больше не
   // возвращается); снять отметку совсем можно только долгим нажатием (см. clearTaskFlag ниже,
   // bindTapOrHold — общий тап/холд-хелпер). Возвращает новое значение ("red"/"yellow").
+  // Цвета полосы приоритета по кругу: красный → оранжевый → жёлтый → зелёный → голубой → синий → фиолетовый → снова красный
+  // (цвет темы — состояние «нет отметки», в круг не входит: к нему возвращает долгое нажатие). В данных: red, yellow (это ОРАНЖЕВЫЙ —
+  // имя осталось с прежних версий), gold (жёлтый), green, cyan, blue, purple. На вкладку «Red» попадают только red и yellow (см. getTasksForTab).
+  function taskFlagList(){ return ["red", "yellow", "gold", "green", "cyan", "blue", "purple"]; }
+  function taskFlagClass(flag){ return taskFlagList().indexOf(flag) >= 0 ? " flag-" + flag : ""; }
   function cycleTaskFlag(id){
     // см. пояснение у moveTaskToEdge выше — тот же баг и то же исправление.
     if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
-    var next = (task.c.flag === "red") ? "yellow" : "red";
+    var list = taskFlagList(), at = list.indexOf(task.c.flag);
+    var next = list[(at + 1) % list.length]; // нет отметки/неизвестное значение → красный, после фиолетового → красный
     task.c.flag = next;
     saveTaskData(id, task.c);
     return next;
@@ -25164,7 +25171,7 @@
     var placeholder = isProjectsTab ? "Новый проект" : "Новая задача";
     var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
     var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">' + placeholder + '</span>';
-    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+    var flagClass = taskFlagClass(task.c.flag);
     // В обычном виде строка ВСЕГДА обрезана по TASK_CLAMP_LINES: разворачивается задача только на
     // время редактирования (тап, см. bindTaskRowGestures), а выйдя из него — сворачивается обратно.
     var isExpanded = false;
@@ -25256,8 +25263,13 @@
       '<span class="task-flag-dot" style="pointer-events:none;"><span class="task-flag-dot-inner"></span></span>', false,
       "Цветная полоса слева на карточке — отметка приоритета (по умолчанию цвета темы). Нажатие переключает по кругу: " +
       '<span class="task-flag-dot flag-red"><span class="task-flag-dot-inner"></span></span> красная → ' +
-      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> оранжевая — и снова красная, по кругу. ' +
-      "Долгое нажатие снимает отметку совсем. Любая отмеченная задача, из какой бы вкладки она ни была, дополнительно показывается на вкладке «Red»."
+      '<span class="task-flag-dot flag-yellow"><span class="task-flag-dot-inner"></span></span> оранжевая → ' +
+      '<span class="task-flag-dot flag-gold"><span class="task-flag-dot-inner"></span></span> жёлтая → ' +
+      '<span class="task-flag-dot flag-green"><span class="task-flag-dot-inner"></span></span> зелёная → ' +
+      '<span class="task-flag-dot flag-cyan"><span class="task-flag-dot-inner"></span></span> голубая → ' +
+      '<span class="task-flag-dot flag-blue"><span class="task-flag-dot-inner"></span></span> синяя → ' +
+      '<span class="task-flag-dot flag-purple"><span class="task-flag-dot-inner"></span></span> фиолетовая — и снова красная, по кругу. ' +
+      "Долгое нажатие возвращает цвет темы. На вкладке «Red» показываются только красные и оранжевые задачи."
     );
     html += iconRow(
       TASK_MOVE_ICON_SVG("worktasks"), false,
@@ -25409,7 +25421,7 @@
         afterWorktasksChange();
       });
     }
-    // ИЗМЕНЕНО: тап — шаг цикла (cycleTaskFlag, red↔yellow), долгое нажатие — сброс
+    // ИЗМЕНЕНО: тап — шаг цикла (cycleTaskFlag, 7 цветов по кругу), долгое нажатие — сброс
     // (clearTaskFlag). На Red состав и порядок строк зависят от отметки (getTasksForTab), поэтому
     // там без полной пересборки списка не обойтись; на остальных вкладках — только сама строка, тем
     // же приёмом, что и раньше (см. историю правок).
@@ -25462,7 +25474,7 @@
     flushPendingTaskEdits(); // если в этот момент редактировалась другая строка — сохранить её
     setTaskRowWide(body, isBigTaskText(task.c.text) || !!expandedTaskIds[id]);
     var isProjectsTab = task.c.tab === "projects";
-    var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+    var flagClass = taskFlagClass(task.c.flag);
     body.innerHTML =
       '<div class="task-editable' + (isProjectsTab ? ' task-editable-project' : '') + '" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
       '<span class="task-actions">' +
@@ -25944,7 +25956,7 @@
       if(!body || !task) return;
       var taskInner = task.c.text ? taskTextInner(task.c.text, linkifyHtml) : null; // картинки — слева от текста (ТЗ 05.10)
       var textHtml = taskInner ? taskInner.html : '<span class="task-text-placeholder">Новая задача</span>';
-      var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+      var flagClass = taskFlagClass(task.c.flag);
       // Обрезка по строкам — та же, что в обычных вкладках задач (см. renderTaskRowView): в обычном
       // виде строка всегда обрезана, разворачивается только на время редактирования (тап).
       var isExpanded = false;
@@ -26071,7 +26083,7 @@
       var task = getTaskById(id);
       if(!body || !task) return;
       flushPendingTaskEdits();
-      var flagClass = task.c.flag === "red" ? " flag-red" : (task.c.flag === "yellow" ? " flag-yellow" : "");
+      var flagClass = taskFlagClass(task.c.flag);
       body.innerHTML =
         '<div class="task-editable" id="taskEditable_' + id + '" contenteditable="true" data-task-id="' + id + '"></div>' +
         '<span class="task-actions">' +
