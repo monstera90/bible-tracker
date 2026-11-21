@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.5 (22.11) — карточки задач: (1) разворачивание/сворачивание не двигает задачи на экране (верх строки остаётся на месте: `taskRowAnchor`, `focus` без собственной прокрутки браузера, подложка под клавиатуру держится до конца сворачивания — `AppKeyboard.holdRelease`); (2) нажатие цвета полосы/«в работе»/напоминания у другой строки во время правки не уводит список к редактируемой (`taskKeepListStill`, `AppKeyboard.suspendLift`; blur от удаления узла при пересборке больше не ставит сторожа прокрутки); (3) первое касание задачи после правки только закрывает правку, не открывая следующую (`taskTapJustClosedEditing`). Откат: my.js 153.4.
    Версия: 153.4 (22.11) — кнопка тегов на вкладках задач заменена фильтром по цвету полосы (корешка): «Все» + цвета, которые есть на вкладке (в т. ч. «Цвет темы»), выбор помнится по вкладкам (`bibleTaskColorFilter_v1`), новая задача при выбранном цвете получает его. Фильтра по тегам больше нет (теги остались на карточках и в QR). Откат: my.js 153.3.
    Версия: 153.3 (22.11) — приоритет задачи: 7 цветов по кругу (красный, оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый; в данных red/yellow(=оранжевый)/gold/green/cyan/blue/purple), долгое нажатие — цвет темы; на вкладку «Red» по-прежнему попадают только красные и оранжевые (`taskFlagList`/`taskFlagClass`/`cycleTaskFlag`). Откат: my.js 153.2.
    Версия: 153.2 (21.11) — задачи: размер шрифта («Аа») отвязан от остального приложения (свой шаг `taskFontSizeStep`, переменная `--task-font-size`, mdeditor.js); кнопки свёрнутой карточки всегда прижаты к низу (не «ползут» при смене шрифта). Откат: my.js 153.1.
@@ -25447,13 +25448,17 @@
         else renderTaskRowView(id, tabKey, onAfterAction);
       };
       bindTapOrHold(worktasksBtn, function(){
-        flushPendingTaskEdits();
-        cycleTaskWorkState(id);
-        afterWorktasksChange();
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          cycleTaskWorkState(id);
+          afterWorktasksChange();
+        });
       }, function(){
-        flushPendingTaskEdits();
-        clearTaskWorkState(id);
-        afterWorktasksChange();
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          clearTaskWorkState(id);
+          afterWorktasksChange();
+        });
       });
     }
     // ИЗМЕНЕНО: тап — шаг цикла (cycleTaskFlag, 7 цветов по кругу), долгое нажатие — сброс
@@ -25468,13 +25473,17 @@
         else renderTaskRowView(id, tabKey, onAfterAction);
       };
       bindTapOrHold(dot, function(){
-        flushPendingTaskEdits();
-        cycleTaskFlag(id);
-        afterFlagChange();
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          cycleTaskFlag(id);
+          afterFlagChange();
+        });
       }, function(){
-        flushPendingTaskEdits();
-        clearTaskFlag(id);
-        afterFlagChange();
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          clearTaskFlag(id);
+          afterFlagChange();
+        });
       });
     }
     // часы «напоминание»: тап — выбор даты и времени (повторный тап на уже стоящем напоминании —
@@ -25490,12 +25499,16 @@
         else renderTaskRowView(id, tabKey, onAfterAction);
       };
       bindTapOrHold(reminderBtn, function(){
-        flushPendingTaskEdits();
-        openTaskReminderDialog(id, afterReminderChange);
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          openTaskReminderDialog(id, afterReminderChange);
+        });
       }, function(){
-        flushPendingTaskEdits();
-        if(clearTaskReminder(id)) afterReminderChange();
-        else openTaskReminderDialog(id, afterReminderChange);
+        taskKeepListStill(body, function(){
+          flushPendingTaskEdits();
+          if(clearTaskReminder(id)) afterReminderChange();
+          else openTaskReminderDialog(id, afterReminderChange);
+        });
       });
     }
   }
@@ -25506,6 +25519,7 @@
     var body = document.querySelector('.task-body[data-id="' + id + '"]');
     var task = getTaskById(id);
     if(!body || !task) return;
+    var expandAnchor = taskLiftIsOurs() ? taskRowAnchor(body) : null; // верх строки не должен сдвинуться при разворачивании (ТЗ 22.11)
     flushPendingTaskEdits(); // если в этот момент редактировалась другая строка — сохранить её
     setTaskRowWide(body, isBigTaskText(task.c.text) || !!expandedTaskIds[id]);
     var isProjectsTab = task.c.tab === "projects";
@@ -25534,13 +25548,15 @@
     updatePlaceholder();
     fitTaskActions(body);
 
-    editable.focus();
+    if(expandAnchor) taskFocusNoScroll(editable); else editable.focus();
     var range = document.createRange();
     range.setStart(textNode, textNode.length);
     range.collapse(true);
     var sel = window.getSelection();
     sel.removeAllRanges();
     sel.addRange(range);
+    // браузер мог сам прокрутить список к полю — возвращаем строку на место; нужный подъём над клавиатурой сделает AppKeyboard
+    if(expandAnchor){ expandAnchor.restore(); expandAnchor.stop(); }
 
     // при каждом вводе текст может перенестись на другое число строк — подгонку кнопок
     // (fitTaskActions) нужно пересчитывать вживую, а не только один раз при открытии редактирования
@@ -25564,7 +25580,13 @@
       // открыт диалог выбора файла для скрепки — не выходим из редактирования, иначе вставлять
       // картинку станет некуда (см. taskAttachDialogOpen выше)
       if(taskAttachDialogOpen) return;
-      var restoreScroll = window.Debug.guardTaskListScroll();
+      // blur от удаления узла: список пересобрали (innerHTML) — перерисовывать и «сторожить» прокрутку нечего, а сторож, созданный
+      // в середине пересборки, откатывал бы прокрутку на случайное место
+      var detached = !document.body.contains(editable);
+      var restoreScroll = detached ? function(){} : window.Debug.guardTaskListScroll();
+      var collapseAnchor = detached ? null : taskRowAnchor(body); // верх строки не должен сдвинуться при сворачивании (ТЗ 22.11)
+      // подложка под клавиатуру остаётся до конца сворачивания: иначе прокрутка зажимается и список «едет» ещё до перерисовки
+      if(!detached && window.AppKeyboard && window.AppKeyboard.holdRelease) window.AppKeyboard.holdRelease(800);
       var newText = getEditableNoteText(editable);
       // Логируем ДО setTaskText, чтобы при следующем разборе лога было видно фактическое значение
       // newText в момент blur, а не гадать по возможным причинам расхождения.
@@ -25572,9 +25594,14 @@
       setTaskText(id, newText.trim());
       editable.contentEditable = "false";
       taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
+      if(detached) return;
       setTimeout(function(){
         if(document.body.contains(body)) renderTaskRowView(id, tabKey, onAfterAction);
         restoreScroll();
+        if(collapseAnchor){
+          collapseAnchor.restore(); collapseAnchor.stop();
+          if(restoreScroll.rebase) restoreScroll.rebase(); // сторож не должен откатывать эту поправку
+        }
       }, 500);
     });
 
@@ -26074,25 +26101,17 @@
       var worktasksBtn = body.querySelector(".task-worktasks-btn");
       if(worktasksBtn){
         bindTapOrHold(worktasksBtn, function(){
-          flushPendingTaskEdits();
-          cycleTaskWorkState(id);
-          renderRowView(id);
+          taskKeepListStill(body, function(){ flushPendingTaskEdits(); cycleTaskWorkState(id); renderRowView(id); });
         }, function(){
-          flushPendingTaskEdits();
-          clearTaskWorkState(id);
-          renderRowView(id);
+          taskKeepListStill(body, function(){ flushPendingTaskEdits(); clearTaskWorkState(id); renderRowView(id); });
         });
       }
       var dot = body.querySelector(".task-flag-dot");
       if(dot){
         bindTapOrHold(dot, function(){
-          flushPendingTaskEdits();
-          cycleTaskFlag(id);
-          renderRowView(id);
+          taskKeepListStill(body, function(){ flushPendingTaskEdits(); cycleTaskFlag(id); renderRowView(id); });
         }, function(){
-          flushPendingTaskEdits();
-          clearTaskFlag(id);
-          renderRowView(id);
+          taskKeepListStill(body, function(){ flushPendingTaskEdits(); clearTaskFlag(id); renderRowView(id); });
         });
       }
       // часы «напоминание» — та же логика, что и в bindTaskRowActions выше (тап: диалог, долгое
@@ -26117,6 +26136,7 @@
       var body = document.querySelector('.task-body[data-id="' + id + '"]');
       var task = getTaskById(id);
       if(!body || !task) return;
+      var expandAnchor = taskLiftIsOurs() ? taskRowAnchor(body) : null; // верх строки не должен сдвинуться при разворачивании (ТЗ 22.11)
       flushPendingTaskEdits();
       var flagClass = taskFlagClass(task.c.flag);
       body.innerHTML =
@@ -26142,13 +26162,14 @@
       updatePlaceholder();
       fitTaskActions(body);
 
-      editable.focus();
+      if(expandAnchor) taskFocusNoScroll(editable); else editable.focus();
       var range = document.createRange();
       range.setStart(textNode, textNode.length);
       range.collapse(true);
       var sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
+      if(expandAnchor){ expandAnchor.restore(); expandAnchor.stop(); }
 
       editable.addEventListener("input", function(){
         updatePlaceholder();
@@ -26165,11 +26186,14 @@
         // открыт диалог выбора файла для скрепки — не выходим из редактирования, иначе вставлять
         // картинку станет некуда (см. taskAttachDialogOpen выше)
         if(taskAttachDialogOpen) return;
+        var detached = !document.body.contains(editable); // blur от удаления узла при пересборке — см. renderTaskRowEdit
         // На этом экране настоящий скролл-контейнер — #taskProjectArea, а не #settingsTabContent
         // (см. modals.css: .task-project-modal-body сам overflow:hidden, скроллится только
         // вложенная .task-project-area) — без явного параметра guardTaskListScroll сторожил бы не
         // тот элемент (у #settingsTabContent scrollTop тут всегда 0).
-        var restoreScroll = window.Debug.guardTaskListScroll(document.getElementById("taskProjectArea"));
+        var restoreScroll = detached ? function(){} : window.Debug.guardTaskListScroll(document.getElementById("taskProjectArea"));
+        var collapseAnchor = detached ? null : taskRowAnchor(body); // верх строки не должен сдвинуться при сворачивании (ТЗ 22.11)
+        if(!detached && window.AppKeyboard && window.AppKeyboard.holdRelease) window.AppKeyboard.holdRelease(800);
         // ГИПОТЕЗА по логу диагностики: браузер откладывает собственный "прокрутить каретку в
         // видимую область" уже ПОСЛЕ blur — и если к моменту его срабатывания сам
         // contenteditable-узел уже удалён, браузер откатывает scrollTop контейнера к 0. Проверяем:
@@ -26184,9 +26208,14 @@
         setTaskText(id, newText.trim());
         editable.contentEditable = "false";
         taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
+        if(detached) return;
         setTimeout(function(){
           if(document.body.contains(body)) renderRowView(id);
           restoreScroll();
+          if(collapseAnchor){
+            collapseAnchor.restore(); collapseAnchor.stop();
+            if(restoreScroll.rebase) restoreScroll.rebase();
+          }
         }, 500);
       });
 
@@ -26642,6 +26671,8 @@
       var tg = e.target;
       if(tg && tg.closest && tg.closest(TASK_GESTURE_IGNORE_SEL)) return;
       if(press.consume()) return;
+      // касание закрыло правку другой строки — эта задача не открывается (нужен ещё один тап)
+      if(taskTapJustClosedEditing(body)) return;
       // двойной тап и долгое нажатие — только по свёрнутой задаче; в развёрнутой (редактируемой) строке
       // тапы — это работа с текстом
       if(body.querySelector(".task-editable")) return;
@@ -26666,6 +26697,89 @@
         g2.onTap();
       }, TASK_DOUBLE_TAP_MS);
     });
+  }
+  // ---------------------------------------------------------------------
+  // УСТОЙЧИВОЕ ПОЛОЖЕНИЕ СПИСКА (ТЗ 22.11). (1) Разворачивание/сворачивание карточки не двигает задачи на экране: верх строки
+  // остаётся там, где был (растёт/сжимается только её низ). (2) Нажатие на кнопку другой строки (цвет полосы, «в работе»,
+  // напоминание…), пока правится эта, не уводит список к редактируемой. (3) Первое касание задачи после выхода из правки только
+  // закрывает правку и не открывает следующую.
+  // ---------------------------------------------------------------------
+  function taskScrollBoxOf(el){
+    return (el && el.closest && el.closest("#taskProjectArea")) || document.getElementById("settingsTabContent");
+  }
+  // Запоминает, где на экране (относительно окна списка) стоит верх строки задачи. restore() возвращает строку на то же место —
+  // сдвигает прокрутку на разницу. Если человек сам взялся за прокрутку (палец/колесо) — restore ничего не делает.
+  // Нашли строку по id заново — на случай, когда список пересобрали. stop() снимает слушатели (само снимется через 3 с).
+  function taskRowAnchor(body){
+    var api = { restore: function(){}, stop: function(){} };
+    var box = taskScrollBoxOf(body);
+    var id = (body && body.getAttribute) ? body.getAttribute("data-id") : null;
+    var row = (body && body.closest) ? (body.closest(".task-row") || body) : null;
+    if(!box || !row) return api;
+    var off = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    var userMoved = false, timer = null;
+    function mark(){ userMoved = true; }
+    var opts = { passive: true, capture: true }; // старые WebView принимают объект как capture=true — безвредно
+    box.addEventListener("touchmove", mark, opts);
+    box.addEventListener("wheel", mark, opts);
+    api.stop = function(){
+      clearTimeout(timer);
+      box.removeEventListener("touchmove", mark, true);
+      box.removeEventListener("wheel", mark, true);
+    };
+    api.restore = function(){
+      if(userMoved) return;
+      if(!document.body.contains(row)){
+        row = id ? box.querySelector('.task-row[data-id="' + id + '"]') : null;
+        if(!row) return;
+      }
+      var d = (row.getBoundingClientRect().top - box.getBoundingClientRect().top) - off;
+      if(Math.abs(d) > 0.5) box.scrollTop += d;
+    };
+    timer = setTimeout(api.stop, 3000);
+    return api;
+  }
+  // подъём строки над клавиатурой делает initTaskKeyboardLift (только там, где есть VirtualKeyboard API); без него прокрутку к
+  // полю ввода по-прежнему делает сам браузер — её не трогаем
+  function taskLiftIsOurs(){ return !!(window.AppKeyboard && navigator.virtualKeyboard); }
+  // focus() без собственной прокрутки браузера: он «центрировал» поле и сдвигал список, а подъём над клавиатурой считает приложение
+  function taskFocusNoScroll(el){
+    try{ el.focus({ preventScroll: true }); }catch(e){ el.focus(); }
+  }
+  // Строка (body) нажимает свою кнопку, а правится ДРУГАЯ строка (её поле в фокусе)? Тогда на время действия подъём над
+  // клавиатурой отключается, а положение этой строки на экране удерживается — список не «улетает» к редактируемой.
+  function taskKeepListStill(body, fn){
+    var ae = document.activeElement;
+    var other = !!(ae && ae.classList && ae.classList.contains("task-editable") && ae.isContentEditable && body && !body.contains(ae));
+    if(!other){ fn(); return; }
+    if(window.AppKeyboard && window.AppKeyboard.suspendLift) window.AppKeyboard.suspendLift(900);
+    var anchor = taskRowAnchor(body);
+    fn();
+    anchor.restore();
+    window.requestAnimationFrame ? window.requestAnimationFrame(anchor.restore) : setTimeout(anchor.restore, 16);
+    setTimeout(anchor.restore, 150);
+    setTimeout(anchor.restore, 450);
+  }
+  // Первое касание задачи, когда в этот момент правилась другая, только закрывает правку (поле теряет фокус само), а не открывает
+  // правку следующей: чтобы править её, нужно тапнуть ещё раз. Запоминаем, чьё поле было в фокусе в момент касания (blur приходит
+  // раньше click, поэтому в обработчике click уже не видно).
+  var taskEditAtDown = null, taskEditAtDownTs = 0, taskTouchDownTs = 0;
+  function noteTaskEditAtDown(fromTouch){
+    if(!fromTouch && Date.now() - taskTouchDownTs < 800) return; // мышиные события после касания — то же касание
+    if(fromTouch) taskTouchDownTs = Date.now();
+    var ae = document.activeElement;
+    taskEditAtDown = (ae && ae.classList && ae.classList.contains("task-editable") && ae.isContentEditable) ? ae : null;
+    taskEditAtDownTs = Date.now();
+  }
+  document.addEventListener("touchstart", function(){ noteTaskEditAtDown(true); }, { passive: true, capture: true });
+  document.addEventListener("mousedown", function(){ noteTaskEditAtDown(false); }, true);
+  function taskTapJustClosedEditing(body){
+    var a = taskEditAtDown;
+    if(!a || Date.now() - taskEditAtDownTs > 2000) return false;
+    if(body && body.contains(a)) return false; // тап по самой редактируемой строке
+    taskEditAtDown = null;
+    try{ if(document.activeElement === a) a.blur(); }catch(e){}
+    return true;
   }
   // свернуть задачу (после выхода из редактирования): в обычном виде строка всегда обрезана
   function taskCollapse(id){ delete expandedTaskIds[id]; }
@@ -26696,6 +26810,8 @@
   (function initTaskKeyboardLift(){
     var vk = navigator.virtualKeyboard;
     var liftNow = null;     // перерасчёт подъёма (назначается ниже, когда applyLift определена)
+    var liftSuspendedUntil = 0; // до этого момента подъём не работает (нажатие кнопки другой строки, см. taskKeepListStill)
+    var releaseHoldUntil = 0;   // до этого момента подложку под клавиатуру не снимаем (идёт сворачивание карточки, см. blur в renderTaskRowEdit)
     var snapUntil = 0;      // до этого момента строку нужно не только поднять, но и опустить вплотную к клавиатуре
     function cancelScrollGuards(){
       if(window.Debug && window.Debug.cancelTaskListScrollGuards) window.Debug.cancelTaskListScrollGuards();
@@ -26709,6 +26825,8 @@
       // фокус соседней строки откатывали бы подъём над клавиатурой, поэтому их снимают — до прокрутки списка и сразу после
       // перехода в редактирование (blur соседней строки создаёт сторожа при focus() новой).
       cancelScrollGuards: cancelScrollGuards,
+      suspendLift: function(ms){ liftSuspendedUntil = Math.max(liftSuspendedUntil, Date.now() + ms); },
+      holdRelease: function(ms){ releaseHoldUntil = Math.max(releaseHoldUntil, Date.now() + ms); },
       // Вызывается сразу после renderTaskRowEdit/renderCommentRowEdit/renderRowEdit новой строки: снимает сторожей и несколько раз
       // перерасчитывает подъём — клавиатура приходит с задержкой, а соседняя строка перерисовывается обратно в просмотр через 500 мс
       // (высота списка меняется), так что одного расчёта сразу после focus() мало.
@@ -26800,10 +26918,15 @@
       var el = activeEditable;
       if(!el) return;
       if(!document.body.contains(el)){ release(); return; } // строку перерисовали/убрали
+      if(Date.now() < liftSuspendedUntil) return;
       var box = getScrollBox(el);
       if(!box) return;
       var r = kbRect();
-      if(!r){ removeSpacer(); return; }
+      if(!r){
+        if(Date.now() < releaseHoldUntil) return; // карточка ещё сворачивается: подложку снимет таймер выхода из правки
+        removeSpacer();
+        return;
+      }
       var boxRect = box.getBoundingClientRect();
       // сколько области чтения перекрыто клавиатурой (в режиме чтения низ окна у самого края экрана
       // — перекрытие больше, чем в обычном, где снизу 47px)
@@ -26857,11 +26980,14 @@
     document.addEventListener("focusout", function(e){
       if(!isLiftEditable(e.target) && !isTitleInput(e.target)) return;
       clearTimeout(releaseTimer);
-      releaseTimer = setTimeout(function(){
+      var tryRelease = function(){
         if(isLiftEditable(document.activeElement) || isTitleInput(document.activeElement)) return;
+        var wait = releaseHoldUntil - Date.now();
+        if(wait > 0){ releaseTimer = setTimeout(tryRelease, wait + 20); return; } // карточка ещё сворачивается
         activeTitleInput = null;
         release();
-      }, RELEASE_DELAY_MS);
+      };
+      releaseTimer = setTimeout(tryRelease, RELEASE_DELAY_MS);
     });
     // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
     vk.addEventListener("geometrychange", function(){
@@ -26870,7 +26996,7 @@
       if(activeTitleInput) liftDialog();
       if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
       if(activeEditable) applyLift();
-      else removeSpacer();
+      else if(Date.now() >= releaseHoldUntil) removeSpacer();
     });
     // при наборе строка растёт (перенос на новую строку) — держим низ над клавиатурой
     document.addEventListener("input", function(e){

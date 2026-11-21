@@ -1,4 +1,5 @@
 // debug.js — общее место для отладочного кода "Графика чтения Библии".
+// Версия: 3.3 (22.11) — guardTaskListScroll: у возвращаемой функции появился rebase() (принять текущую прокрутку за исходную; нужен my.js 153.5 после поправки положения строки). Откат: debug.js 3.2.
 // Версия: 3.2 (28.10)
 // Версия: 3.0 (12.10) — структурная правка: (1) копирование в буфер переписано (`copyViaExecCommand`,
 // `showManualCopyOverlay`): на Android 5 (WebView) `navigator.clipboard.writeText` отказывает, а запасного пути
@@ -601,11 +602,15 @@
       window.removeEventListener("resize", onResize);
       if (window.visualViewport) window.visualViewport.removeEventListener("resize", onResize);
     }, 2000);
-    return function () {
+    var restoreFn = function () {
       log("restore-called", snapshot());
       if (guardState.cancelled) return;
       if (document.body.contains(container) && container.scrollTop !== savedScroll) container.scrollTop = savedScroll;
     };
+    // rebase(): принять текущую прокрутку за «правильную» — после того как приложение само поправило положение строки (my.js, taskRowAnchor),
+    // сторож не должен откатывать эту поправку к старому значению
+    restoreFn.rebase = function () { savedScroll = container.scrollTop; };
+    return restoreFn;
   }
 
   window.Debug = {
