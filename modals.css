@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.3 (22.11) — полноэкранный режим и режим чтения: полоса приоритета карточки задачи больше не скрывается (`.reading-mode-active .task-card > .task-flag-dot{display:block}`). Откат: modals.css 23.2.
    Версия: 23.2 (21.11) — задачи: `.task-body` берёт размер из `--task-font-size` (свой шаг «Аа» задач); `.task-card > .task-actions` с `margin-top:auto` — кнопки свёрнутой карточки не зависят от размера шрифта. Откат: modals.css 23.1.
    Версия: 23.1 (21.11) — карточки задач: --tc-ratio 2,113 (виджет 4×2, 1063×503 px); `.task-card-open` растёт по тексту при редактировании (как в 23.0). Откат: modals.css 23.0.
    Версия: 23.0 (21.11) — карточки задач (my.js 153.0, `taskCardize`/`fitTaskCard`): `.task-row-card`, `.task-card` (рамка, скругление, фиксированное соотношение сторон `--tc-ratio`), полоса приоритета `.task-card > .task-flag-dot` (цвет темы / красный #ff4d52 / оранжевый #ff8a3d), нижний ряд `.task-actions-l`/`.task-actions-r`, развёрнутая `.task-card-open`. Откат: modals.css 22.8.
@@ -1122,6 +1123,11 @@
      точка сдвигала бы текст точно так же, как и видимая. */
   .settings-modal-overlay.reading-mode-active .task-flag-dot{
     display:none;
+  }
+  /* У карточки задачи полоса приоритета (.task-card > .task-flag-dot) лежит поверх левого края (position:absolute) и текст не двигает —
+     в полноэкранном режиме и режиме чтения она остаётся на месте: вид карточек в этих режимах не меняется. */
+  .settings-modal-overlay.reading-mode-active .task-body.task-card > .task-flag-dot{
+    display:block;
   }
   /* ТЗ 28.09: дубликат индикатора синхронизации (.sync-status-modal-dup,
      см. выше) в режиме чтения и в полноэкранном режиме (оба вешают
