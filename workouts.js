@@ -1,5 +1,6 @@
 /* ===========================================================================
    workouts.js
+   Версия: 17.1 (21.11) — карточка «Рекорд» (рекорд нагрузки) в стиле «Пик»: кубок (без правок), линия суммы баллов за 7 дней по дням недели до рекорда, пунктир на уровне рекорда, точка-пик, значение и дата (`recCardHtml`, `loadSeriesOf`); ряд значений сохраняется в сообщении (поле `ser`, `checkLoadRecord`), у старых сообщений — условная кривая. Откат: workouts.js 17.0.
    Версия: 17.0 (16.11)
    Версия: 2.0 (28.10) — структурная правка: «Нагрузка» (метод sRPE): окно оценки после тренировки в области панели записи (`rpeCardHtml`, `saveRpe`, `pendingRecord`), запрет новой записи до ответа (`startNative` → "rpe"), баллы у каждой записи, кнопка-индикатор суммы за 7 дней слева от «1 мес.» (`weekLoad`, `#wkLoadBtn`) и краткая справка (`infoCardHtml`).
    Версия: 1.3 (28.10) — `WorkoutsTab.start()` (старт записи без экрана, для QR «Комбинированный»).
@@ -499,7 +500,9 @@
       if(e < rd){ var w = win(e); if(w > prev) prev = w; }
     });
     if(!(prev > 0) || cur <= prev) return;
-    pushNotice({ k: "srpe:" + rec.id, kind: "load", tab: "records", tk: kindOf(rec), val: cur,
+    var ser = [];
+    for(var si = LOAD_DAYS - 1; si >= 0; si--) ser.push(win(rd - si)); // сумма за 7 дней на каждый из 7 последних дней: последний — рекорд (для карточки «Рекорд»)
+    pushNotice({ k: "srpe:" + rec.id, kind: "load", tab: "records", tk: kindOf(rec), val: cur, ser: ser,
       text: "Рекорд нагрузки: " + cur + " " + pointsWord(cur) + " за " + LOAD_DAYS + " дней! Прежний рекорд — " + prev + "." });
   }
 
@@ -584,6 +587,7 @@
       ".wk-flow > *{grid-column:1 / -1;}" +
       ".wk-flow > .wk-card.wk-wg{grid-column:auto;}" +
       ".wk-card.wk-wg,.wk-flow > .wk-card.wk-wg:last-child{--s:var(--wg-w,160px);position:relative;box-sizing:border-box;width:100%;height:calc(var(--s) * 1.02);margin:0 0 calc(var(--s) * 0.04 + 8px);padding:0;border:none;border-radius:calc(var(--s) * 0.12);background:#8000ff;color:#fff;box-shadow:0 calc(var(--s) * 0.04) 0 #6a00d6;overflow:hidden;text-align:center;}" +
+      ".wk-rec > svg{position:absolute;left:0;top:0;width:100%;height:100%;display:block;}" +
       ".wk-wg-ico{position:absolute;left:50%;top:calc(var(--s) * 0.119);width:calc(var(--s) * 0.229);height:calc(var(--s) * 0.229);margin-left:calc(var(--s) * -0.1145);color:#fff;}" +
       ".wk-wg-ico svg{display:block;width:100%;height:100%;}" +
       ".wk-wg-top{position:absolute;left:5%;right:5%;top:calc(var(--s) * 0.358);font-size:calc(var(--s) * 0.1);line-height:1.2;white-space:nowrap;}" +
@@ -739,12 +743,41 @@
     if(!(v > 0)){ var m = /Рекорд нагрузки:\s*(\d+)/.exec(String(n.text || "")); v = m ? Number(m[1]) : 0; }
     return v > 0 ? v + " " + pointsWord(v) : String(n.text || "");
   }
+  // ряд для линии карточки «Рекорд»: 7 значений суммы баллов за 7 дней (последнее — рекорд); у старых сообщений поля нет — условная восходящая кривая
+  function loadSeriesOf(n){
+    var a = n && n.ser;
+    if(Array.isArray(a) && a.length === 7 && a.every(function(v){ return isFinite(Number(v)); })) return a.map(Number);
+    var peak = Number(n && n.val) > 0 ? Number(n.val) : 1;
+    return [0.6, 0.5, 0.58, 0.74, 0.68, 0.86, 1].map(function(f){ return peak * f; });
+  }
+  // карточка «Рекорд», стиль «Пик»: рисуется целиком SVG на размер карточки-виджета (180 × 184), кубок — тот же CUP_ICON_SVG
+  function recCardHtml(n, attrs){
+    var ser = loadSeriesOf(n), lo = Math.min.apply(null, ser), hi = Math.max.apply(null, ser), span = hi - lo;
+    var pts = [], i;
+    for(i = 0; i < 7; i++){
+      var y = span > 0 ? 104 - (ser[i] - lo) / span * 46 : 58;
+      pts.push((14 + i * 25).toFixed(1) + "," + y.toFixed(1));
+    }
+    var line = pts.join(" "), last = pts[6].split(",");
+    var cup = CUP_ICON_SVG.replace("<svg ", '<svg x="14" y="12" width="34" height="34" style="color:#f3eaff" ');
+    return '<div class="wk-card wk-tip wk-ach wk-wg wk-rec"' + attrs + '>' +
+      '<svg viewBox="0 0 180 184" aria-hidden="true">' + cup +
+        '<text x="56" y="36" font-size="17" fill="#e3d0ff" font-family="sans-serif">Рекорд</text>' +
+        '<polygon points="' + line + ' 164,112 14,112" fill="#9440ff"/>' +
+        '<line x1="14" y1="58" x2="164" y2="58" stroke="#e3d0ff" stroke-width="1" stroke-dasharray="3 4"/>' +
+        '<polyline points="' + line + '" fill="none" stroke="#f3eaff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="5.5" fill="#ffffff" stroke="#3a0080" stroke-width="2"/>' +
+        '<text x="14" y="142" font-size="25" font-weight="bold" fill="#ffffff" font-family="Palatino Linotype,Georgia,serif">' + esc(loadValueOf(n)) + '</text>' +
+        '<text x="14" y="166" font-size="16" fill="#e3d0ff" font-family="sans-serif">' + esc(achDateText(n.ts)) + '</text>' +
+      '</svg></div>';
+  }
   // отдельная карточка на каждое достижение последней недели; нажатие открывает кубок на нужной части и виде
   // «Награда» и «Цель достигнута» — значок вида тренировки, заголовок, название, дата; «Рекорд» — кубок, «Рекорд», баллы, дата; остальные — как были
   function achCardHtml(n){
     var tab = n.tab === "awards" ? "awards" : (n.tab === "records" ? "records" : "goals");
     var isAward = n.kind === "award", isLoad = n.kind === "load", isDone = String(n.k).indexOf("gd:") === 0;
     var attrs = ' data-tab="' + tab + '" data-kind="' + esc(kindKey(n.tk)) + '"';
+    if(isLoad) return recCardHtml(n, attrs);
     if(isAward || isLoad || isDone){
       // стиль виджета: большой значок, подпись, название (serif, жирное), дата крупно
       var ico = isLoad ? CUP_ICON_SVG : KINDS[kindKey(n.tk)].svg;
