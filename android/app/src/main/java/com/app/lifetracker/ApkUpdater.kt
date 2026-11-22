@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (22.11) — APK скачивается в несколько потоков (`DlMode.MULTI`, число потоков — настройка скачивания, по умолчанию 4); если сервер не отдаёт диапазоны, движок сам переходит на один поток. Откат: ApkUpdater.kt 2.0.
 // Версия: 2.0 (22.11) — этап 5 ТЗ «скачивание файлов»: APK скачивает общий движок ([FileDownloads], `source = APP_UPDATE`, ход виден в острове); старый код скачивания удалён. Контракт describe()/downloadedBytes сохранён. Откат: ApkUpdater.kt 1.0.
 // Версия: 1.0 (15.11) — обновление самого APK из GitHub Releases: проверка, скачивание, запуск системного установщика (ТЗ TASK_APK_SELF_UPDATE.md).
 
@@ -256,7 +257,7 @@ object ApkUpdater {
         val app = ctx.applicationContext
         val task = FileDownloads.enqueue(
             app, info.url, mapOf("User-Agent" to "LifeTracker-ApkUpdater", "Accept" to "application/octet-stream, */*"),
-            target.name, DlMode.SINGLE, 1, "",
+            target.name, DlMode.MULTI, FileDownloads.threads(app), "", // несколько потоков (число — из настройки скачивания); сервер без Range — движок сам качает в один
             source = DlSource.APP_UPDATE, silent = true, showInIsland = true,
             verify = UpdateChecks.apkVerifier(info.size, MAX_APK_BYTES) { f -> verify(app, f, info.build) },
             title = "Обновление приложения", maxBytes = MAX_APK_BYTES, dest = target
