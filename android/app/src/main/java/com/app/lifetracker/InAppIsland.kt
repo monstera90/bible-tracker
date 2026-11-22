@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 24.3 (22.11) — разрешение «Поверх других приложений»: на Xiaomi/Redmi/POCO кнопка открывает страницу разрешений именно этого приложения (редактор MIUI/HyperOS), а не общий список; запрос показывается сразу после обновления APK (не ждёт 12 часов); в запросе добавлена кнопка «Общий экран». Откат: InAppIsland.kt 24.2.
 // Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
 // Версия: 24.2 (22.11) — у скачанного файла вместо «Готово» — «Открыть»: нажатие открывает файл и убирает плашку, не нажали за 10 с — плашка исчезает. Откат: InAppIsland.kt 24.1.
 // Версия: 24.1 (22.11) — «Готово» у загрузки показывает, куда сохранён файл: «→ Загрузки» / «→ <папка>» или пометку «Папка недоступна — сохранено в «Загрузки»» (ТЗ 7.2, этап 4). Откат: InAppIsland.kt 24.0.
@@ -101,8 +102,26 @@ class InAppIsland private constructor(private val appCtx: Context) {
             return i
         }
 
-        /** Экран разрешения «Поверх других приложений» (запасной — сведения о приложении). */
-        fun openOverlaySettings(ctx: Context) {
+        /**
+         * Экран разрешения «Поверх других приложений». На Xiaomi/Redmi/POCO (HyperOS) общий экран открывается списком всех приложений,
+         * поэтому сначала — редактор разрешений именно этого приложения; дальше — стандартный экран, запасной — сведения о приложении.
+         */
+        fun openOverlaySettings(ctx: Context, standard: Boolean = false) {
+            val maker = Build.MANUFACTURER ?: ""
+            if (!standard && (maker.equals("xiaomi", true) || maker.equals("redmi", true) || maker.equals("poco", true))) {
+                try {
+                    ctx.startActivity(
+                        Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                            setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                            putExtra("extra_pkgname", ctx.packageName)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                    )
+                    return
+                } catch (e: Exception) {
+                    // редактор недоступен в этой версии оболочки — стандартный экран ниже
+                }
+            }
             try {
                 ctx.startActivity(
                     Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -784,13 +803,16 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val prefs = prefs()
         val now = System.currentTimeMillis()
         val last = prefs.getLong("askedAt", 0L)
-        if (last in 1..now && now - last < ASK_EVERY_MS) return
-        prefs.edit().putLong("askedAt", now).apply()
+        val upd = try { appCtx.packageManager.getPackageInfo(appCtx.packageName, 0).lastUpdateTime } catch (e: Exception) { 0L }
+        val updated = upd != 0L && prefs.getLong("askedForUpdate", 0L) != upd // приложение обновили с прошлого вопроса: система могла сбросить разрешение — спрашиваем сразу
+        if (!updated && last in 1..now && now - last < ASK_EVERY_MS) return
+        prefs.edit().putLong("askedAt", now).putLong("askedForUpdate", upd).apply()
         try {
             askDialog = AlertDialog.Builder(act)
                 .setTitle("Плашка таймера")
                 .setMessage("Разрешение «Поверх других приложений» (в настройках Xiaomi — «Отображение всплывающих окон») выключено: система его время от времени сбрасывает. Без него плашку сверху нельзя нажать и раскрыть. Включить?")
                 .setPositiveButton("Открыть настройки") { _, _ -> openOverlaySettings(appCtx) }
+                .setNeutralButton("Общий экран") { _, _ -> openOverlaySettings(appCtx, standard = true) }
                 .setNegativeButton("Позже", null)
                 .show()
         } catch (e: Exception) {
