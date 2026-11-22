@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (22.11) — «Открыть» висит в острове [OPEN_HOLD_MS] (10 с), потом исчезает; [holdMs]. Откат: FileDownloads.kt 1.2.
 // Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): `enqueue(handoffId)` — задача страницы; после убийства процесса такая задача доделывается в «Загрузки» (страницы, которая заберёт файл, уже нет). Откат: FileDownloads.kt 1.1.
 // Версия: 1.1 (22.11) — этап 5: `enqueue` принимает title/maxBytes/dest (обновления), `awaitFinish` — ожидание конца закачки для ApkUpdater/WebUpdater. Откат: FileDownloads.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
@@ -20,7 +21,11 @@ import java.util.concurrent.atomic.AtomicLong
 object FileDownloads {
 
     const val MAX_PARALLEL = 3 // одновременно качается не больше задач (остальные — в очереди)
-    const val DONE_HOLD_MS = 4000L // сколько секунд занятие «Готово» висит в острове
+    const val DONE_HOLD_MS = 4000L // сколько мс занятие «Готово» висит в острове (файла для открытия нет: обновления, книги)
+    const val OPEN_HOLD_MS = 10000L // сколько мс кнопка «Открыть» висит в острове; не нажали — остров исчезает
+
+    /** Сколько держать завершённую задачу в острове: с кнопкой «Открыть» — дольше. */
+    fun holdMs(t: DownloadTask): Long = if (t.openUri.isNotEmpty()) OPEN_HOLD_MS else DONE_HOLD_MS
 
     private const val PREFS = "downloads"
     private const val KEY_THREADS = "threads"
@@ -69,7 +74,7 @@ object FileDownloads {
     fun islandTasks(now: Long = System.currentTimeMillis()): List<DownloadTask> =
         list.filter {
             it.showInIsland && when (it.state) {
-                DlState.DONE -> now - it.finishedAt < DONE_HOLD_MS
+                DlState.DONE -> now - it.finishedAt < holdMs(it)
                 DlState.CANCELED -> false
                 else -> true
             }
@@ -80,7 +85,7 @@ object FileDownloads {
         list.any {
             when (it.state) {
                 DlState.QUEUED, DlState.RUNNING, DlState.PAUSED, DlState.WAITING_NET -> true
-                DlState.DONE -> it.showInIsland && now - it.finishedAt < DONE_HOLD_MS
+                DlState.DONE -> it.showInIsland && now - it.finishedAt < holdMs(it)
                 else -> false
             }
         }

@@ -337,7 +337,10 @@ object DownloadFolders {
      * Копирует готовый файл [work] в папку-дерево [tree] через SAF под свободным именем («имя (1).ext», если занято). Возвращает итоговое имя.
      * При сбое созданный документ удаляется, бросается [IOException]. Временный файл не трогает.
      */
-    fun copyInto(ctx: Context, tree: Uri, work: File, name: String): String {
+    fun copyInto(ctx: Context, tree: Uri, work: File, name: String): String = copyIntoDoc(ctx, tree, work, name).first
+
+    /** То же, что [copyInto], но возвращает ещё и Uri созданного документа (чтобы открыть его из острова). */
+    fun copyIntoDoc(ctx: Context, tree: Uri, work: File, name: String): Pair<String, Uri> {
         val resolver = ctx.contentResolver
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val taken = listNames(ctx, tree)
@@ -354,7 +357,7 @@ object DownloadFolders {
             try { DocumentsContract.deleteDocument(resolver, doc) } catch (e2: Exception) { }
             throw if (e is IOException) e else IOException(e.message ?: "Не удалось записать файл в папку")
         }
-        return finalName
+        return Pair(finalName, doc)
     }
 
     /** Создаёт пустой документ в дереве для потоковой записи ([FileSaver]); null — не вышло. */

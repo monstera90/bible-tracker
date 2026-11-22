@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — у скачанного файла вместо «Готово» — «Открыть» ([TOGGLE_OPEN]). Откат: SystemIslandLogic.kt 1.0.
 // Версия: 1.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 3: что показывает системный остров Xiaomi для загрузок.
 
 /**
@@ -22,6 +23,7 @@ object SystemIslandLogic {
     const val TOGGLE_PAUSE = 1
     const val TOGGLE_RESUME = 2
     const val TOGGLE_RETRY = 3
+    const val TOGGLE_OPEN = 4 // у «Готово» с файлом: открыть его
 
     class Info(
         val taskId: Long,
@@ -88,7 +90,7 @@ object SystemIslandLogic {
             else -> KIND_ACTIVE
         }
         val time = when (kind) {
-            KIND_DONE -> "Готово"
+            KIND_DONE -> if (t.openUri.isNotEmpty()) "Открыть" else "Готово"
             KIND_FAILED -> "Ошибка"
             else -> if (pct >= 0) "$pct %" else DownloadLogic.formatSize(done)
         }
@@ -97,7 +99,7 @@ object SystemIslandLogic {
         val toggle = when {
             kind == KIND_FAILED -> TOGGLE_RETRY
             kind == KIND_PAUSED -> TOGGLE_RESUME
-            kind == KIND_DONE -> TOGGLE_NONE
+            kind == KIND_DONE -> if (t.openUri.isNotEmpty()) TOGGLE_OPEN else TOGGLE_NONE
             t.canPause -> TOGGLE_PAUSE
             else -> TOGGLE_NONE // сервер без Range: паузы нет, остаётся «Стоп»
         }

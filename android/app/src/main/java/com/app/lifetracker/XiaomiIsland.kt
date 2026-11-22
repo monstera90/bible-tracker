@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.3 (22.11) — кнопка «Открыть» у скачанного файла в системном острове (downloadExtras, TOGGLE_OPEN). Откат: XiaomiIsland.kt 12.2.
 // Версия: 12.2 (22.11) — `downloadExtras`: системный остров загрузок (ТЗ скачивания файлов, этап 3): свёрнутый — кольцо и «45 %», раскрытый — имя, скорость, кнопки «Пауза/Продолжить/Повторить» и «Стоп». Откат: XiaomiIsland.kt 12.1.
 // Версия: 12.1 (21.11) — `downloadIconBitmap`: значок загрузки для внутреннего острова (ТЗ скачивания файлов, этап 1). Откат: XiaomiIsland.kt 12.0.
 // Версия: 12.0 (15.11)
@@ -941,6 +942,7 @@ object XiaomiIsland {
                 val (bmp, label) = when (info.toggle) {
                     SystemIslandLogic.TOGGLE_RETRY -> pauseBitmap(1f, STAGE_NORMAL, true, 0xFFE53935.toInt()) to "Повторить"
                     SystemIslandLogic.TOGGLE_RESUME -> pauseBitmap(info.fraction, STAGE_NORMAL, true, DOWNLOAD_COLOR) to "Продолжить"
+                    SystemIslandLogic.TOGGLE_OPEN -> downloadIconBitmap(1f, 96, 1) to "Открыть"
                     else -> pauseBitmap(info.fraction, STAGE_NORMAL, false, DOWNLOAD_COLOR) to "Пауза"
                 }
                 acts.putParcelable(ACTION_DL_TOGGLE, Notification.Action.Builder(Icon.createWithBitmap(bmp), label, toggle).build())

@@ -4,4 +4,6 @@
     <cache-path name="share" path="share/" />
     <!-- Скачанный APK новой сборки для установщика (ApkUpdater): files/apkupdate/. -->
     <files-path name="apk_update" path="apkupdate/" />
+    <!-- Скачанные файлы в «Загрузках» и папках пользователя: кнопка «Открыть» в острове (DownloadTarget.viewIntent). -->
+    <external-path name="downloaded" path="." />
 </paths>

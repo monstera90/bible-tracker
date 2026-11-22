@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.5 (22.11) — «Открыть» вместо «Готово» у скачанного файла: кнопка острова открывает файл, держится 10 с. Откат: DownloadService.kt 1.4.
 // Версия: 1.4 (22.11) — этап 3 (системный остров Xiaomi, ТЗ 8): уведомление службы несёт extras острова ([XiaomiIsland.downloadExtras], выбор занятия — [SystemIslandLogic]); кнопки «Пауза/Продолжить/Повторить» и «Стоп» приходят в службу; нажатие на остров открывает вкладку-источник. Откат: DownloadService.kt 1.3.
 // Версия: 1.3 (22.11) — этап 2 (Flibusta, 6.2): [finishHandoff] — готовую книгу отдаём странице ([PageHandoff]), в «Загрузки» не кладём; копия в папку «Книги», если включена. Откат: DownloadService.kt 1.2.
 // Версия: 1.2 (22.11) — этап 5: завершение обновлений (`task.dest`): [UpdateChecks.placeAndVerify], копия APK в папку обновлений, без «Загрузок». Откат: DownloadService.kt 1.1.
@@ -177,6 +178,7 @@ class DownloadService : Service() {
                 SystemIslandLogic.TOGGLE_PAUSE -> actionIntent(app, ACTION_PAUSE, info.taskId)
                 SystemIslandLogic.TOGGLE_RESUME -> actionIntent(app, ACTION_RESUME, info.taskId)
                 SystemIslandLogic.TOGGLE_RETRY -> actionIntent(app, ACTION_RETRY, info.taskId)
+                SystemIslandLogic.TOGGLE_OPEN -> openFile(app, info.taskId)
                 else -> null
             }
             val stop = if (info.kind == SystemIslandLogic.KIND_DONE) null else actionIntent(app, ACTION_STOP, info.taskId)
@@ -185,7 +187,7 @@ class DownloadService : Service() {
                 b.addExtras(island)
                 b.setContentTitle(info.name)
                 b.setContentText(info.sub)
-                b.setContentIntent(openApp(app, FileDownloads.find(info.taskId)?.originTab ?: ""))
+                b.setContentIntent((if (info.toggle == SystemIslandLogic.TOGGLE_OPEN) toggle else null) ?: openApp(app, FileDownloads.find(info.taskId)?.originTab ?: ""))
                 sig = info.signature()
                 shownId = info.taskId
             }
@@ -206,6 +208,13 @@ class DownloadService : Service() {
         } else {
             PendingIntent.getService(ctx, code, i, flags)
         }
+    }
+
+    /** Кнопка «Открыть» острова: файл открывается приложением по умолчанию. Нет файла или программы — null (остров без кнопки). */
+    private fun openFile(ctx: Context, id: Long): PendingIntent? {
+        val t = FileDownloads.find(id) ?: return null
+        val i = DownloadTarget.viewIntent(t) ?: return null
+        return PendingIntent.getActivity(ctx, (7000 + id % 1000).toInt(), i, Compat.pendingFlags())
     }
 
     /** Нажатие на остров/уведомление: приложение вперёд, сразу на вкладку-источник (если она известна). */
@@ -305,7 +314,7 @@ class DownloadService : Service() {
                 }
                 // «Готово» висит несколько секунд, потом задача исчезает; у скрытых из острова — сразу
                 for (t in all) {
-                    if (t.state == DlState.DONE && (!t.showInIsland || now - t.finishedAt >= FileDownloads.DONE_HOLD_MS)) {
+                    if (t.state == DlState.DONE && (!t.showInIsland || now - t.finishedAt >= FileDownloads.holdMs(t))) {
                         FileDownloads.remove(t)
                         speeds.remove(t.id)
                     }
@@ -437,6 +446,7 @@ class DownloadService : Service() {
             val saved = DownloadTarget.commit(applicationContext, t, work)
             t.targetLabel = saved.label
             t.targetNote = saved.note
+            t.openUri = saved.open
             e.cleanup()
             t.copying = false
             t.finishedAt = System.currentTimeMillis()

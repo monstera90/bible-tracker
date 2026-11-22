@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.3 (22.11) — [Saved.open] и [viewIntent]: куда лёг файл и как его открыть (кнопка «Открыть» в острове). Откат: DownloadTarget.kt 2.2.
 // Версия: 2.2 (22.11) — этап 2 (Flibusta, 6.2): задача страницы (`handoffId`) качается в `files/dlhandoff`; [copyBook] — копия книги в папку категории «Книги», если пользователь её включил. Откат: DownloadTarget.kt 2.1.
 // Версия: 2.1 (22.11) — этап 5: обновления (`task.dest`) качаются рядом с итоговым файлом в каталоге приложения; [copyUpdate] — необязательная копия APK в папку «Обновление приложения». Откат: DownloadTarget.kt 2.0.
 // Версия: 2.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 4: выбор папки по правилам раздела 13.3 ([DownloadRules]), запись в папку пользователя (по пути или через SAF), запасной вариант «Загрузки» с пометкой. Откат: DownloadTarget.kt 1.0.
@@ -6,11 +7,14 @@ package com.app.lifetracker
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.media.MediaScannerConnection
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 
@@ -43,7 +47,22 @@ object DownloadTarget {
     class Target(val label: String, val folder: DownloadFolders.Folder? = null, val note: String = "")
 
     /** Итог переноса: [label] — куда сохранено, [note] — пометка («Папка недоступна…») или пусто. */
-    class Saved(val label: String, val note: String)
+    class Saved(val label: String, val note: String, val open: String = "")
+
+    /** Intent «открыть скачанный файл» для задачи: null, если открывать нечего. */
+    fun viewIntent(t: DownloadTask): Intent? {
+        if (t.openUri.isEmpty()) return null
+        return Intent(Intent.ACTION_VIEW)
+            .setDataAndType(Uri.parse(t.openUri), FileSaver.mimeForName(DownloadLogic.safeName(t.fileName)))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    /** Uri файла на диске для чужого приложения (FileProvider); null — путь вне зоны провайдера (например, SD-карта). */
+    private fun uriOfFile(ctx: Context, f: File): String? = try {
+        FileProvider.getUriForFile(ctx, FileSaver.AUTHORITY, f).toString()
+    } catch (e: Exception) {
+        null
+    }
 
     /** Единая функция выбора места: правила 13.3, затем проверка, что выбранная папка доступна. */
     fun resolve(ctx: Context, fileName: String, source: DlSource): Target {
@@ -102,16 +121,16 @@ object DownloadTarget {
         val folder = target.folder
         if (folder != null) {
             try {
-                commitToFolder(ctx, folder, work, name)
-                return Saved(target.label, "")
+                val open = commitToFolder(ctx, folder, work, name)
+                return Saved(target.label, "", open)
             } catch (e: Exception) {
                 // папка не приняла файл (сорвалась запись, пропало право) — файл не теряем: «Загрузки» и пометка
-                commitToDownloads(ctx, work, name)
-                return Saved(LABEL_DOWNLOADS, NOTE_FOLDER_LOST)
+                val open = commitToDownloads(ctx, work, name)
+                return Saved(LABEL_DOWNLOADS, NOTE_FOLDER_LOST, open)
             }
         }
-        commitToDownloads(ctx, work, name)
-        return Saved(LABEL_DOWNLOADS, target.note)
+        val open = commitToDownloads(ctx, work, name)
+        return Saved(LABEL_DOWNLOADS, target.note, open)
     }
 
     /**
@@ -149,7 +168,7 @@ object DownloadTarget {
     }
 
     /** В папку пользователя: переименование, если временный файл уже лежит в ней (прямой режим), иначе копирование (путь или SAF). */
-    private fun commitToFolder(ctx: Context, folder: DownloadFolders.Folder, work: File, name: String) {
+    private fun commitToFolder(ctx: Context, folder: DownloadFolders.Folder, work: File, name: String): String {
         val dir = DownloadFolders.directDir(ctx, folder.treeUri)
         if (dir != null) {
             val finalName = DownloadLogic.uniqueName(name) { File(dir, it).exists() }
@@ -161,27 +180,29 @@ object DownloadTarget {
                 try { work.delete() } catch (e: Exception) { }
             }
             scan(ctx, dest, name)
-            return
+            return uriOfFile(ctx, dest) ?: ""
         }
-        DownloadFolders.copyInto(ctx, folder.treeUri, work, name)
+        val doc = DownloadFolders.copyIntoDoc(ctx, folder.treeUri, work, name).second
         try { work.delete() } catch (e: Exception) { }
+        return doc.toString()
     }
 
     /** В «Загрузки»: переименование, если временный файл уже в ней, иначе MediaStore / обычная запись. */
-    private fun commitToDownloads(ctx: Context, work: File, name: String) {
+    private fun commitToDownloads(ctx: Context, work: File, name: String): String {
         val dir = downloadsDir()
         if (work.parentFile?.absolutePath == dir.absolutePath) {
             val finalName = DownloadLogic.uniqueName(name) { File(dir, it).exists() }
             val dest = File(dir, finalName)
             if (!work.renameTo(dest)) throw IOException("Не удалось сохранить файл в «Загрузки»")
             scan(ctx, dest, name)
-            return
+            return uriOfFile(ctx, dest) ?: ""
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copyToMediaStore(ctx, work, name) else copyLegacy(ctx, work, name)
+        val open = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copyToMediaStore(ctx, work, name) else copyLegacy(ctx, work, name)
         try { work.delete() } catch (e: Exception) { }
+        return open
     }
 
-    private fun copyToMediaStore(ctx: Context, work: File, name: String) {
+    private fun copyToMediaStore(ctx: Context, work: File, name: String): String {
         val resolver = ctx.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
@@ -195,6 +216,7 @@ object DownloadTarget {
             out.use { o -> work.inputStream().use { it.copyTo(o, 1 shl 16) } }
             val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
             resolver.update(uri, done, null, null)
+            return uri.toString()
         } catch (e: Exception) {
             try { resolver.delete(uri, null, null) } catch (e2: Exception) { }
             throw if (e is IOException) e else IOException(e.message ?: "Не удалось сохранить файл")
@@ -202,7 +224,7 @@ object DownloadTarget {
     }
 
     /** Android 5–9 без «Доступа ко всем файлам»: запись в «Загрузки» напрямую с обычным разрешением (как у [FileSaver]). */
-    private fun copyLegacy(ctx: Context, work: File, name: String) {
+    private fun copyLegacy(ctx: Context, work: File, name: String): String {
         val granted = ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!granted && MainActivity.instance?.requestStoragePermissionBlocking() != true) throw IOException("Нет разрешения на запись в «Загрузки»")
         val dir = downloadsDir()
@@ -210,6 +232,7 @@ object DownloadTarget {
         val dest = File(dir, DownloadLogic.uniqueName(name) { File(dir, it).exists() })
         work.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o, 1 shl 16) } }
         scan(ctx, dest, name)
+        return uriOfFile(ctx, dest) ?: ""
     }
 
     private fun scan(ctx: Context, f: File, name: String) {

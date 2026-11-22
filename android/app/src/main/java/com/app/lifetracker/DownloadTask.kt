@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (22.11) — `openUri`: куда лёг скачанный файл (для кнопки «Открыть» в острове). Откат: DownloadTask.kt 1.3.
 // Версия: 1.3 (22.11) — этап 2 (Flibusta, 6.2): `handoffId` — результат отдаётся странице (библиотека «Книги»), а не кладётся в «Загрузки». Откат: DownloadTask.kt 1.2.
 // Версия: 1.2 (22.11) — этап 5: `title` (имя занятия в острове), `maxBytes` (предел размера), `dest` (итоговый файл обновления). Откат: DownloadTask.kt 1.1.
 // Версия: 1.1 (22.11) — этап 4: `targetNote` (пометка «Папка недоступна…» для карточки «Готово»). Откат: DownloadTask.kt 1.0.
@@ -40,6 +41,7 @@ class DownloadTask(val id: Long, val url: String, val headers: Map<String, Strin
     @Volatile var source = DlSource.USER
     @Volatile var category = "other" // ключ раздела 13 ТЗ (этап 4)
     @Volatile var targetLabel = "" // «Загрузки» или название папки — для подписи «Готово»
+    @Volatile var openUri = "" // Uri готового файла (строкой), чтобы открыть из острова; пусто — открывать нечего, остаётся «Готово»
     @Volatile var targetNote = "" // пометка вместо «→ папка», если пришлось взять запасное место («Папка недоступна — сохранено в «Загрузки»»)
     @Volatile var verify: ((File) -> String?)? = null // проверка готового файла: null — всё хорошо, иначе текст ошибки (этап 5)
     @Volatile var silent = false // без диалога «Обычное / В N потоков»

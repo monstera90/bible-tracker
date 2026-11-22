@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — «Открыть» вместо «Готово» у скачанного файла, удержание 10 с. Откат: SystemIslandLogicTest.kt 1.0.
 // Версия: 1.0 (22.11) — тесты выбора занятия для системного острова Xiaomi (ТЗ TZ_downloads.md, этап 3). Запуск: ./gradlew testDebugUnitTest
 
 import org.junit.Assert.assertEquals
@@ -123,5 +124,28 @@ class SystemIslandLogicTest {
         assertEquals(a, SystemIslandLogic.info(listOf(t))!!.signature())
         t.done.set(46)
         assertNotEquals(a, SystemIslandLogic.info(listOf(t))!!.signature())
+    }
+
+    @Test fun doneWithFileShowsOpen() {
+        val t = task(1, DlState.DONE, 100)
+        t.openUri = "content://media/external/downloads/1"
+        val i = SystemIslandLogic.info(listOf(t))!!
+        assertEquals("Открыть", i.time)
+        assertEquals(SystemIslandLogic.TOGGLE_OPEN, i.toggle)
+        assertEquals(SystemIslandLogic.KIND_DONE, i.kind)
+    }
+
+    @Test fun doneWithoutFileStaysReady() {
+        val i = SystemIslandLogic.info(listOf(task(1, DlState.DONE, 100)))!!
+        assertEquals("Готово", i.time)
+        assertEquals(SystemIslandLogic.TOGGLE_NONE, i.toggle)
+    }
+
+    @Test fun openHoldsTenSeconds() {
+        val a = task(1, DlState.DONE, 100)
+        a.openUri = "content://x"
+        val b = task(2, DlState.DONE, 100)
+        assertEquals(10000L, FileDownloads.holdMs(a))
+        assertEquals(4000L, FileDownloads.holdMs(b))
     }
 }

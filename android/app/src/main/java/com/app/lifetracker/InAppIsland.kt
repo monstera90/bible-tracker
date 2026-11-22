@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
+// Версия: 24.2 (22.11) — у скачанного файла вместо «Готово» — «Открыть»: нажатие открывает файл и убирает плашку, не нажали за 10 с — плашка исчезает. Откат: InAppIsland.kt 24.1.
 // Версия: 24.1 (22.11) — «Готово» у загрузки показывает, куда сохранён файл: «→ Загрузки» / «→ <папка>» или пометку «Папка недоступна — сохранено в «Загрузки»» (ТЗ 7.2, этап 4). Откат: InAppIsland.kt 24.0.
 // Версия: 24.0 (21.11) — занятие «загрузка файла» (`K_DOWNLOAD`, `downloadItem`; ТЗ TZ_downloads.md, этап 1); порядок занятий задаёт `IslandOrder` (помодоро → музыка → видео → загрузки → таймеры → секундомер → тренировка); ряд значков карточки листается вбок (`stripScroll`). Откат: InAppIsland.kt 23.1.
 // Версия: 23.1 (15.11)
@@ -1170,6 +1171,16 @@ class InAppIsland private constructor(private val appCtx: Context) {
         return IslandOrder.sort(out) { IslandOrder.rank(it.kind, it.onDone != null) }
     }
 
+    /** Открыть скачанный файл приложением по умолчанию; нет подходящей программы — короткое сообщение. */
+    private fun openDownloaded(t: DownloadTask) {
+        val i = DownloadTarget.viewIntent(t) ?: return
+        try {
+            appCtx.startActivity(i)
+        } catch (e: Exception) {
+            try { android.widget.Toast.makeText(appCtx, "Нет приложения, которое откроет этот файл", android.widget.Toast.LENGTH_SHORT).show() } catch (e2: Exception) { }
+        }
+    }
+
     /** Занятие «загрузка файла» (ТЗ скачивания, 7.1): капсула — значок с кольцом, имя файла и процент; карточка — прогресс, скорость, потоки. */
     private fun downloadItem(t: DownloadTask, now: Long): Item {
         val ctx = appCtx
@@ -1181,15 +1192,20 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val done = t.doneBytes
         val pct = DownloadLogic.percent(done, total)
         val frac = if (pct >= 0) pct / 100f else 1f
-        m.samples = if (total > 0) listOf("88 %", "100 %", "Готово") else listOf("888 МБ", "Готово")
+        val canOpen = t.state == DlState.DONE && t.openUri.isNotEmpty()
+        val doneWord = if (canOpen) "Открыть" else "Готово"
+        m.samples = if (total > 0) listOf("88 %", "100 %", doneWord) else listOf("888 МБ", doneWord)
         if (t.state == DlState.DONE) {
             m.iconKey = "dl-done"
             m.iconFn = { s -> XiaomiIsland.downloadIconBitmap(1f, s, 1) }
-            m.time = "Готово"
+            m.time = doneWord
             m.big = m.time
             m.sub = if (t.targetNote.isNotEmpty()) t.targetNote else if (t.targetLabel.isNotEmpty()) "→ " + t.targetLabel else t.title.ifEmpty { t.fileName }
-            m.onDone = { FileDownloads.dismiss(ctx, id) }
-            m.onStop = m.onDone
+            val dismiss: () -> Unit = { FileDownloads.dismiss(ctx, id) }
+            // нажатие на «Открыть»: файл открывается и плашка убирается; не нажали — плашка исчезает сама через FileDownloads.OPEN_HOLD_MS
+            val open: () -> Unit = { openDownloaded(t); dismiss() }
+            m.onDone = if (canOpen) open else dismiss
+            m.onStop = dismiss
             return m
         }
         val failed = t.state == DlState.FAILED
