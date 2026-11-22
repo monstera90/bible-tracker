@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (22.11) — этап 5: завершение обновлений (`task.dest`): [UpdateChecks.placeAndVerify], копия APK в папку обновлений, без «Загрузок». Откат: DownloadService.kt 1.1.
 // Версия: 1.1 (22.11) — этап 4: место записи выбирает `DownloadTarget.newWorkFile(app, t)`; итог переноса ([DownloadTarget.Saved]) — в `targetLabel`/`targetNote`. Откат: DownloadService.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
@@ -294,6 +295,28 @@ class DownloadService : Service() {
 
     /** Закачка завершена: проверка (для обновлений), перенос в «Загрузки», «Готово». */
     private fun finish(t: DownloadTask, e: DownloadEngine, work: java.io.File) {
+        val dest = t.dest
+        if (dest != null) { // обновление приложения или веб-части: файл на место, проверка по итоговому пути, в «Загрузки» не попадает
+            val err = UpdateChecks.placeAndVerify(work, dest, t.verify)
+            if (err != null) {
+                e.cleanup()
+                t.error = err
+                t.state = DlState.FAILED
+                return
+            }
+            var saved = DownloadTarget.Saved("", "")
+            if (t.source == DlSource.APP_UPDATE) {
+                t.copying = true
+                saved = try { DownloadTarget.copyUpdate(applicationContext, t, dest) } catch (ex: Exception) { DownloadTarget.Saved("", DownloadTarget.NOTE_UPDATE_COPY_LOST) }
+                t.copying = false
+            }
+            t.targetLabel = saved.label
+            t.targetNote = saved.note
+            e.cleanup()
+            t.finishedAt = System.currentTimeMillis()
+            t.state = DlState.DONE
+            return
+        }
         val verify = t.verify
         if (verify != null) {
             val err = try { verify(work) } catch (ex: Exception) { "Файл не прошёл проверку" }

@@ -1,8 +1,10 @@
 package com.app.lifetracker
+// Версия: 2.0 (22.11) — этап 5 ТЗ «скачивание файлов»: zip веб-части скачивает общий движок ([FileDownloads], `source = WEB_BUNDLE`; в «Загрузки» и папки не попадает), старый `download` удалён; в острове — только при ручной проверке. Откат: WebUpdater.kt 1.2.
 // Версия: 1.2 (15.11) — `minApk` в version.json: если установленный versionCode меньше, веб-часть не скачивается и страница получает `needApk`; в describe() ещё `latest` (последняя версия в репозитории) и `lastCheckAt`.
 // Версия: 1.1 (24.10) — счётчик завершённых проверок `checkSeq` (в describe() и для вкладки «Проверка обновлений»).
 // Версия: 1.0 (16.10) — activeBundleReadOnly(): чтение активного бандла без изменения состояния (для ScanActivity).
 
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import org.json.JSONArray
@@ -89,6 +91,12 @@ class WebUpdater(
         /** versionCode установленного APK (задаёт MainActivity до проверки; 0 — неизвестно, ограничение `minApk` тогда не действует). */
         @Volatile
         var installedApk: Long = 0L
+
+        /** Контекст приложения для общего движка скачивания (задаёт MainActivity; без него веб-часть не скачивается). */
+        @Volatile
+        var appContext: Context? = null
+
+        private const val AWAIT_MAX_MS = 30L * 60L * 1000L // дольше получаса ждать закачку не будем
 
         /** Нужная сборка APK, если последняя веб-часть требует оболочку новее установленной (0 — не требует). */
         @Volatile
@@ -332,7 +340,7 @@ class WebUpdater(
             }
             lastCheckAt = now
             val result = try {
-                doCheck()
+                doCheck(force)
             } catch (e: Exception) {
                 "ошибка: ${e.message ?: e.javaClass.simpleName}"
             }
@@ -346,7 +354,7 @@ class WebUpdater(
         }
     }
 
-    private fun doCheck(): String {
+    private fun doCheck(force: Boolean): String {
         webRoot.mkdirs()
         needApk = 0L
         val info = JSONObject(fetchText(VERSION_URL, 64 * 1024))
@@ -377,13 +385,15 @@ class WebUpdater(
             return "для версии $ver нужно обновить приложение (нужна сборка $minApk, у вас $installedApk)"
         }
 
-        val part = File(webRoot, "$ver.zip.part")
+        val zip = File(webRoot, "$ver.zip")
+        val part = File(webRoot, "$ver.zip.part") // рабочий файл движка и его служебный файл частей
         try {
-            val actual = download(url, part)
-            if (actual != sha) throw IOException("sha256 не совпал (скачано $actual, ожидалось $sha)")
-            installFromZip(part, ver)
+            downloadZip(url, zip, sha, force)
+            installFromZip(zip, ver)
         } finally {
+            zip.delete()
             part.delete()
+            File(part.path + ".json").delete()
         }
         synchronized(LOCK) {
             val st = load()
@@ -425,33 +435,22 @@ class WebUpdater(
         }
     }
 
-    /** Скачивает файл, считая SHA-256 на лету. Возвращает хэш (hex, нижний регистр). */
-    private fun download(url: String, target: File): String {
-        val c = open(url)
-        try {
-            val code = c.responseCode
-            if (code != 200) throw IOException("HTTP $code при скачивании архива")
-            val len = c.contentLengthLong
-            if (len > MAX_ZIP_BYTES) throw IOException("архив слишком большой ($len байт)")
-            val md = MessageDigest.getInstance("SHA-256")
-            var total = 0L
-            c.inputStream.use { input ->
-                FileOutputStream(target).use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        total += n
-                        if (total > MAX_ZIP_BYTES) throw IOException("архив больше ${MAX_ZIP_BYTES / 1048576} МБ")
-                        md.update(buf, 0, n)
-                        out.write(buf, 0, n)
-                    }
-                }
-            }
-            return md.digest().joinToString("") { "%02x".format(it) }
-        } finally {
-            c.disconnect()
-        }
+    /**
+     * Скачивает zip веб-части общим движком ([FileDownloads]): один поток, без диалога, предел [MAX_ZIP_BYTES]; SHA-256 сверяется хуком
+     * задачи по готовому файлу. [showInIsland] — только если проверку запустил пользователь (автопроверка при запуске остров не показывает).
+     * Блокирует поток до конца; не вышло — [IOException] с причиной.
+     */
+    private fun downloadZip(url: String, dest: File, sha: String, showInIsland: Boolean) {
+        val ctx = appContext ?: throw IOException("нет контекста приложения для скачивания")
+        val task = FileDownloads.enqueue(
+            ctx, url, mapOf("User-Agent" to "LifeTracker-WebUpdater", "Accept" to "*/*"),
+            dest.name, DlMode.SINGLE, 1, "",
+            source = DlSource.WEB_BUNDLE, silent = true, showInIsland = showInIsland,
+            verify = UpdateChecks.shaVerifier(sha, MAX_ZIP_BYTES),
+            title = "Обновление веб-части", maxBytes = MAX_ZIP_BYTES, dest = dest
+        )
+        val res = FileDownloads.awaitFinish(ctx, task, AWAIT_MAX_MS)
+        if (!res.ok) throw IOException(res.error)
     }
 
     // ---------------------------------------------------------------- распаковка

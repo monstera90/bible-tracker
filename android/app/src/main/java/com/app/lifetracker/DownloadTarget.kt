@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (22.11) — этап 5: обновления (`task.dest`) качаются рядом с итоговым файлом в каталоге приложения; [copyUpdate] — необязательная копия APK в папку «Обновление приложения». Откат: DownloadTarget.kt 2.0.
 // Версия: 2.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 4: выбор папки по правилам раздела 13.3 ([DownloadRules]), запись в папку пользователя (по пути или через SAF), запасной вариант «Загрузки» с пометкой. Откат: DownloadTarget.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: место сохранения всегда «Загрузки»; сортировка по папкам (раздел 13) добавится на этапе 4 без переделки движка.
 
@@ -35,6 +36,7 @@ object DownloadTarget {
 
     const val LABEL_DOWNLOADS = "Загрузки"
     const val NOTE_FOLDER_LOST = "Папка недоступна — сохранено в «Загрузки»"
+    const val NOTE_UPDATE_COPY_LOST = "Копию в папку сохранить не удалось"
 
     /** Куда положить файл: [label] — подпись для «Готово» («Загрузки» или название папки); [folder] — папка пользователя или null («Загрузки»); [note] — пометка, если пришлось взять запасное место. */
     class Target(val label: String, val folder: DownloadFolders.Folder? = null, val note: String = "")
@@ -68,6 +70,11 @@ object DownloadTarget {
      * доступная по пути) либо в каталоге приложения (тогда [commit] скопирует готовый файл).
      */
     fun newWorkFile(ctx: Context, task: DownloadTask): File {
+        val fixed = task.dest // обновления: рабочая копия остаётся в каталоге приложения (проверка и установка требуют обычного файла)
+        if (fixed != null) {
+            fixed.parentFile?.mkdirs()
+            return File(fixed.path + ".part")
+        }
         val name = DownloadLogic.safeName(task.fileName)
         val target = resolve(ctx, task.fileName, task.source)
         val userDir = target.folder?.let { DownloadFolders.directDir(ctx, it.treeUri) }
@@ -103,6 +110,31 @@ object DownloadTarget {
         }
         commitToDownloads(ctx, work, name)
         return Saved(LABEL_DOWNLOADS, target.note)
+    }
+
+    /**
+     * Обновление приложения (ТЗ 6.5): рабочий файл [task].dest уже на месте и проверен. Если категория «Обновление приложения» включена
+     * и выбрана — ещё и копия туда; иначе ничего не остаётся (в «Загрузки» не кладём никогда). Сорвалась копия — обновление не страдает:
+     * только пометка в карточке «Готово». Возвращает [Saved] (label пусто — копии нет).
+     */
+    fun copyUpdate(ctx: Context, task: DownloadTask, file: File): Saved {
+        val choice = DownloadRules.choose(task.fileName, DlSource.APP_UPDATE, DownloadFolders.config(ctx))
+        val folder = DownloadFolders.folderFor(ctx, choice) ?: return Saved("", "")
+        if (!DownloadFolders.isWritable(ctx, folder.treeUri)) return Saved("", NOTE_UPDATE_COPY_LOST)
+        val name = DownloadLogic.safeName(task.fileName)
+        return try {
+            val dir = DownloadFolders.directDir(ctx, folder.treeUri)
+            if (dir != null) {
+                val dest = File(dir, DownloadLogic.uniqueName(name) { File(dir, it).exists() })
+                file.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o, 1 shl 16) } }
+                scan(ctx, dest, name)
+            } else {
+                DownloadFolders.copyInto(ctx, folder.treeUri, file, name)
+            }
+            Saved(folder.label, "")
+        } catch (e: Exception) {
+            Saved("", NOTE_UPDATE_COPY_LOST)
+        }
     }
 
     /** В папку пользователя: переименование, если временный файл уже лежит в ней (прямой режим), иначе копирование (путь или SAF). */

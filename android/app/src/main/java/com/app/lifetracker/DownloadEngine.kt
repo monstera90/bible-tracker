@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 5: предел размера `task.maxBytes` (обновления: по заявленному размеру и по ходу чтения). Откат: DownloadEngine.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
 import java.io.File
@@ -17,6 +18,9 @@ import javax.net.ssl.SSLException
 
 /** Сервер ответил кодом ошибки. */
 class HttpStatusException(val code: Int) : IOException("HTTP $code")
+
+/** Файл больше предела [DownloadTask.maxBytes]. */
+class TooBigException : IOException("Файл слишком большой")
 
 /** Чем кончилась работа движка над задачей. */
 enum class DlOutcome { DONE, PAUSED, CANCELED, NET_LOST, FAILED }
@@ -264,6 +268,7 @@ class DownloadEngine(
         try {
             if (!task.probed) prepare(task, netUp)?.let { return it }
             stopped()?.let { return it }
+            if (task.maxBytes > 0 && task.totalBytes > task.maxBytes) return fail(TooBigException().message ?: "Файл слишком большой")
             if (task.mode == DlMode.MULTI) {
                 if (task.supportsRange && task.totalBytes > 0 && DownloadLogic.splitRanges(task.totalBytes, task.threads).size >= 2) return runMulti()
                 if (task.totalBytes > 0 && !task.supportsRange) task.note = NOTE_NO_RANGE
@@ -286,6 +291,9 @@ class DownloadEngine(
             stopped()?.let { return it }
             try {
                 return singleOnce()
+            } catch (e: TooBigException) {
+                cleanup()
+                return fail(e.message ?: "Файл слишком большой")
             } catch (e: HttpStatusException) {
                 stopped()?.let { return it }
                 if (e.code == 416 && !restarted) { // диапазон за пределами файла: качаем заново
@@ -341,6 +349,7 @@ class DownloadEngine(
                     raf.write(buf, 0, n)
                     pos += n
                     task.done.set(pos)
+                    if (task.maxBytes > 0 && pos > task.maxBytes) throw TooBigException()
                     if (task.control != DownloadTask.CTL_RUN) break
                     val now = System.currentTimeMillis()
                     if (now - lastMeta > META_EVERY_MS) {

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 5: предел размера `maxBytes` (по заявленному размеру и по ходу чтения). Откат: DownloadEngineTest.kt 1.0.
 // Версия: 1.0 (21.11) — тесты движка скачивания на локальном HTTP-сервере JDK (ТЗ TZ_downloads.md, этап 1, раздел 9.1). Запуск: ./gradlew testDebugUnitTest
 
 import com.sun.net.httpserver.HttpExchange
@@ -164,5 +165,33 @@ class DownloadEngineTest {
         assertEquals(data.size.toLong(), p.total)
         assertTrue(p.acceptRanges)
         assertEquals("\"v1\"", p.etag)
+    }
+
+    @Test fun tooBigByDeclaredSizeIsRejected() {
+        val t = task(DlMode.SINGLE)
+        t.maxBytes = 1024 * 1024L
+        val (o, f) = run(t)
+        assertEquals(DlOutcome.FAILED, o)
+        assertEquals("Файл слишком большой", t.error)
+        assertFalse(f.exists())
+    }
+
+    @Test fun tooBigWhileReadingIsRejectedAndCleaned() {
+        val t = task(DlMode.SINGLE)
+        t.maxBytes = 1024 * 1024L
+        t.probed = true // разведки не было: размер неизвестен, предел ловится по ходу чтения
+        t.totalBytes = -1L
+        val (o, f) = run(t)
+        assertEquals(DlOutcome.FAILED, o)
+        assertEquals("Файл слишком большой", t.error)
+        assertFalse(f.exists())
+    }
+
+    @Test fun updateSizeWithinLimitDownloads() {
+        val t = task(DlMode.SINGLE)
+        t.maxBytes = 10L * 1024 * 1024
+        val (o, f) = run(t)
+        assertEquals(DlOutcome.DONE, o)
+        assertArrayEquals(data, f.readBytes())
     }
 }

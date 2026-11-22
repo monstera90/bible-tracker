@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.7 (22.11) — `WebUpdater.appContext` задаётся при создании (общий движок скачивания, ТЗ TZ_downloads.md, этап 5). Откат: MainActivity.kt 18.6.
 // Версия: 18.6 (22.11) — вкладка «Сохранение загрузок»: системное окно выбора папки для типа файла (`downloadFolderLauncher`, `pickDownloadFolder`; ТЗ TZ_downloads.md, этап 4). Откат: MainActivity.kt 18.5.
 // Версия: 18.5 (21.11) — главный WebView: `setDownloadListener` → `DownloadLauncher` (скачивание http/https самим приложением, ТЗ TZ_downloads.md, этап 1). Откат: MainActivity.kt 18.4.
 // Версия: 18.4 (17.11) — главный WebView подключён к длинному скриншоту ([InnerScrollCapture.install]): кнопка «Прокрутка» в плашке снимка экрана была неактивна, потому что страница прокручивает внутренний блок, а не сам WebView. Откат: MainActivity.kt 18.3.
@@ -420,6 +421,7 @@ class MainActivity : ComponentActivity() {
         SharedInbox.cleanStale(applicationContext)
 
         // Live-update: до загрузки страницы выбираем бандл (скачанный или встроенный) и применяем ожидающую версию.
+        WebUpdater.appContext = applicationContext // общий движок скачивания (ТЗ скачивания, этап 5)
         webUpdater = WebUpdater(File(filesDir, "web"), { readBuiltinVersion() })
         WebUpdater.installedApk = ApkUpdater.installedCode(applicationContext)
         val bundle = try {

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (22.11) — этап 5: `title` (имя занятия в острове), `maxBytes` (предел размера), `dest` (итоговый файл обновления). Откат: DownloadTask.kt 1.1.
 // Версия: 1.1 (22.11) — этап 4: `targetNote` (пометка «Папка недоступна…» для карточки «Готово»). Откат: DownloadTask.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
@@ -9,7 +10,7 @@ enum class DlState { QUEUED, RUNNING, PAUSED, WAITING_NET, DONE, FAILED, CANCELE
 
 enum class DlMode { SINGLE, MULTI }
 
-/** Откуда задача: пользователь, обновление APK, веб-часть приложения (этап 5; сейчас всегда USER). */
+/** Откуда задача: пользователь, обновление APK, веб-часть приложения (обновления — этап 5, silent и без папок пользователя, ТЗ 6.5). */
 enum class DlSource { USER, APP_UPDATE, WEB_BUNDLE }
 
 /**
@@ -41,6 +42,9 @@ class DownloadTask(val id: Long, val url: String, val headers: Map<String, Strin
     @Volatile var targetNote = "" // пометка вместо «→ папка», если пришлось взять запасное место («Папка недоступна — сохранено в «Загрузки»»)
     @Volatile var verify: ((File) -> String?)? = null // проверка готового файла: null — всё хорошо, иначе текст ошибки (этап 5)
     @Volatile var silent = false // без диалога «Обычное / В N потоков»
+    @Volatile var title = "" // имя занятия в острове вместо имени файла («Обновление приложения»)
+    @Volatile var maxBytes = 0L // предел размера (0 — без предела): больше — ошибка «Файл слишком большой» (обновления)
+    @Volatile var dest: File? = null // обновления: итоговый файл в каталоге приложения (рабочая копия), а не «Загрузки»/папка пользователя
     @Volatile var showInIsland = true
     @Volatile var note = "" // пояснение для второй строки карточки («Сервер не поддерживает потоки»)
     @Volatile var activeThreads = 1 // сколько потоков качает прямо сейчас

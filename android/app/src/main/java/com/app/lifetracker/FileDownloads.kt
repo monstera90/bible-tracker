@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 5: `enqueue` принимает title/maxBytes/dest (обновления), `awaitFinish` — ожидание конца закачки для ApkUpdater/WebUpdater. Откат: FileDownloads.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
 import android.content.Context
@@ -101,7 +102,10 @@ object FileDownloads {
         source: DlSource = DlSource.USER,
         silent: Boolean = false,
         showInIsland: Boolean = true,
-        verify: ((File) -> String?)? = null
+        verify: ((File) -> String?)? = null,
+        title: String = "",
+        maxBytes: Long = 0L,
+        dest: File? = null
     ): DownloadTask {
         restore(ctx) // сначала поднять записанные прежним процессом задачи, иначе запись ниже их затрёт
         val t = DownloadTask(seq.incrementAndGet(), url, headers)
@@ -113,6 +117,9 @@ object FileDownloads {
         t.silent = silent
         t.showInIsland = showInIsland
         t.verify = verify
+        t.title = title
+        t.maxBytes = maxBytes
+        t.dest = dest
         t.startedAt = System.currentTimeMillis()
         if (probe != null) {
             t.totalBytes = probe.total
@@ -120,11 +127,62 @@ object FileDownloads {
             t.etag = probe.etag
             t.probed = probe.error.isEmpty()
         }
-        t.category = DownloadTarget.categoryOf(fileName)
+        t.category = if (source == DlSource.APP_UPDATE) DownloadRules.KEY_UPDATE else DownloadTarget.categoryOf(fileName)
         list.add(t)
         persist(ctx)
         DownloadService.ensure(ctx)
         return t
+    }
+
+    /** Чем кончилось ожидание задачи ([awaitFinish]): [ok] — файл скачан и проверен; иначе [error] — причина для страницы «Система». */
+    class Wait(val ok: Boolean, val error: String)
+
+    private const val AWAIT_POLL_MS = 300L
+    private const val AWAIT_FAILED_HOLD_MS = 10L * 60L * 1000L // ошибка в острове висит: пользователь может нажать «повторить»
+
+    /**
+     * Блокирует поток (не главный!) до конца задачи [t]: нужен обновлениям, у которых после скачивания идёт своя цепочка
+     * (установщик, распаковка). Ошибка у задачи, показанной в острове, не конец: её можно повторить кнопкой острова — ждём
+     * [AWAIT_FAILED_HOLD_MS]; у скрытой задачи ошибка — сразу итог (задача убирается). Отмена в острове — итог «отменено».
+     * Не уложились в [giveUpMs] — задача отменяется. [onTick] — раз в 0,3 с (ход для страницы «Система»).
+     */
+    fun awaitFinish(ctx: Context, t: DownloadTask, giveUpMs: Long, onTick: (DownloadTask) -> Unit = {}): Wait {
+        val begin = System.currentTimeMillis()
+        var failedSince = 0L
+        var lastKick = 0L
+        while (true) {
+            val now = System.currentTimeMillis()
+            onTick(t)
+            val st = t.state
+            if (st == DlState.DONE) return Wait(true, "")
+            if (st == DlState.CANCELED || (find(t.id) == null && st != DlState.FAILED)) return Wait(false, "Скачивание отменено")
+            if (st == DlState.FAILED) {
+                if (!t.showInIsland) {
+                    val e = t.error.ifEmpty { "Ошибка скачивания" }
+                    dismiss(ctx, t.id)
+                    return Wait(false, e)
+                }
+                if (failedSince == 0L) failedSince = now
+                if (find(t.id) == null) return Wait(false, t.error.ifEmpty { "Ошибка скачивания" })
+                if (now - failedSince > AWAIT_FAILED_HOLD_MS) {
+                    val e = t.error.ifEmpty { "Ошибка скачивания" }
+                    dismiss(ctx, t.id)
+                    return Wait(false, e)
+                }
+            } else {
+                failedSince = 0L
+            }
+            if (now - begin > giveUpMs) {
+                cancel(ctx, t.id)
+                return Wait(false, "Не удалось скачать за отведённое время")
+            }
+            // служба не поднялась (запуск из фона не разрешён) — пробуем ещё раз
+            if (st == DlState.QUEUED && !DownloadService.active && now - lastKick > 5000L) {
+                lastKick = now
+                DownloadService.ensure(ctx)
+            }
+            try { Thread.sleep(AWAIT_POLL_MS) } catch (e: InterruptedException) { return Wait(false, "Скачивание прервано") }
+        }
     }
 
     // ---------- команды ----------

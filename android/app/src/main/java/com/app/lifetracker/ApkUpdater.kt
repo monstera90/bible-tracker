@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (22.11) — этап 5 ТЗ «скачивание файлов»: APK скачивает общий движок ([FileDownloads], `source = APP_UPDATE`, ход виден в острове); старый код скачивания удалён. Контракт describe()/downloadedBytes сохранён. Откат: ApkUpdater.kt 1.0.
 // Версия: 1.0 (15.11) — обновление самого APK из GitHub Releases: проверка, скачивание, запуск системного установщика (ТЗ TASK_APK_SELF_UPDATE.md).
 
 import android.app.Activity
@@ -13,7 +14,6 @@ import androidx.core.content.pm.PackageInfoCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -29,7 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     (его в workflow задаёт номер запуска: -PversionCode=${{ github.run_number }}).
  *  2. Автопроверка при запуске и возврате в приложение — не чаще раза в [MIN_GAP_MS]; кнопка «Проверка обновлений» проверяет принудительно.
  *     Если сборка новее и о ней ещё не отказывались, MainActivity показывает диалог «Скачать / Позже»; отказ запоминается до выхода следующей сборки.
- *  3. Скачивание в files/apkupdate/ (без DownloadManager: прогресс виден странице), проверка размера и [verify] (тот же пакет, нужный versionCode).
+ *  3. Скачивание — общим движком загрузок ([FileDownloads], источник APP_UPDATE, без диалога выбора способа, один поток) в files/apkupdate/;
+ *     ход виден в плавающем острове и странице «Система». Проверка размера и [verify] (тот же пакет, нужный versionCode) — хуком задачи.
+ *     Если категория «Обновление приложения» включена и выбрана папка — после проверки копия ложится и туда; в «Загрузках» ничего не остаётся.
  *  4. Установка: интент ACTION_VIEW через FileProvider. На Android 8+ сначала нужно разрешение «Установка неизвестных приложений»: если его нет,
  *     открываются настройки, пользователь включает и нажимает «Установить» ещё раз. Тихой установки нет: системное подтверждение обязательно.
  * Обновление встанет поверх установленного только при той же подписи (ключ в секретах workflow менять нельзя).
@@ -42,6 +44,7 @@ object ApkUpdater {
 
     const val MIN_GAP_MS = 3L * 60L * 60L * 1000L
     private const val MAX_APK_BYTES = 300L * 1024L * 1024L
+    private const val AWAIT_MAX_MS = 60L * 60L * 1000L // дольше часа ждать закачку не будем
     private const val CONNECT_TIMEOUT_MS = 15_000
     private const val READ_TIMEOUT_MS = 30_000
     private const val PREFS = "apk_updater"
@@ -249,40 +252,25 @@ object ApkUpdater {
             return target
         }
         target.delete()
-        val part = File(d, target.name + ".part")
-        val c = open(info.url)
-        try {
-            val code = c.responseCode
-            if (code != 200) throw IOException("HTTP $code при скачивании")
-            var total = 0L
-            FileOutputStream(part).use { out ->
-                c.inputStream.use { input ->
-                    val buf = ByteArray(32 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        total += n
-                        downloadedBytes = total
-                        if (total > MAX_APK_BYTES) throw IOException("файл слишком большой")
-                    }
-                }
+        if (!UpdateChecks.urlAllowed(info.url, DOWNLOAD_PREFIX)) throw IOException("адрес скачивания не из $DOWNLOAD_PREFIX")
+        val app = ctx.applicationContext
+        val task = FileDownloads.enqueue(
+            app, info.url, mapOf("User-Agent" to "LifeTracker-ApkUpdater", "Accept" to "application/octet-stream, */*"),
+            target.name, DlMode.SINGLE, 1, "",
+            source = DlSource.APP_UPDATE, silent = true, showInIsland = true,
+            verify = UpdateChecks.apkVerifier(info.size, MAX_APK_BYTES) { f -> verify(app, f, info.build) },
+            title = "Обновление приложения", maxBytes = MAX_APK_BYTES, dest = target
+        )
+        val res = FileDownloads.awaitFinish(app, task, AWAIT_MAX_MS) { t ->
+            downloadedBytes = t.doneBytes
+            if (t.state == DlState.FAILED) { // ошибка видна в острове (там можно «повторить»): страница показывает её же
+                installNote = "ошибка: " + t.error.ifEmpty { "ошибка скачивания" }
+            } else if (installNote.startsWith("ошибка")) {
+                installNote = ""
             }
-            if (info.size > 0L && total != info.size) throw IOException("скачано $total байт из ${info.size}")
-        } catch (e: Exception) {
-            part.delete()
-            throw e
-        } finally {
-            c.disconnect()
         }
-        if (!part.renameTo(target)) {
-            part.delete()
-            throw IOException("не удалось сохранить файл")
-        }
-        if (!verify(ctx, target, info.build)) {
-            target.delete()
-            throw IOException("скачанный файл не подходит (другой пакет или версия)")
-        }
+        if (!res.ok) throw IOException(res.error)
+        downloadedBytes = target.length()
         return target
     }
 

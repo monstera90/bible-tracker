@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
 // Версия: 24.1 (22.11) — «Готово» у загрузки показывает, куда сохранён файл: «→ Загрузки» / «→ <папка>» или пометку «Папка недоступна — сохранено в «Загрузки»» (ТЗ 7.2, этап 4). Откат: InAppIsland.kt 24.0.
 // Версия: 24.0 (21.11) — занятие «загрузка файла» (`K_DOWNLOAD`, `downloadItem`; ТЗ TZ_downloads.md, этап 1); порядок занятий задаёт `IslandOrder` (помодоро → музыка → видео → загрузки → таймеры → секундомер → тренировка); ряд значков карточки листается вбок (`stripScroll`). Откат: InAppIsland.kt 23.1.
 // Версия: 23.1 (15.11)
@@ -1175,7 +1176,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val id = t.id
         val m = Item("dl:" + t.id, K_DOWNLOAD)
         m.tabKey = t.originTab
-        m.name = t.fileName
+        m.name = t.title.ifEmpty { t.fileName } // обновления — «Обновление приложения» / «Обновление веб-части»
         val total = t.totalBytes
         val done = t.doneBytes
         val pct = DownloadLogic.percent(done, total)
@@ -1186,7 +1187,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             m.iconFn = { s -> XiaomiIsland.downloadIconBitmap(1f, s, 1) }
             m.time = "Готово"
             m.big = m.time
-            m.sub = if (t.targetNote.isNotEmpty()) t.targetNote else if (t.targetLabel.isNotEmpty()) "→ " + t.targetLabel else t.fileName
+            m.sub = if (t.targetNote.isNotEmpty()) t.targetNote else if (t.targetLabel.isNotEmpty()) "→ " + t.targetLabel else t.title.ifEmpty { t.fileName }
             m.onDone = { FileDownloads.dismiss(ctx, id) }
             m.onStop = m.onDone
             return m
