@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.8 (22.11) — задачи: (1) в режиме правки абзацы видны так же, как в обычном виде (красная строка у первой строки абзаца: `taskEditFill`/`bindTaskEditParas`, `<span class="ed-para">` с `::before` 1ch в modals.css; текст, каретка и выделение не меняются); (2) крестик удаления — не плашка, а ещё одна кнопка ряда справа от «Копировать» (`taskShowDeleteBtn`, `.task-delete-btn`): обычно её нет, появляется после долгого нажатия на задачу, пропадает при касании мимо. Откат: my.js 153.7.
    Версия: 153.7 (22.11) — задачи: (1) «домик» на вкладках задач и комментариев (`#taskFabHomeStub`) — кнопка: прокручивает список вниз (начальный экран); (2) подложка под клавиатуру (`liftSpacer`) после конца ввода/сворачивания клавиатуры больше не снимается по таймеру (список дёргался): пустое место под задачей остаётся, пока не уйдёт с экрана при прокрутке, тогда тихо снимается (`retireSpacer`); (3) кнопки внутри строки («Копировать», «В работе» и др.), меняющие свою иконку прямо в обработчике, больше не открывают задачу на правку: нажатие определяется по пути события, а не по `e.target` (`taskEventOnIgnored`). Откат: my.js 153.6.
    Версия: 153.6 (22.11) — вкладка «Сохранение загрузок» (`set2s_17`, кнопка `settingsTabSet2Btn17`, модуль `downloadfolders.js`, `renderSettingsTabDlFolders`; ТЗ TZ_downloads.md, этап 4, раздел 13): язычок режима колеса рядом с «Системой» (регистрация везде, где есть `WHEEL_SYSTEM_TAB_KEY`; `DLFOLDERS_TAB_KEY`/`DLFOLDERS_TAB_BTN_ID`). Откат: my.js 153.5.
    Версия: 153.5 (22.11) — карточки задач: (1) разворачивание/сворачивание не двигает задачи на экране (верх строки остаётся на месте: `taskRowAnchor`, `focus` без собственной прокрутки браузера, подложка под клавиатуру держится до конца сворачивания — `AppKeyboard.holdRelease`); (2) нажатие цвета полосы/«в работе»/напоминания у другой строки во время правки не уводит список к редактируемой (`taskKeepListStill`, `AppKeyboard.suspendLift`; blur от удаления узла при пересборке больше не ставит сторожа прокрутки); (3) первое касание задачи после правки только закрывает правку, не открывая следующую (`taskTapJustClosedEditing`). Откат: my.js 153.4.
@@ -25537,6 +25538,158 @@
     }
   }
 
+  // ---------------------------------------------------------------------
+  // КРАСНАЯ СТРОКА В РЕЖИМЕ ПРАВКИ (ТЗ 22.11). В обычном виде первая строка абзаца (после пустой строки или заголовка, см.
+  // formatObsidianHtml) сдвинута на 1ch; в поле правки лежит сырой текст, поэтому там сдвиг рисуем так же, как в заметках
+  // (`.cm-md-para-start`): первая строка абзаца обёрнута в <span class="ed-para"> с псевдоэлементом ::before шириной 1ch.
+  // Псевдоэлемент — не узел DOM: текст (getEditableNoteText), каретка и выделение не меняются. Разметку абзацев после
+  // правок поддерживает taskEditParasSync (не во время набора слова с клавиатуры — только когда ввод завершён).
+  // ---------------------------------------------------------------------
+  // номера строк, с которых начинается абзац: те же правила, что в formatObsidianHtml (обычная строка после пустой/заголовка/начала)
+  function taskParaLineSet(text){
+    var set = {};
+    var lines = String(text == null ? "" : text).split("\n");
+    for(var i = 0; i < lines.length; i++){
+      var line = lines[i];
+      if(line.trim() === "") continue;
+      if(/^(#{1,3})(\s+)/.test(line) || /^(\s*>+ ?)/.test(line) || /^(\s*)([-*])(\s+)/.test(line) || /^(\s*)(\d{1,4}[.)])(\s+)/.test(line)) continue;
+      var prev = i > 0 ? lines[i - 1] : null;
+      if(prev == null || prev.trim() === "" || /^(#{1,3})(\s+)/.test(prev)) set[i] = true;
+    }
+    return set;
+  }
+  // кладёт текст в поле правки: по узлу на строку, первая строка абзаца — внутри .ed-para; возвращает последний текстовый узел
+  // (куда ставить каретку). Склейка всех узлов == исходный текст.
+  function taskEditFill(editable, text){
+    while(editable.firstChild) editable.removeChild(editable.firstChild);
+    text = String(text == null ? "" : text);
+    if(text === ""){
+      var anchor = document.createTextNode(EMPTY_ANCHOR_CHAR);
+      editable.appendChild(anchor);
+      return anchor;
+    }
+    var paras = taskParaLineSet(text);
+    var lines = text.split("\n");
+    var last = null;
+    for(var i = 0; i < lines.length; i++){
+      var seg = i < lines.length - 1 ? lines[i] + "\n" : lines[i];
+      if(seg === "") continue; // пустой хвост после последнего \n — отдельного узла не нужно (каретка встанет после \n)
+      var node = document.createTextNode(seg);
+      if(paras[i]){
+        var sp = document.createElement("span");
+        sp.className = "ed-para";
+        sp.appendChild(node);
+        editable.appendChild(sp);
+      } else editable.appendChild(node);
+      last = node;
+    }
+    return last || editable.appendChild(document.createTextNode(EMPTY_ANCHOR_CHAR));
+  }
+  // разметка абзацев в поле соответствует тексту? (каждый .ed-para стоит ровно на первой строке абзаца и не захватывает вторую строку)
+  function taskEditParasOk(editable, text){
+    var want = taskParaLineSet(text);
+    var got = {}, line = 0, ok = true;
+    function walk(node, inPara){
+      if(!ok) return;
+      if(node.nodeType === 3){
+        var v = node.nodeValue.split(EMPTY_ANCHOR_CHAR).join("");
+        if(inPara && v.replace(/\n$/, "").indexOf("\n") !== -1){ ok = false; return; } // span растянулся на несколько строк
+        line += v.split("\n").length - 1;
+        return;
+      }
+      if(node.nodeType !== 1) return;
+      if(node.tagName === "BR"){ line++; return; }
+      var para = node.classList && node.classList.contains("ed-para");
+      if(para){
+        var before = taskEditTextBefore(editable, node);
+        var startsLine = before === "" || /\n$/.test(before);
+        if(!startsLine){ ok = false; return; }
+        got[line] = true;
+      }
+      var kids = node.childNodes;
+      for(var i = 0; i < kids.length; i++) walk(kids[i], inPara || para);
+    }
+    var top = editable.childNodes;
+    for(var i = 0; i < top.length; i++) walk(top[i], false);
+    if(!ok) return false;
+    var k;
+    for(k in want) if(!got[k]) return false;
+    for(k in got) if(!want[k]) return false;
+    return true;
+  }
+  function taskEditTextBefore(editable, node){
+    try{
+      var r = document.createRange();
+      r.selectNodeContents(editable);
+      r.setEndBefore(node);
+      return r.toString().split(EMPTY_ANCHOR_CHAR).join("");
+    }catch(e){ return ""; }
+  }
+  function taskEditOffsetOf(editable, node, off){
+    try{
+      var r = document.createRange();
+      r.selectNodeContents(editable);
+      r.setEnd(node, off);
+      return r.toString().split(EMPTY_ANCHOR_CHAR).join("").length;
+    }catch(e){ return -1; }
+  }
+  // пересобирает поле под актуальный текст, не сдвигая каретку/выделение (позиции — в символах текста)
+  function taskEditRebuild(editable){
+    var sel = window.getSelection ? window.getSelection() : null;
+    var a = -1, b = -1;
+    if(sel && sel.rangeCount > 0 && editable.contains(sel.anchorNode) && editable.contains(sel.focusNode)){
+      a = taskEditOffsetOf(editable, sel.anchorNode, sel.anchorOffset);
+      b = taskEditOffsetOf(editable, sel.focusNode, sel.focusOffset);
+    }
+    var text = getEditableNoteText(editable);
+    var lastNode = taskEditFill(editable, text);
+    if(a < 0 || b < 0 || !sel) return;
+    function place(off){ // первый узел, в котором off лежит строго внутри; на границе — начало следующего узла (после красной строки)
+      var walker = document.createTreeWalker(editable, NodeFilter.SHOW_TEXT, null, false);
+      var n, acc = 0, lastT = null;
+      while((n = walker.nextNode())){
+        var len = n.nodeValue.split(EMPTY_ANCHOR_CHAR).join("").length;
+        if(off < acc + len) return { node: n, offset: Math.max(0, Math.min(n.nodeValue.length, off - acc)) };
+        acc += len;
+        lastT = n;
+      }
+      lastT = lastT || lastNode;
+      return { node: lastT, offset: lastT.nodeValue.length };
+    }
+    try{
+      var pa = place(a), pb = (b === a) ? pa : place(b);
+      var r = document.createRange();
+      r.setStart(pa.node, pa.offset);
+      r.setEnd(pb.node, pb.offset);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      if(sel.extend && (a !== b)){ // направление выделения сохраняем
+        sel.removeAllRanges();
+        var r1 = document.createRange(); r1.setStart(pa.node, pa.offset); r1.collapse(true);
+        sel.addRange(r1);
+        sel.extend(pb.node, pb.offset);
+      }
+    }catch(e){}
+  }
+  // вешается на поле правки один раз после taskEditFill: следит, чтобы абзацы совпадали с текстом
+  function bindTaskEditParas(editable){
+    var composing = false, timer = null;
+    function sync(){
+      timer = null;
+      if(composing || !editable.isConnected || editable.contentEditable !== "true") return;
+      if(document.activeElement !== editable) return;
+      if(taskEditParasOk(editable, getEditableNoteText(editable))) return;
+      taskEditRebuild(editable);
+    }
+    function later(ms){ clearTimeout(timer); timer = setTimeout(sync, ms); }
+    editable.addEventListener("compositionstart", function(){ composing = true; clearTimeout(timer); });
+    editable.addEventListener("compositionend", function(){ composing = false; later(0); });
+    editable.addEventListener("input", function(e){
+      if(composing || (e && e.isComposing)) return;
+      later(120);
+    });
+  }
+
   // редактирование текста задачи — без отдельной дискеты сохранения: задача сохраняется сама, как
   // только поле теряет фокус.
   function renderTaskRowEdit(id, tabKey, onAfterAction){
@@ -25562,8 +25715,8 @@
       '</span>';
     var editable = document.getElementById("taskEditable_" + id);
     if(!editable) return;
-    var textNode = document.createTextNode(task.c.text ? task.c.text : EMPTY_ANCHOR_CHAR);
-    editable.appendChild(textNode);
+    var textNode = taskEditFill(editable, task.c.text); // красная строка абзацев — как в обычном виде (ТЗ 22.11)
+    bindTaskEditParas(editable);
 
     function updatePlaceholder(){
       var empty = getEditableNoteText(editable).length === 0;
@@ -26176,8 +26329,8 @@
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);
       if(!editable) return;
-      var textNode = document.createTextNode(task.c.text ? task.c.text : EMPTY_ANCHOR_CHAR);
-      editable.appendChild(textNode);
+      var textNode = taskEditFill(editable, task.c.text); // красная строка абзацев — как в обычном виде (ТЗ 22.11)
+      bindTaskEditParas(editable);
 
       function updatePlaceholder(){
         var empty = getEditableNoteText(editable).length === 0;
@@ -26663,6 +26816,65 @@
       onYes();
     }, { label: "Удалить задачу", single: true });
   }
+  // Кнопка «крестик» (удалить задачу насовсем) — обычная кнопка ряда `.task-actions` справа от «Копировать»
+  // (у архива копирования нет — тогда в конец ряда). Обычно её в строке нет: появляется после долгого нажатия на
+  // задачу и пропадает при касании в любом другом месте или при перерисовке строки. Одна на экран.
+  var taskDeleteBtnDismiss = null;
+  function taskHideDeleteBtn(){
+    if(!taskDeleteBtnDismiss) return;
+    var f = taskDeleteBtnDismiss;
+    taskDeleteBtnDismiss = null;
+    f();
+  }
+  function taskShowDeleteBtn(body, onDelete){
+    if(!body || !body.isConnected || typeof onDelete !== "function") return false;
+    var actions = body.querySelector(".task-actions");
+    if(!actions) return false;
+    taskHideDeleteBtn(); // у другой строки крестик уже не нужен
+    if(actions.querySelector(".task-delete-btn")) return true;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "task-icon-btn task-delete-btn";
+    btn.title = "Удалить задачу";
+    btn.setAttribute("aria-label", "Удалить задачу");
+    btn.innerHTML = CROSS_SMALL_ICON_SVG;
+    var copy = actions.querySelector(".task-copy-btn, .review-task-copy-btn");
+    if(copy && copy.parentNode) copy.parentNode.insertBefore(btn, copy.nextSibling);
+    else (actions.querySelector(".task-actions-l") || actions).appendChild(btn);
+    var gone = false;
+    function detach(){
+      if(gone) return;
+      gone = true;
+      document.removeEventListener("touchstart", onOutside, true);
+      document.removeEventListener("mousedown", onOutside, true);
+      if(taskDeleteBtnDismiss === dismiss) taskDeleteBtnDismiss = null;
+    }
+    function dismiss(){
+      var had = !gone;
+      detach();
+      if(had && btn.parentNode) btn.parentNode.removeChild(btn);
+      if(had && body.isConnected) fitTaskActions(body);
+    }
+    // касание мимо крестика убирает его; с небольшой задержкой — чтобы кнопки рядом не «поехали» между нажатием и отпусканием
+    function onOutside(e){
+      if(e.target === btn || (btn.contains && btn.contains(e.target))) return;
+      setTimeout(dismiss, 300);
+    }
+    btn.addEventListener("mousedown", function(e){ e.preventDefault(); }); // фокус не отнимаем
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      detach();
+      onDelete();
+    });
+    taskDeleteBtnDismiss = dismiss;
+    setTimeout(function(){
+      if(gone) return;
+      document.addEventListener("touchstart", onOutside, true);
+      document.addEventListener("mousedown", onOutside, true);
+    }, 0);
+    fitTaskActions(body);
+    return true;
+  }
   function bindTaskRowGestures(body, id, cfg){
     if(!body) return;
     body.__taskGest = cfg || null;
@@ -26684,7 +26896,9 @@
         try{ if(navigator.vibrate) navigator.vibrate(12); }catch(e){}
         var open = function(){
           if(!body.isConnected) return;
-          openTaskDeleteBubble(info.x, info.y, body, g.onDelete);
+          // крестик — ещё одна кнопка ряда справа от «Копировать» (ТЗ 22.11); плашка — только запасной вариант,
+          // если у строки нет ряда кнопок
+          if(!taskShowDeleteBtn(body, g.onDelete)) openTaskDeleteBubble(info.x, info.y, body, g.onDelete);
         };
         if(info.via === "context"){ open(); return; }
         // плашку открываем, когда палец уже отпущен: иначе «клик» от отпускания сочтётся тапом мимо
