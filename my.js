@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.7 (22.11) — задачи: (1) «домик» на вкладках задач и комментариев (`#taskFabHomeStub`) — кнопка: прокручивает список вниз (начальный экран); (2) подложка под клавиатуру (`liftSpacer`) после конца ввода/сворачивания клавиатуры больше не снимается по таймеру (список дёргался): пустое место под задачей остаётся, пока не уйдёт с экрана при прокрутке, тогда тихо снимается (`retireSpacer`); (3) кнопки внутри строки («Копировать», «В работе» и др.), меняющие свою иконку прямо в обработчике, больше не открывают задачу на правку: нажатие определяется по пути события, а не по `e.target` (`taskEventOnIgnored`). Откат: my.js 153.6.
    Версия: 153.6 (22.11) — вкладка «Сохранение загрузок» (`set2s_17`, кнопка `settingsTabSet2Btn17`, модуль `downloadfolders.js`, `renderSettingsTabDlFolders`; ТЗ TZ_downloads.md, этап 4, раздел 13): язычок режима колеса рядом с «Системой» (регистрация везде, где есть `WHEEL_SYSTEM_TAB_KEY`; `DLFOLDERS_TAB_KEY`/`DLFOLDERS_TAB_BTN_ID`). Откат: my.js 153.5.
    Версия: 153.5 (22.11) — карточки задач: (1) разворачивание/сворачивание не двигает задачи на экране (верх строки остаётся на месте: `taskRowAnchor`, `focus` без собственной прокрутки браузера, подложка под клавиатуру держится до конца сворачивания — `AppKeyboard.holdRelease`); (2) нажатие цвета полосы/«в работе»/напоминания у другой строки во время правки не уводит список к редактируемой (`taskKeepListStill`, `AppKeyboard.suspendLift`; blur от удаления узла при пересборке больше не ставит сторожа прокрутки); (3) первое касание задачи после правки только закрывает правку, не открывая следующую (`taskTapJustClosedEditing`). Откат: my.js 153.4.
    Версия: 153.4 (22.11) — кнопка тегов на вкладках задач заменена фильтром по цвету полосы (корешка): «Все» + цвета, которые есть на вкладке (в т. ч. «Цвет темы»), выбор помнится по вкладкам (`bibleTaskColorFilter_v1`), новая задача при выбранном цвете получает его. Фильтра по тегам больше нет (теги остались на карточках и в QR). Откат: my.js 153.3.
@@ -1965,8 +1966,18 @@
         homeStub.id = "taskFabHomeStub";
         homeStub.className = "mdeditor-fab-btn task-project-fab-home";
         homeStub.tabIndex = -1;
-        homeStub.setAttribute("aria-disabled", "true");
+        homeStub.title = "В конец списка";
+        homeStub.setAttribute("aria-label", "В конец списка");
         homeStub.innerHTML = READER_HOME_ICON_SVG;
+        // ТЗ 22.11: «домик» на вкладках задач ведёт вниз списка — это и есть начальный экран (список открывается прокрученным вниз).
+        // Не отнимает фокус у правящейся строки (иначе клавиатура закроется и строка свернётся).
+        homeStub.addEventListener("mousedown", function(e){ e.preventDefault(); });
+        homeStub.addEventListener("click", function(){
+          var sc = document.getElementById("settingsTabContent");
+          if(!sc) return;
+          var top = Math.max(0, sc.scrollHeight - sc.clientHeight);
+          try{ sc.scrollTo({ top: top, behavior: "smooth" }); }catch(err){ sc.scrollTop = top; }
+        });
         addFab.parentNode.insertBefore(homeStub, addFab);
       }
       if(homeStub) homeStub.classList.add("visible");
@@ -26615,6 +26626,23 @@
   var TASK_DOUBLE_TAP_MS = 350;
   var TASK_LONG_PRESS_MS = 500;
     var TASK_GESTURE_IGNORE_SEL = "a, button, input, textarea, .task-actions, .task-img-wrap, .task-flag-dot";
+  // Нажатие пришлось на кнопку/ссылку/значок внутри строки? Смотрим не на e.target (кнопка «Копировать», «В работе» и др. меняют свою
+  // иконку прямо в своём обработчике: к моменту, когда клик дошёл до строки, e.target уже оторван от кнопки и closest() её не находит —
+  // строка ошибочно открывалась на правку), а на путь события, он определён в момент нажатия и от перерисовки не зависит.
+  function taskEventOnIgnored(e){
+    var tg = e.target;
+    if(tg && tg.closest && tg.closest(TASK_GESTURE_IGNORE_SEL)) return true;
+    var path = null;
+    try{ path = e.composedPath ? e.composedPath() : null; }catch(err){}
+    if(path){
+      for(var i = 0; i < path.length; i++){
+        var el = path[i];
+        if(el === e.currentTarget) break;
+        if(el && el.matches && el.matches(TASK_GESTURE_IGNORE_SEL)) return true;
+      }
+    }
+    return false;
+  }
   function taskGestureReadingMode(){
     var ov = document.getElementById("settingsModalOverlay");
     return !!(ov && ov.classList.contains("reading-mode-active"));
@@ -26681,8 +26709,7 @@
     body.addEventListener("click", function(e){
       var g = body.__taskGest;
       if(!g) return;
-      var tg = e.target;
-      if(tg && tg.closest && tg.closest(TASK_GESTURE_IGNORE_SEL)) return;
+      if(taskEventOnIgnored(e)) return;
       if(press.consume()) return;
       // касание закрыло правку другой строки — эта задача не открывается (нужен ещё один тап)
       if(taskTapJustClosedEditing(body)) return;
@@ -26907,11 +26934,38 @@
       var r = vk.boundingRect;
       return (r && r.height > 0) ? r : null;
     }
+    // ТЗ 22.11: после конца ввода / сворачивания клавиатуры подложку НЕ убираем сразу — иначе прокрутка зажимается и список дёргается.
+    // Под задачей остаётся пустое место; как только человек прокрутил список так, что это место ушло с экрана, подложка тихо
+    // снимается (из-за того, что она ниже экрана, ничего не сдвигается) — и вернуться к пустому месту прокруткой уже нельзя.
+    var spacerWatchBox = null, spacerWatchFn = null;
+    function stopSpacerWatch(){
+      if(spacerWatchBox && spacerWatchFn){ try{ spacerWatchBox.removeEventListener("scroll", spacerWatchFn, false); }catch(e){} }
+      spacerWatchBox = null;
+      spacerWatchFn = null;
+    }
     function removeSpacer(){
+      stopSpacerWatch();
       if(liftSpacer && liftSpacer.parentNode) liftSpacer.parentNode.removeChild(liftSpacer);
       liftSpacer = null;
     }
+    // подложка целиком ниже видимой части окна (или её уже нет в документе)
+    function spacerOffscreen(){
+      if(!liftSpacer || !liftSpacer.parentNode || !document.body.contains(liftSpacer)) return true;
+      var br = liftSpacer.parentNode.getBoundingClientRect();
+      return liftSpacer.getBoundingClientRect().top >= br.bottom - 1;
+    }
+    function retireSpacer(){
+      if(!liftSpacer) return;
+      var box = liftSpacer.parentNode;
+      if(!box || !document.body.contains(box)){ removeSpacer(); return; }
+      if(spacerWatchFn) return; // уже ждём
+      spacerWatchBox = box;
+      spacerWatchFn = function(){ if(spacerOffscreen()) removeSpacer(); };
+      box.addEventListener("scroll", spacerWatchFn, false);
+      if(spacerOffscreen()) removeSpacer();
+    }
     function setSpacer(box, px){
+      stopSpacerWatch(); // снова правка — подложка нужна, как прежде
       if(!liftSpacer || liftSpacer.parentNode !== box){
         removeSpacer();
         liftSpacer = document.createElement("div");
@@ -26922,7 +26976,7 @@
       liftSpacer.style.height = Math.round(px) + "px";
     }
     function release(){
-      removeSpacer();
+      retireSpacer();
       clearDialogLift();
       activeEditable = null;
       try{ vk.overlaysContent = false; }catch(e){}
@@ -26937,7 +26991,7 @@
       var r = kbRect();
       if(!r){
         if(Date.now() < releaseHoldUntil) return; // карточка ещё сворачивается: подложку снимет таймер выхода из правки
-        removeSpacer();
+        retireSpacer();
         return;
       }
       var boxRect = box.getBoundingClientRect();
@@ -27009,7 +27063,7 @@
       if(activeTitleInput) liftDialog();
       if(activeEditable && !document.body.contains(activeEditable)){ release(); return; }
       if(activeEditable) applyLift();
-      else if(Date.now() >= releaseHoldUntil) removeSpacer();
+      else if(Date.now() >= releaseHoldUntil) retireSpacer();
     });
     // при наборе строка растёт (перенос на новую строку) — держим низ над клавиатурой
     document.addEventListener("input", function(e){
