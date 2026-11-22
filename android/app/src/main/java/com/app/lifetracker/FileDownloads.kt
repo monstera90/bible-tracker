@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): `enqueue(handoffId)` — задача страницы; после убийства процесса такая задача доделывается в «Загрузки» (страницы, которая заберёт файл, уже нет). Откат: FileDownloads.kt 1.1.
 // Версия: 1.1 (22.11) — этап 5: `enqueue` принимает title/maxBytes/dest (обновления), `awaitFinish` — ожидание конца закачки для ApkUpdater/WebUpdater. Откат: FileDownloads.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
@@ -105,7 +106,8 @@ object FileDownloads {
         verify: ((File) -> String?)? = null,
         title: String = "",
         maxBytes: Long = 0L,
-        dest: File? = null
+        dest: File? = null,
+        handoffId: String = ""
     ): DownloadTask {
         restore(ctx) // сначала поднять записанные прежним процессом задачи, иначе запись ниже их затрёт
         val t = DownloadTask(seq.incrementAndGet(), url, headers)
@@ -120,6 +122,7 @@ object FileDownloads {
         t.title = title
         t.maxBytes = maxBytes
         t.dest = dest
+        t.handoffId = handoffId
         t.startedAt = System.currentTimeMillis()
         if (probe != null) {
             t.totalBytes = probe.total

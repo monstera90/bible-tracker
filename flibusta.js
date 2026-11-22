@@ -1,3 +1,4 @@
+// Версия: 1.1 (22.11) — этап 2 ТЗ TZ_downloads.md (раздел 6.2): в приложении Android (мост версии 44) книга скачивается общим движком приложения (окно «Обычное / В N потоков», ход в плавающем острове), файл забирается по ./__dl/<id> и сохраняется в библиотеку «Книги»; при сбое вместо «Открыть ссылку в браузере» — «Повторить». Без нового моста — прежний fetch. Откат: flibusta.js 1.0.
 // flibusta.js — подключение к OPDS-каталогу (READER_PLAN.md, Этап E, шаг 17,
 // 13.09.2026). Подход как в существующих читалках на Android (Moon+ Reader,
 // FBReader): пользователь один раз вводит адрес OPDS-каталога (по умолчанию
@@ -413,35 +414,51 @@
         }
       }
 
+      // Книга из готового буфера: fb2 внутри zip (частый формат отдачи у OPDS-каталогов) — распаковываем один .fb2 из архива тем же
+      // MiniZip.extractAllFiles, что и при ручной загрузке .zip книг (см. handleImportBooksFile в my.js) — сам .zip как книгу не сохраняем.
+      function saveBuffer(entry, link, buf){
+        var ext = extFromLink(link);
+        if(ext === "fb2.zip"){
+          if(!window.MiniZip || !window.MiniZip.extractAllFiles){
+            throw new Error("Модуль ZIP (minizip.js) не загружен.");
+          }
+          return window.MiniZip.extractAllFiles(buf).then(function(files){
+            var fb2 = files.filter(function(f){ return /\.fb2$/i.test(f.path); })[0];
+            if(!fb2) throw new Error("В .zip не найден файл .fb2.");
+            return saveBookFile(sanitizeBookFileName(entry.title) + ".fb2", fb2.data);
+          });
+        }
+        var fname = sanitizeBookFileName(entry.title) + "." + ext;
+        return saveBookFile(fname, new Uint8Array(buf));
+      }
+
+      function reportSaved(result){
+        if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
+        setListStatus(result.added ?
+          ("Книга сохранена: «" + result.name + "».") :
+          ("Такая книга уже была загружена раньше (файл «" + result.name + "»)."), false);
+      }
+
+      // Приложение Android (мост версии 44+): скачивает общий движок приложения (окно «Обычное / В N потоков», ход в плавающем острове,
+      // CORS и смешанный контент не мешают). Старая оболочка и браузер — прежний путь через fetch (ТЗ TZ_downloads.md, этап 2, раздел 6.2).
+      function nativeDl(){
+        var b = window.LifeTrackerNative;
+        return (b && typeof b.downloadStart === "function" && typeof b.downloadStatus === "function" &&
+                typeof b.downloadRelease === "function") ? b : null;
+      }
+
       function downloadBook(entry, link){
-        var href = resolveUrl(link.href, feedUrl); // оригинальный адрес — для fetch ниже оборачивается прокси, а вот window.open в catch (см. ниже) намеренно использует ИМЕННО его, не через прокси
+        var href = resolveUrl(link.href, feedUrl); // оригинальный адрес — для fetch ниже оборачивается прокси; в приложении прокси не нужен (у нативных запросов нет CORS)
+        var nb = nativeDl();
+        if(nb){ downloadBookNative(nb, entry, link, href); return; }
         setListStatus("Скачивание «" + entry.title + "»…", false);
         fetch(applyProxy(href)).then(function(res){
           if(!res.ok) throw new Error("Сервер ответил HTTP " + res.status);
           return res.arrayBuffer();
         }).then(function(buf){
-          var ext = extFromLink(link);
-          // fb2 внутри zip (частый формат отдачи у OPDS-каталогов) —
-          // распаковываем один .fb2 из архива тем же MiniZip.extractAllFiles,
-          // что и при ручной загрузке .zip книг (см. handleImportBooksFile
-          // в my.js) — сам .zip как книгу не сохраняем.
-          if(ext === "fb2.zip"){
-            if(!window.MiniZip || !window.MiniZip.extractAllFiles){
-              throw new Error("Модуль ZIP (minizip.js) не загружен.");
-            }
-            return window.MiniZip.extractAllFiles(buf).then(function(files){
-              var fb2 = files.filter(function(f){ return /\.fb2$/i.test(f.path); })[0];
-              if(!fb2) throw new Error("В .zip не найден файл .fb2.");
-              return saveBookFile(sanitizeBookFileName(entry.title) + ".fb2", fb2.data);
-            });
-          }
-          var fname = sanitizeBookFileName(entry.title) + "." + ext;
-          return saveBookFile(fname, new Uint8Array(buf));
+          return saveBuffer(entry, link, buf);
         }).then(function(result){
-          if(result.added) registerBookInRegistry(result.hash, result.name, result.size);
-          setListStatus(result.added ?
-            ("Книга сохранена: «" + result.name + "».") :
-            ("Такая книга уже была загружена раньше (файл «" + result.name + "»)."), false);
+          reportSaved(result);
         }).catch(function(e){
           if(window.Debug) window.Debug.log("flibusta: не удалось скачать " + href + " — " + describeFetchError(e));
           setListStatus(
@@ -455,6 +472,85 @@
           var openBtn = document.getElementById("flibustaOpenLinkBtn");
           if(openBtn) openBtn.addEventListener("click", function(){ window.open(href, "_blank"); });
         });
+      }
+
+      // Скачивание через движок приложения. Опрос состояния идёт, пока запрос жив (даже если окно каталога закрыли): готовая книга всё равно
+      // попадёт в библиотеку. Ошибка остаётся в острове с кнопкой «повторить» — опрос ждёт её до 10 минут; кнопка «Повторить» здесь запускает заново.
+      function downloadBookNative(nb, entry, link, href){
+        var fname = sanitizeBookFileName(entry.title) + "." + extFromLink(link);
+        var title = "«" + entry.title + "»";
+        var req = "";
+        var failedSince = 0;
+        var finished = false;
+
+        function release(){ try{ if(req) nb.downloadRelease(req); }catch(e){} }
+        function fail(msg){
+          finished = true;
+          if(window.Debug) window.Debug.log("flibusta: не удалось скачать " + href + " — " + msg);
+          setListStatus("Не удалось скачать " + title + ": " + msg, true,
+            '<br><button type="button" class="mdeditor-cleanup-cancel" id="flibustaRetryBtn" style="margin-top:6px;">Повторить</button>');
+          var retry = document.getElementById("flibustaRetryBtn");
+          if(retry) retry.addEventListener("click", function(){ finished = true; release(); downloadBook(entry, link); });
+        }
+        function progressText(st){
+          if(st.phase === "queued") return "в очереди";
+          if(st.phase === "paused") return "пауза";
+          if(st.phase === "waiting") return "нет сети, ждём";
+          if(st.pct >= 0) return st.pct + " %";
+          return "идёт";
+        }
+        function take(){
+          setListStatus("Сохраняем " + title + " в библиотеку…", false);
+          fetch("./__dl/" + encodeURIComponent(req), {cache: "no-store"}).then(function(res){
+            if(!res.ok) throw new Error("приложение не отдало файл (HTTP " + res.status + ")");
+            return res.arrayBuffer();
+          }).then(function(buf){
+            return saveBuffer(entry, link, buf);
+          }).then(function(result){
+            finished = true;
+            release();
+            reportSaved(result);
+          }).catch(function(e){
+            release();
+            fail(describeFetchError(e));
+          });
+        }
+        function poll(){
+          if(finished) return;
+          var st;
+          try{ st = JSON.parse(nb.downloadStatus(req) || "{}"); }catch(e){ st = null; }
+          if(!st || !st.ok){ fail((st && st.error) || "приложение не ответило"); return; }
+          if(st.state === "done"){ finished = true; take(); return; }
+          if(st.state === "canceled"){
+            finished = true;
+            setListStatus("Скачивание " + title + " отменено.", false);
+            release();
+            return;
+          }
+          if(st.state === "failed"){
+            if(!failedSince){ failedSince = Date.now(); fail(st.error || "ошибка скачивания"); finished = false; }
+            if(Date.now() - failedSince > 10 * 60 * 1000){ finished = true; release(); return; }
+            setTimeout(poll, 1500);
+            return;
+          }
+          if(failedSince){ // повторили кнопкой в острове — снова идёт
+            failedSince = 0;
+          }
+          if(st.state === "asking") setListStatus("Выберите способ скачивания " + title + "…", false);
+          else setListStatus("Скачивание " + title + ": " + progressText(st), false);
+          setTimeout(poll, 600);
+        }
+
+        var started;
+        try{ started = JSON.parse(nb.downloadStart(href, JSON.stringify({ name: fname, referer: feedUrl })) || "{}"); }
+        catch(e){ started = null; }
+        if(!started || !started.ok || !started.req){
+          fail((started && started.error) || "приложение не приняло задачу");
+          return;
+        }
+        req = started.req;
+        setListStatus("Выберите способ скачивания " + title + "…", false);
+        setTimeout(poll, 600);
       }
 
       redraw();

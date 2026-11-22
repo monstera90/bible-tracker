@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 2 (Flibusta): `./__dl/<id>` отдаёт готовый файл скачивания, запрошенного страницей (PageHandoff). Откат: WebAssetServer.kt 1.0.
 // Версия: 1.0 (31.10)
 
 import android.content.Context
@@ -62,6 +63,9 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
             // Файл, принятый из системного «Поделиться» (SharedInbox): ./__shared/<id>.
             if (rel.startsWith("__shared/")) return sharedFile(rel.removePrefix("__shared/"))
 
+            // Готовая книга Flibusta, скачанная движком по запросу страницы (PageHandoff): ./__dl/<id>.
+            if (rel.startsWith("__dl/")) return handoffFile(rel.removePrefix("__dl/"))
+
             // PDF из выбранной папки поиска по PDF (PdfLibrary): ./__pdflib/<docId>.
             if (rel.startsWith("__pdflib/")) return pdfLibFile(rel.removePrefix("__pdflib/"))
 
@@ -93,6 +97,20 @@ class WebAssetServer(private val context: Context, private val bundleDir: File?)
                 "Cache-Control" to "no-store"
             )
             WebResourceResponse(item.type, null, 200, "OK", headers, FileInputStream(item.file))
+        } catch (e: IOException) {
+            notFound()
+        }
+    }
+
+    /** Отдаёт готовый файл скачивания по запросу страницы (тот же origin). Чужие, неготовые и уже забранные id дают 404. */
+    private fun handoffFile(id: String): WebResourceResponse {
+        val f = PageHandoff.file(id) ?: return notFound()
+        return try {
+            val headers = mapOf(
+                "Content-Length" to f.length().toString(),
+                "Cache-Control" to "no-store"
+            )
+            WebResourceResponse("application/octet-stream", null, 200, "OK", headers, FileInputStream(f))
         } catch (e: IOException) {
             notFound()
         }

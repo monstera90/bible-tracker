@@ -11,7 +11,7 @@
 // в приложении больше нет). Сбой скачивания необязательного файла установку не
 // срывает — см. CRITICAL_ASSETS и INSTALL_REPORT_CACHE ниже.
 
-const APP_VERSION = "v0.39.332";
+const APP_VERSION = "v0.39.333";
 const CACHE_NAME = "bible-tracker-" + APP_VERSION;
 
 // Временное хранилище для файла, присланного через системное "Поделиться"
@@ -410,6 +410,9 @@ self.addEventListener("fetch", (event) => {
   // Погода карточек (itemcards.js): запросы к Open-Meteo всегда идут напрямую в сеть — иначе стратегия ниже
   // отдала бы первый закэшированный ответ и погода «застыла» бы.
   if (url.hostname.endsWith(".open-meteo.com")) return;
+
+  // Готовая книга Flibusta от приложения Android (./__dl/<id>, TZ_downloads.md, этап 2): одноразовый файл, в кэш не кладём и из кэша не отдаём.
+  if (url.pathname.indexOf("/__dl/") !== -1) return;
 
   event.respondWith(
     isOfflineModeOn().then((offlineMode) =>

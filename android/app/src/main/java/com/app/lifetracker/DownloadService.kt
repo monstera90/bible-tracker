@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (22.11) — этап 2 (Flibusta, 6.2): [finishHandoff] — готовую книгу отдаём странице ([PageHandoff]), в «Загрузки» не кладём; копия в папку «Книги», если включена. Откат: DownloadService.kt 1.2.
 // Версия: 1.2 (22.11) — этап 5: завершение обновлений (`task.dest`): [UpdateChecks.placeAndVerify], копия APK в папку обновлений, без «Загрузок». Откат: DownloadService.kt 1.1.
 // Версия: 1.1 (22.11) — этап 4: место записи выбирает `DownloadTarget.newWorkFile(app, t)`; итог переноса ([DownloadTarget.Saved]) — в `targetLabel`/`targetNote`. Откат: DownloadService.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
@@ -327,6 +328,10 @@ class DownloadService : Service() {
                 return
             }
         }
+        if (t.handoffId.isNotEmpty()) {
+            finishHandoff(t, e, work)
+            return
+        }
         try {
             t.copying = true
             val saved = DownloadTarget.commit(applicationContext, t, work)
@@ -339,6 +344,42 @@ class DownloadService : Service() {
         } catch (ex: Exception) {
             t.copying = false
             t.error = ex.message?.takeIf { it.isNotBlank() } ?: "Не удалось сохранить файл"
+            t.state = DlState.FAILED
+        }
+    }
+
+    /**
+     * Книга для страницы (Flibusta): готовый файл переименовывается в `<id запроса>.bin` и ждёт, пока страница заберёт его по `./__dl/<id>`;
+     * в «Загрузки» не кладётся. Если включена папка для этого типа файлов — туда уходит копия. Занятие в острове — «Готово · → Книги».
+     */
+    private fun finishHandoff(t: DownloadTask, e: DownloadEngine, work: java.io.File) {
+        val req = PageHandoff.get(t.handoffId)
+        if (req == null || req.state == HandoffLogic.CANCELED) { // страница отказалась или процесс пересоздан: файл не нужен
+            e.cleanup()
+            t.state = DlState.CANCELED
+            FileDownloads.remove(t)
+            return
+        }
+        try {
+            t.copying = true
+            val dest = java.io.File(work.parentFile, t.handoffId + ".bin")
+            try { dest.delete() } catch (ex: Exception) { }
+            if (!work.renameTo(dest)) {
+                work.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o, 1 shl 16) } }
+                try { work.delete() } catch (ex: Exception) { }
+            }
+            val saved = try { DownloadTarget.copyBook(applicationContext, t, dest) } catch (ex: Exception) { DownloadTarget.Saved("", DownloadTarget.NOTE_UPDATE_COPY_LOST) }
+            t.targetLabel = if (saved.label.isNotEmpty()) "Книги и " + saved.label else "Книги"
+            t.targetNote = saved.note
+            e.cleanup()
+            t.copying = false
+            req.file = dest
+            req.state = HandoffLogic.DONE // страница увидит это при следующем опросе и заберёт файл
+            t.finishedAt = System.currentTimeMillis()
+            t.state = DlState.DONE
+        } catch (ex: Exception) {
+            t.copying = false
+            t.error = ex.message?.takeIf { it.isNotBlank() } ?: "Не удалось подготовить файл"
             t.state = DlState.FAILED
         }
     }

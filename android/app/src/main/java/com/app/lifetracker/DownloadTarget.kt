@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.2 (22.11) — этап 2 (Flibusta, 6.2): задача страницы (`handoffId`) качается в `files/dlhandoff`; [copyBook] — копия книги в папку категории «Книги», если пользователь её включил. Откат: DownloadTarget.kt 2.1.
 // Версия: 2.1 (22.11) — этап 5: обновления (`task.dest`) качаются рядом с итоговым файлом в каталоге приложения; [copyUpdate] — необязательная копия APK в папку «Обновление приложения». Откат: DownloadTarget.kt 2.0.
 // Версия: 2.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 4: выбор папки по правилам раздела 13.3 ([DownloadRules]), запись в папку пользователя (по пути или через SAF), запасной вариант «Загрузки» с пометкой. Откат: DownloadTarget.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: место сохранения всегда «Загрузки»; сортировка по папкам (раздел 13) добавится на этапе 4 без переделки движка.
@@ -76,6 +77,7 @@ object DownloadTarget {
             return File(fixed.path + ".part")
         }
         val name = DownloadLogic.safeName(task.fileName)
+        if (task.handoffId.isNotEmpty()) return File(PageHandoff.dir(ctx), task.id.toString() + "_" + name + ".part") // страница заберёт файл сама, «Загрузки» и папки пользователя не нужны
         val target = resolve(ctx, task.fileName, task.source)
         val userDir = target.folder?.let { DownloadFolders.directDir(ctx, it.treeUri) }
         if (userDir != null) return partIn(userDir, name)
@@ -117,8 +119,17 @@ object DownloadTarget {
      * и выбрана — ещё и копия туда; иначе ничего не остаётся (в «Загрузки» не кладём никогда). Сорвалась копия — обновление не страдает:
      * только пометка в карточке «Готово». Возвращает [Saved] (label пусто — копии нет).
      */
-    fun copyUpdate(ctx: Context, task: DownloadTask, file: File): Saved {
-        val choice = DownloadRules.choose(task.fileName, DlSource.APP_UPDATE, DownloadFolders.config(ctx))
+    fun copyUpdate(ctx: Context, task: DownloadTask, file: File): Saved = copyToChosen(ctx, task, file, DlSource.APP_UPDATE)
+
+    /**
+     * Книга Flibusta (ТЗ 6.2): основной экземпляр кладёт в библиотеку «Книги» страница, а сюда — только необязательная копия: если по правилам 13.3
+     * для этого имени файла есть включённая папка (категория «Электронные книги» или свой формат) — копия идёт в неё. Папки нет — ничего не остаётся
+     * (в «Загрузки» не кладём). Возвращает [Saved] (label пусто — копии нет).
+     */
+    fun copyBook(ctx: Context, task: DownloadTask, file: File): Saved = copyToChosen(ctx, task, file, DlSource.USER)
+
+    private fun copyToChosen(ctx: Context, task: DownloadTask, file: File, source: DlSource): Saved {
+        val choice = DownloadRules.choose(task.fileName, source, DownloadFolders.config(ctx))
         val folder = DownloadFolders.folderFor(ctx, choice) ?: return Saved("", "")
         if (!DownloadFolders.isWritable(ctx, folder.treeUri)) return Saved("", NOTE_UPDATE_COPY_LOST)
         val name = DownloadLogic.safeName(task.fileName)

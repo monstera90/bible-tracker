@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.7 (22.11) — мост версии 44: `downloadStart` / `downloadStatus` / `downloadCancel` / `downloadRelease` — скачивание по запросу страницы через общий движок с показом в острове (Flibusta → библиотека «Книги»; PageHandoff, ТЗ TZ_downloads.md, этап 2). Откат: NativeBridge.kt 30.6.
 // Версия: 30.6 (22.11) — мост версии 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders) — ТЗ TZ_downloads.md, этап 4; `finishSave` называет в сообщении, куда сохранено. Откат: NativeBridge.kt 30.5.
 // Версия: 30.5 (21.11) — мост версии 42: `downloadThreadsGet` / `downloadThreadsSet` — число потоков скачивания по умолчанию (ТЗ TZ_downloads.md, этап 1). Откат: NativeBridge.kt 30.4.
 // Версия: 30.4 (21.11) — мост версии 41: `cardAlarmTap(id)` (решение по нажатию на карточку-будильник: 0 завести, 1 заглушить, 2 выключить, 3 ничего — одно для виджета и приложения) и `silenceCardAlarm(id)`. Откат: NativeBridge.kt 30.3.
@@ -70,6 +71,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
+         * 44: `downloadStart(url, optsJson)` / `downloadStatus(req)` / `downloadCancel(req)` / `downloadRelease(req)` — скачивание по запросу страницы (Flibusta): движок + остров, готовый файл страница забирает по https://localhost/__dl/<req> (WebAssetServer, PageHandoff).
          * 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders): папки по типам файлов и «свои форматы»; `finishSave` отдаёт странице `where` и `note`.
          * 42: `downloadThreadsGet()` / `downloadThreadsSet(n)` — число потоков скачивания по умолчанию, 2–8 (вкладка «Система»; FileDownloads).
          * 39: `widgetTimerTake()` / `widgetTimerAck(ns)` — таймеры, запущенные нажатием в виджете без окна: страница записывает их в журнал событий.
@@ -79,7 +81,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 43
+        const val BRIDGE_VERSION = 44
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1191,6 +1193,57 @@ class NativeBridge(private val activity: MainActivity) {
     fun downloadThreadsSet(n: Int): Int {
         if (!activity.pageTrusted) return 0
         return FileDownloads.setThreads(activity.applicationContext, n)
+    }
+
+    // ---------- скачивание по запросу страницы (мост ≥44; PageHandoff, DownloadLauncher.startForPage) ----------
+
+    /**
+     * Запускает скачивание по адресу [url] через общий движок (разведка, окно «Обычное / В N потоков», остров). [optsJson]: `{"name":"Книга.fb2","referer":"https://…"}`.
+     * Возвращает `{"ok":true,"req":"<id>"}` или `{"ok":false,"error":"…"}`. Ход — `downloadStatus(req)`; готовый файл — `fetch("./__dl/<req>")`.
+     */
+    @JavascriptInterface
+    fun downloadStart(url: String?, optsJson: String?): String {
+        if (!activity.pageTrusted) return org.json.JSONObject().put("ok", false).put("error", "Страница не доверенная").toString()
+        val u = url?.trim().orEmpty()
+        if (!u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true)) {
+            return org.json.JSONObject().put("ok", false).put("error", "Адрес не http/https").toString()
+        }
+        var name = ""
+        var referer = ""
+        try {
+            val o = org.json.JSONObject(optsJson ?: "{}")
+            name = DownloadLogic.safeName(o.optString("name")).takeIf { o.optString("name").isNotBlank() } ?: ""
+            referer = o.optString("referer")
+        } catch (e: Exception) {
+            // без параметров: имя даст сервер
+        }
+        val app = activity.applicationContext
+        val req = PageHandoff.create(app, name)
+        activity.runOnUiThread { DownloadLauncher.startForPage(activity, u, name, referer, req) }
+        return org.json.JSONObject().put("ok", true).put("req", req.id).toString()
+    }
+
+    /** Ход запроса: `{"ok":true,"state":"asking|running|done|failed|canceled","phase":"queued|running|paused|waiting","pct":45,"done":…,"total":…,"threads":N,"error":"…"}`. */
+    @JavascriptInterface
+    fun downloadStatus(req: String?): String {
+        if (!activity.pageTrusted) return org.json.JSONObject().put("ok", false).put("error", "Страница не доверенная").toString()
+        return PageHandoff.statusJson(req)
+    }
+
+    /** Отмена запроса (окно выбора, закачка): файлы удаляются. */
+    @JavascriptInterface
+    fun downloadCancel(req: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        PageHandoff.cancel(activity.applicationContext, req)
+        return true
+    }
+
+    /** Страница закончила с запросом (забрала файл или показала ошибку): временный файл удаляется, карточка с ошибкой убирается из острова. */
+    @JavascriptInterface
+    fun downloadRelease(req: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        PageHandoff.release(activity.applicationContext, req)
+        return true
     }
 
     // ---------- «Сохранение загрузок»: папки по типам файлов (мост ≥43; DownloadFolders, DownloadRules) ----------

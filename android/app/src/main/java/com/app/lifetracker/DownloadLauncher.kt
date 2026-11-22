@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): [startForPage] — скачивание по запросу страницы (мост `downloadStart`): разведка, то же окно «Обычное / В N потоков», задача с `handoffId`. Откат: DownloadLauncher.kt 1.1.
 // Версия: 1.1 (22.11) — этап 6 (6.6): [handlePage] — `data:` и `blob:` со вкладок-сайтов и Claude сохраняет приложение ([PageDownloads]), http/https — прежний путь. Откат: DownloadLauncher.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: общий обработчик скачивания для вкладок-сайтов, вкладки Claude и главного WebView (раздел 6.1, 6.4).
 
@@ -75,7 +76,32 @@ object DownloadLauncher {
         return true
     }
 
-    private fun showChoice(activity: Activity, url: String, headers: Map<String, String>, name: String, p: ProbeResult, originTab: String) {
+    /**
+     * Скачивание по запросу страницы (Flibusta, ТЗ 6.2): те же разведка и окно выбора способа, но результат не «Загрузки», а страница
+     * ([PageHandoff]). [name] — имя, которое выбрала страница (название книги + расширение); пусто — имя даст сервер.
+     * Закрыли окно или нажали «Отмена» — запрос получает состояние «отменено».
+     */
+    fun startForPage(activity: MainActivity, url: String, name: String, referer: String?, req: PageHandoff.Req) {
+        val headers = LinkedHashMap<String, String>()
+        if (!referer.isNullOrBlank() && (referer.startsWith("http://") || referer.startsWith("https://"))) headers["Referer"] = referer
+        Toast.makeText(activity, "Проверяем файл…", Toast.LENGTH_SHORT).show()
+        Thread({
+            val p = DownloadEngine.probe(url, headers)
+            val shown = name.ifEmpty { DownloadLogic.pickFileName(p.contentDisposition, url, p.mime) }
+            activity.runOnUiThread {
+                if (activity.isFinishing) {
+                    req.state = HandoffLogic.CANCELED
+                } else {
+                    showChoice(activity, url, headers, shown, p, "", req)
+                }
+            }
+        }, "dl-probe-page").also {
+            it.isDaemon = true
+            it.start()
+        }
+    }
+
+    private fun showChoice(activity: Activity, url: String, headers: Map<String, String>, name: String, p: ProbeResult, originTab: String, req: PageHandoff.Req? = null) {
         val app = activity.applicationContext
         val threads = FileDownloads.threads(app)
         val size = if (p.total >= 0) DownloadLogic.formatSize(p.total) else "размер неизвестен"
@@ -86,12 +112,21 @@ object DownloadLauncher {
             AlertDialog.Builder(activity)
                 .setTitle("Скачать файл")
                 .setMessage(msg.toString())
-                .setPositiveButton("Обычное") { _, _ -> FileDownloads.enqueue(app, url, headers, name, DlMode.SINGLE, threads, originTab, p) }
-                .setNeutralButton("В " + DownloadLogic.threadsText(threads)) { _, _ -> FileDownloads.enqueue(app, url, headers, name, DlMode.MULTI, threads, originTab, p) }
-                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Обычное") { _, _ -> start(app, url, headers, name, DlMode.SINGLE, threads, originTab, p, req) }
+                .setNeutralButton("В " + DownloadLogic.threadsText(threads)) { _, _ -> start(app, url, headers, name, DlMode.MULTI, threads, originTab, p, req) }
+                .setNegativeButton("Отмена") { _, _ -> req?.state = HandoffLogic.CANCELED }
+                .setOnCancelListener { if (req != null && req.taskId == 0L) req.state = HandoffLogic.CANCELED }
                 .show()
         } catch (e: Exception) {
             // окно показать не удалось (активность закрылась) — скачивание не начинаем
+            req?.state = HandoffLogic.CANCELED
         }
+    }
+
+    /** Создаёт задачу; для запроса страницы запоминает её номер и помечает задачу `handoffId`. */
+    private fun start(app: android.content.Context, url: String, headers: Map<String, String>, name: String, mode: DlMode, threads: Int, originTab: String, p: ProbeResult, req: PageHandoff.Req?) {
+        if (req != null && req.state == HandoffLogic.CANCELED) return
+        val t = FileDownloads.enqueue(app, url, headers, name, mode, threads, originTab, p, handoffId = req?.id ?: "")
+        if (req != null) req.taskId = t.id // состояние «идёт» страница получает из [HandoffLogic.state]: служба могла успеть закончить раньше этой строки
     }
 }
