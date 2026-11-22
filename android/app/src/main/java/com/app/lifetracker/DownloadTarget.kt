@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 4: выбор папки по правилам раздела 13.3 ([DownloadRules]), запись в папку пользователя (по пути или через SAF), запасной вариант «Загрузки» с пометкой. Откат: DownloadTarget.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: место сохранения всегда «Загрузки»; сортировка по папкам (раздел 13) добавится на этапе 4 без переделки движка.
 
 import android.content.ContentValues
@@ -13,28 +14,44 @@ import java.io.IOException
 
 /**
  * Единственная точка выбора места записи (ТЗ 5.5): [resolve] решает, куда положить готовый файл, [newWorkFile] — где его качать,
- * [commit] — переносит готовый файл на место. Этап 1: всегда «Загрузки». Этап 4 добавит папки пользователя (раздел 13.3) внутри [resolve] и [commit].
+ * [commit] — переносит готовый файл на место. Правила выбора папки — [DownloadRules.choose] (раздел 13.3), настройки — [DownloadFolders].
  *
  * Как пишем в «Загрузки»:
  *  - есть «Доступ ко всем файлам» (или Android до 10 с разрешением на запись) — прямо в папку «Загрузки» во временный `<имя>.part`,
  *    по завершении переименовываем (быстро, без второй копии);
  *  - иначе — во временный файл в каталоге приложения, по завершении копируем в «Загрузки» через MediaStore (Android 10+).
  *    Выбор сделан осознанно: перематываемый дескриптор MediaStore («rw») для многопоточной записи не проверен на телефоне заказчика.
+ *
+ * Как пишем в папку пользователя (этап 4):
+ *  - есть «Доступ ко всем файлам» и дерево удаётся превратить в обычный путь ([DownloadFolders.directDir]) — как в «Загрузки»:
+ *    `<имя>.part` прямо в папке, по завершении переименование;
+ *  - иначе — временный файл в каталоге приложения, по завершении копирование в папку через SAF ([DownloadFolders.copyInto]; в карточке
+ *    «копирование…»). Перематываемый дескриптор SAF для многопоточной записи не используем: провайдеры по-разному обращаются с `.part`
+ *    (дописывают своё расширение), а копия после завершения работает у всех;
+ *  - перед записью папка проверяется ([DownloadFolders.isWritable]); недоступна или запись сорвалась — файл идёт в «Загрузки»,
+ *    а в карточке «Готово» остаётся пометка «Папка недоступна — сохранено в «Загрузки»».
  */
 object DownloadTarget {
 
     const val LABEL_DOWNLOADS = "Загрузки"
+    const val NOTE_FOLDER_LOST = "Папка недоступна — сохранено в «Загрузки»"
 
-    /** Куда положить файл: [label] — подпись для «Готово» («Загрузки» или название папки). */
-    class Target(val label: String)
+    /** Куда положить файл: [label] — подпись для «Готово» («Загрузки» или название папки); [folder] — папка пользователя или null («Загрузки»); [note] — пометка, если пришлось взять запасное место. */
+    class Target(val label: String, val folder: DownloadFolders.Folder? = null, val note: String = "")
 
-    /** Единая функция выбора (этап 1 — всегда «Загрузки»). [source] нужен этапу 4–5: обновление приложения живёт по своим правилам. */
-    @Suppress("UNUSED_PARAMETER")
-    fun resolve(fileName: String, source: DlSource): Target = Target(LABEL_DOWNLOADS)
+    /** Итог переноса: [label] — куда сохранено, [note] — пометка («Папка недоступна…») или пусто. */
+    class Saved(val label: String, val note: String)
 
-    /** Ключ категории по имени файла (раздел 13.2). Этап 1 — одна общая. */
-    @Suppress("UNUSED_PARAMETER")
-    fun categoryOf(fileName: String): String = "other"
+    /** Единая функция выбора места: правила 13.3, затем проверка, что выбранная папка доступна. */
+    fun resolve(ctx: Context, fileName: String, source: DlSource): Target {
+        val choice = DownloadRules.choose(fileName, source, DownloadFolders.config(ctx))
+        val folder = DownloadFolders.folderFor(ctx, choice) ?: return Target(LABEL_DOWNLOADS)
+        if (!DownloadFolders.isWritable(ctx, folder.treeUri)) return Target(LABEL_DOWNLOADS, null, NOTE_FOLDER_LOST)
+        return Target(folder.label, folder)
+    }
+
+    /** Ключ категории по имени файла (раздел 13.2), без учёта настроек. */
+    fun categoryOf(fileName: String): String = DownloadRules.categoryOfName(fileName)
 
     @Suppress("DEPRECATION")
     private fun downloadsDir(): File = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -46,37 +63,79 @@ object DownloadTarget {
         return (dir.isDirectory || dir.mkdirs()) && dir.canWrite()
     }
 
-    /** Временный файл, куда движок пишет закачку. Имя — свободное в «Загрузках» (прямой режим) либо в каталоге приложения. */
-    fun newWorkFile(ctx: Context, taskId: Long, fileName: String): File {
-        val name = DownloadLogic.safeName(fileName)
-        if (canWriteDirect(ctx)) {
-            val dir = downloadsDir()
-            val part = DownloadLogic.uniqueName("$name.part") { File(dir, it).exists() || File(dir, it + ".json").exists() }
-            return File(dir, part)
-        }
+    /**
+     * Временный файл, куда движок пишет закачку. Имя — свободное в папке назначения (прямой режим: «Загрузки» или папка пользователя,
+     * доступная по пути) либо в каталоге приложения (тогда [commit] скопирует готовый файл).
+     */
+    fun newWorkFile(ctx: Context, task: DownloadTask): File {
+        val name = DownloadLogic.safeName(task.fileName)
+        val target = resolve(ctx, task.fileName, task.source)
+        val userDir = target.folder?.let { DownloadFolders.directDir(ctx, it.treeUri) }
+        if (userDir != null) return partIn(userDir, name)
+        if (target.folder == null && canWriteDirect(ctx)) return partIn(downloadsDir(), name)
         val base = ctx.getExternalFilesDir("downloads") ?: File(ctx.filesDir, "downloads")
         if (!base.isDirectory) base.mkdirs()
-        return File(base, taskId.toString() + "_" + name + ".part")
+        return File(base, task.id.toString() + "_" + name + ".part")
+    }
+
+    private fun partIn(dir: File, name: String): File {
+        val part = DownloadLogic.uniqueName("$name.part") { File(dir, it).exists() || File(dir, it + ".json").exists() }
+        return File(dir, part)
     }
 
     /**
-     * Готовый файл — на место. Возвращает подпись для «Готово». Бросает [IOException] с понятным текстом, если не вышло.
+     * Готовый файл — на место. Возвращает куда сохранено и пометку. Бросает [IOException] с понятным текстом, если не вышло.
      * Временный файл после переноса удаляет сам (при переименовании он уже перемещён).
      */
-    fun commit(ctx: Context, task: DownloadTask, work: File): String {
-        val target = resolve(task.fileName, task.source)
+    fun commit(ctx: Context, task: DownloadTask, work: File): Saved {
+        val target = resolve(ctx, task.fileName, task.source)
         val name = DownloadLogic.safeName(task.fileName)
+        val folder = target.folder
+        if (folder != null) {
+            try {
+                commitToFolder(ctx, folder, work, name)
+                return Saved(target.label, "")
+            } catch (e: Exception) {
+                // папка не приняла файл (сорвалась запись, пропало право) — файл не теряем: «Загрузки» и пометка
+                commitToDownloads(ctx, work, name)
+                return Saved(LABEL_DOWNLOADS, NOTE_FOLDER_LOST)
+            }
+        }
+        commitToDownloads(ctx, work, name)
+        return Saved(LABEL_DOWNLOADS, target.note)
+    }
+
+    /** В папку пользователя: переименование, если временный файл уже лежит в ней (прямой режим), иначе копирование (путь или SAF). */
+    private fun commitToFolder(ctx: Context, folder: DownloadFolders.Folder, work: File, name: String) {
+        val dir = DownloadFolders.directDir(ctx, folder.treeUri)
+        if (dir != null) {
+            val finalName = DownloadLogic.uniqueName(name) { File(dir, it).exists() }
+            val dest = File(dir, finalName)
+            if (work.parentFile?.absolutePath == dir.absolutePath) {
+                if (!work.renameTo(dest)) throw IOException("Не удалось сохранить файл в папку")
+            } else {
+                work.inputStream().use { i -> dest.outputStream().use { o -> i.copyTo(o, 1 shl 16) } }
+                try { work.delete() } catch (e: Exception) { }
+            }
+            scan(ctx, dest, name)
+            return
+        }
+        DownloadFolders.copyInto(ctx, folder.treeUri, work, name)
+        try { work.delete() } catch (e: Exception) { }
+    }
+
+    /** В «Загрузки»: переименование, если временный файл уже в ней, иначе MediaStore / обычная запись. */
+    private fun commitToDownloads(ctx: Context, work: File, name: String) {
         val dir = downloadsDir()
         if (work.parentFile?.absolutePath == dir.absolutePath) {
             val finalName = DownloadLogic.uniqueName(name) { File(dir, it).exists() }
             val dest = File(dir, finalName)
             if (!work.renameTo(dest)) throw IOException("Не удалось сохранить файл в «Загрузки»")
             scan(ctx, dest, name)
-            return target.label
+            return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copyToMediaStore(ctx, work, name) else copyLegacy(ctx, work, name)
         try { work.delete() } catch (e: Exception) { }
-        return target.label
     }
 
     private fun copyToMediaStore(ctx: Context, work: File, name: String) {

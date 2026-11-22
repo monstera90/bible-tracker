@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+     Версия: 42.0 (22.11) — структурная правка: кнопка вкладки «Сохранение загрузок» `settingsTabSet2Btn17` (set2s_17, рядом с «Системой») и подключён `downloadfolders.js` (ТЗ TZ_downloads.md, этап 4). Откат: index.html 41.0.
      Версия: 41.0 (15.11) — структурная правка: подключён `hotkeys.js` (горячие клавиши bluetooth-клавиатуры: Ctrl+←/→ — нижний ряд язычков, Ctrl+↑/↓ — боковой ряд).
      Версия: 40.0 (11.11)
      Версия: 12.0 (27.10) — структурная правка: кнопка вкладки «Тренировки» `settingsTabWorkoutsBtn` (нижний ряд набора 1, между шестерёнкой и «Картой дней года») и подключён `workouts.js`.
@@ -392,6 +393,15 @@ window.addEventListener("error", function(e){
           <line x1="10.5" y1="19" x2="13.5" y2="19"></line>
         </svg>
       </button>
+       <!-- «Сохранение загрузок» (settingsTabSet2Btn17, "set2s_17"): язычок режима колеса рядом с «Системой»; куда приложение кладёт
+            скачанные файлы — папки по типам и «свои форматы». См. downloadfolders.js и DownloadFolders.kt. -->
+       <button class="settings-tab" id="settingsTabSet2Btn17" title="Сохранение загрузок" style="display:none;">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+           <path d="M3.5 7.5a1.5 1.5 0 0 1 1.5-1.5h4l2 2.2h8a1.5 1.5 0 0 1 1.5 1.5v8.3a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"></path>
+           <path d="M12 10.8v5.2"></path>
+           <path d="M9.6 14l2.4 2.4 2.4-2.4"></path>
+         </svg>
+       </button>
       <!-- Комментарии (extra2, renderCommentsTab): вкладка бокового ряда «Задачи» — самая нижняя, под «Задачи в работе».
            Не вкладка задач: свой ключ "extra2". Значок и подсказку ставит my.js (refreshExtra2TabAppearance). -->
       <button class="settings-tab" id="settingsTabExtra2Btn" title="" style="display:none;"></button>
@@ -1004,6 +1014,7 @@ window.addEventListener("error", function(e){
 <script src="tabreorder.js"></script>
 <script src="hotkeys.js"></script>
 <script src="system.js"></script>
+<script src="downloadfolders.js"></script>
 <script src="music.js"></script>
 <script src="pomodoro.js"></script>
 <script src="calendar.js"></script>

@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.6 (22.11) — вкладка «Сохранение загрузок» (`set2s_17`, кнопка `settingsTabSet2Btn17`, модуль `downloadfolders.js`, `renderSettingsTabDlFolders`; ТЗ TZ_downloads.md, этап 4, раздел 13): язычок режима колеса рядом с «Системой» (регистрация везде, где есть `WHEEL_SYSTEM_TAB_KEY`; `DLFOLDERS_TAB_KEY`/`DLFOLDERS_TAB_BTN_ID`). Откат: my.js 153.5.
    Версия: 153.5 (22.11) — карточки задач: (1) разворачивание/сворачивание не двигает задачи на экране (верх строки остаётся на месте: `taskRowAnchor`, `focus` без собственной прокрутки браузера, подложка под клавиатуру держится до конца сворачивания — `AppKeyboard.holdRelease`); (2) нажатие цвета полосы/«в работе»/напоминания у другой строки во время правки не уводит список к редактируемой (`taskKeepListStill`, `AppKeyboard.suspendLift`; blur от удаления узла при пересборке больше не ставит сторожа прокрутки); (3) первое касание задачи после правки только закрывает правку, не открывая следующую (`taskTapJustClosedEditing`). Откат: my.js 153.4.
    Версия: 153.4 (22.11) — кнопка тегов на вкладках задач заменена фильтром по цвету полосы (корешка): «Все» + цвета, которые есть на вкладке (в т. ч. «Цвет темы»), выбор помнится по вкладкам (`bibleTaskColorFilter_v1`), новая задача при выбранном цвете получает его. Фильтра по тегам больше нет (теги остались на карточках и в QR). Откат: my.js 153.3.
    Версия: 153.3 (22.11) — приоритет задачи: 7 цветов по кругу (красный, оранжевый, жёлтый, зелёный, голубой, синий, фиолетовый; в данных red/yellow(=оранжевый)/gold/green/cyan/blue/purple), долгое нажатие — цвет темы; на вкладку «Red» по-прежнему попадают только красные и оранжевые (`taskFlagList`/`taskFlagClass`/`cycleTaskFlag`). Откат: my.js 153.2.
@@ -2027,7 +2028,8 @@
     set2s_4: "settingsTabSet2Btn4", set2s_11: "settingsTabSet2Btn11", set2s_12: "settingsTabSet2Btn12", set2s_13: "settingsTabSet2Btn13", set2s_5: "settingsTabSet2Btn5", set2s_6: "settingsTabSet2Btn6", set2s_14: "settingsTabSet2Btn14",
     set2s_7: "settingsTabSet2Btn7", set2s_8: "settingsTabSet2Btn8", set2s_9: "settingsTabSet2Btn9",
     set2s_10: "settingsTabSet2Btn10",
-    set2s_16: "settingsTabSet2Btn16"
+    set2s_16: "settingsTabSet2Btn16",
+    set2s_17: "settingsTabSet2Btn17"
   };
   var SET2_EXTRA_TAB_IDS = {
     set2b_1: "settingsTabSet2GearBtn1", set2b_2: "settingsTabSet2GearBtn2", set2b_3: "settingsTabSet2GearBtn3",
@@ -7296,6 +7298,11 @@
   function renderSettingsTabSystem(){
     if(window.SystemTabMod) window.SystemTabMod.render();
   }
+  // Вкладка «Сохранение загрузок» (set2s_17, кнопка settingsTabSet2Btn17, язычок режима колеса рядом с «Системой»): куда приложение кладёт
+  // скачанные файлы (папки по типам и «свои форматы»). Вынесена в downloadfolders.js; всё решает оболочка (мост версии 43).
+  function renderSettingsTabDlFolders(){
+    if(window.DownloadFoldersTabMod) window.DownloadFoldersTabMod.render();
+  }
 
   // Реестр адаптеров синхронизации файлов (books/images) по kind. Должен существовать ДО
   // инициализации MdEditor ниже — тот регистрирует свой адаптер ("images") синхронно во время
@@ -11337,7 +11344,7 @@
     // нижнего, набор 1 или 2) — служебные экраны вроде "import"/"resetConfirm"
     // (открываются кнопками ВНУТРИ вкладки настроек) не считаются отдельной позицией и не сбивают
     // запомненное место — см. cycleSettingsTabSet ниже.
-    if(tab !== WHEEL_SYSTEM_TAB_KEY && (SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY || isInfoStackTab(tab) ||
+    if(tab !== WHEEL_SYSTEM_TAB_KEY && tab !== DLFOLDERS_TAB_KEY && (SETTINGS_SIDE_ORDER_1.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_1.indexOf(tab) !== -1 || tab === WORKOUTS_TAB_KEY || isInfoStackTab(tab) ||
        SETTINGS_SIDE_ORDER_2.indexOf(tab) !== -1 || SETTINGS_BOTTOM_ORDER_2.indexOf(tab) !== -1)){
       settingsLastStackTab = tab;
       // тоже в localStorage — settingsLastStackTab сам живёт только в памяти вкладки и не
@@ -11462,6 +11469,8 @@
     else if(tab === "set2s_10") renderSettingsTabClaude();
     // вкладка-сайт ряда «Интернет» (ключ utab_<id>, кнопка «+», usertabs.js): адрес по умолчанию, место на странице запоминает оболочка
     else if(window.UserTabsMod && window.UserTabsMod.isKey(tab)) window.UserTabsMod.render(tab);
+    // «Сохранение загрузок» (set2s_17, язычок режима колеса рядом с «Системой») — downloadfolders.js: папки по типам скачанных файлов
+    else if(tab === DLFOLDERS_TAB_KEY) renderSettingsTabDlFolders();
     // «Система» (set2s_15, язычок режима колеса, самый нижний в стеке набора 1) — system.js: усиление громкости и др.
     else if(tab === "set2s_15") renderSettingsTabSystem();
     else if(SET2_TAB_IDS.hasOwnProperty(tab) || SET2_EXTRA_TAB_IDS.hasOwnProperty(tab)) renderSettingsTabSet2Stub();
@@ -19149,7 +19158,7 @@
     if(savedTab && isOwnStackTab(savedTab)) savedSet = 1; // вкладки рядов «Статистика», «Инструменты» и «Активности» живут в наборе 1
     if(savedSet === 2 && !isSet2Unlocked()){ savedSet = 1; savedTab = null; }
     if(savedSet === 2 && savedTab === "gear") savedTab = null; // колесико набора 2 не открывается как вкладка
-    if(savedTab === WHEEL_SYSTEM_TAB_KEY || savedTab === EVENTS_TAB_KEY || savedTab === WIDGETS_TAB_KEY) savedTab = null; // «Система» и «События» — язычки режима колеса, как и alt-вкладки, при запуске не восстанавливаются
+    if(savedTab === WHEEL_SYSTEM_TAB_KEY || savedTab === DLFOLDERS_TAB_KEY || savedTab === EVENTS_TAB_KEY || savedTab === WIDGETS_TAB_KEY) savedTab = null; // «Система» и «События» — язычки режима колеса, как и alt-вкладки, при запуске не восстанавливаются
     if(savedTab && (TASK_TAB_IDS.hasOwnProperty(savedTab) || savedTab === "extra2") && !getShowAllTasksEnabled()){
       savedTab = null;
     }
@@ -19656,7 +19665,7 @@
       else renderSettingsTabYear(yearGridScrollKeep);
       return;
     }
-    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && tab !== EVENTS_TAB_KEY && !isInfoStackTab(tab) && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
+    if(bottomAltMode && !BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) && tab !== WHEEL_SYSTEM_TAB_KEY && tab !== DLFOLDERS_TAB_KEY && tab !== EVENTS_TAB_KEY && !isInfoStackTab(tab) && BOTTOM_ROW_TABS.indexOf(tab) === -1) return; // нижний ряд в режиме колеса остаётся рабочим (его вкладка выключает режим колеса)
     if(tab === currentSettingsTab) return;
     switchSettingsTab(tab);
   }
@@ -19711,6 +19720,8 @@
   };
   var WHEEL_SYSTEM_TAB_KEY = "set2s_15";            // «Система»: язычок режима колеса, самый нижний в стеке (на месте «Календаря»)
   var WHEEL_SYSTEM_TAB_BTN_ID = "settingsTabSet2Btn15";
+  var DLFOLDERS_TAB_KEY = "set2s_17";               // «Сохранение загрузок» (downloadfolders.js): язычок режима колеса рядом с «Системой»
+  var DLFOLDERS_TAB_BTN_ID = "settingsTabSet2Btn17";
   var BOTTOM_ALT_TAB_TITLES = {
     alt1: "Внешний вид", alt2: "Синхронизация",
     alt3: "Восстановление и сброс", alt4: "Дополнительные возможности",
@@ -19833,6 +19844,8 @@
     });
     var sysBtn = document.getElementById(WHEEL_SYSTEM_TAB_BTN_ID);
     if(sysBtn) sysBtn.style.display = bottomAltMode ? "flex" : "none"; // «Система» — только в режиме колеса
+    var dlfBtn = document.getElementById(DLFOLDERS_TAB_BTN_ID);
+    if(dlfBtn) dlfBtn.style.display = bottomAltMode ? "flex" : "none"; // «Сохранение загрузок» — тоже только в режиме колеса
     // нижний ряд от режима колеса не меняется — меняется только вертикальный стек
     refreshSettingsTabsVisibility();   // вертикальный стек набора 1 (декор вокруг вкладок колеса)
     updateBottomGearButtons();         // колесо подсвечено, пока показан набор вкладок колеса
@@ -19896,7 +19909,7 @@
   function syncBottomAltModeForTab(tab){
     // «своя» вкладка набора 1 открыта, а на экране ряд набора 2 (пустой) — возвращаем набор 1
     if(isOwnStackTab(tab) && settingsActiveTabSet !== 1){ settingsActiveTabSet = 1; applySettingsTabSetVisibility(); }
-    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === EVENTS_TAB_KEY || isInfoStackTab(tab)) setBottomAltMode(true);
+    if(BOTTOM_ALT_TAB_IDS.hasOwnProperty(tab) || tab === WHEEL_SYSTEM_TAB_KEY || tab === DLFOLDERS_TAB_KEY || tab === EVENTS_TAB_KEY || isInfoStackTab(tab)) setBottomAltMode(true);
     else if(isToolsStackTab(tab)) setToolsStackMode(true);
     else if(isActivitiesStackTab(tab)) setTasksStackMode(true); // набор активностей живёт в ряду «Задачи и активности»
     else if(isClaudeStackTab(tab)) setClaudeStackMode(true);
@@ -20038,7 +20051,7 @@
     for(var o = 0; o < orders.length; o++){
       for(var i = 0; i < orders[o].length; i++){
         var key = orders[o][i];
-        if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY) continue;
+        if(key === "gear" || key === WHEEL_SYSTEM_TAB_KEY || key === DLFOLDERS_TAB_KEY) continue;
         if(set === 2 && isOwnStackTab(key)) continue; // «Статистика», «Инструменты» и «Активности» живут в наборе 1
         if(set === 1 && (TASK_TAB_IDS.hasOwnProperty(key) || key === "extra2") && !getShowAllTasksEnabled()) continue;
         if(key === EVENTS_TAB_KEY) continue; // «События» — вкладка режима колеса, как «Система» и alt-вкладки
@@ -20132,7 +20145,7 @@
     return {
       bottom: { host: "settingsTabsGear", ids: [INFO_STACK_BTN_ID, CLAUDE_STACK_BTN_ID, TOOLS_STACK_BTN_ID, SET2_TAB_IDS[NOTES_TAB_KEY], SET2_TAB_IDS[BOOKS_TAB_KEY], SET2_TAB_IDS[ITEM_CARDS_TAB_KEY], TASKS_STACK_BTN_ID, CALENDAR_TAB_BTN_ID] },
       stats: { host: "settingsTabs", ids: vals(INFO_STACK_BTN_IDS) },
-      settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
+      settings: { host: "settingsTabs", ids: vals(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_BTN_ID, DLFOLDERS_TAB_BTN_ID, EVENTS_TAB_BTN_ID]) },
       tools: { host: "settingsTabs", ids: vals(TOOLS_STACK_BTN_IDS) },
       activities: { host: "settingsTabs", ids: vals(ACTIVITIES_STACK_BTN_IDS) },
       tasks: { host: "settingsTabs", ids: vals(TASK_TAB_IDS).concat([EXTRA_TAB_IDS.extra2]) },
@@ -20220,7 +20233,7 @@
   // ---- боковые ряды: какой вкладкой открывать ряд ----
   var STACK_LAST_TAB_KEY = "bibleStackLastTab_v1";
   function stackGroupTabs(g){
-    if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, EVENTS_TAB_KEY], INFO_STACK_TABS); // «Настройки и статистика»: два набора вкладок в одном ряду
+    if(g === "wheel") return Object.keys(BOTTOM_ALT_TAB_IDS).concat([WHEEL_SYSTEM_TAB_KEY, DLFOLDERS_TAB_KEY, EVENTS_TAB_KEY], INFO_STACK_TABS); // «Настройки и статистика»: два набора вкладок в одном ряду
     if(g === "tasks") return Object.keys(TASK_TAB_IDS).concat(["extra2"], ACTIVITIES_STACK_TABS); // «Задачи и активности»: два набора вкладок в одном ряду
     if(g === "tools") return TOOLS_STACK_TABS;
     if(g === "claude") return CLAUDE_STACK_TABS.concat(window.UserTabsMod ? window.UserTabsMod.keys() : []);

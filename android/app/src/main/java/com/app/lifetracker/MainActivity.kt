@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.6 (22.11) — вкладка «Сохранение загрузок»: системное окно выбора папки для типа файла (`downloadFolderLauncher`, `pickDownloadFolder`; ТЗ TZ_downloads.md, этап 4). Откат: MainActivity.kt 18.5.
 // Версия: 18.5 (21.11) — главный WebView: `setDownloadListener` → `DownloadLauncher` (скачивание http/https самим приложением, ТЗ TZ_downloads.md, этап 1). Откат: MainActivity.kt 18.4.
 // Версия: 18.4 (17.11) — главный WebView подключён к длинному скриншоту ([InnerScrollCapture.install]): кнопка «Прокрутка» в плашке снимка экрана была неактивна, потому что страница прокручивает внутренний блок, а не сам WebView. Откат: MainActivity.kt 18.3.
 // Версия: 18.3 (15.11) — белый экран после возврата из другого приложения: после возврата (onStop → onResume) проверяется, что страница рисует кадры (requestAnimationFrame отвечает); если нет — встряска окна WebView (INVISIBLE → VISIBLE), затем reload, затем recreate. Откат: MainActivity.kt 18.2.
@@ -368,6 +369,42 @@ class MainActivity : ComponentActivity() {
         try {
             pdfFolderLauncher.launch(null)
         } catch (e: Exception) {
+            toast("Не удалось открыть выбор папки")
+        }
+    }
+
+    // Вкладка «Сохранение загрузок»: системное окно выбора папки для записи (категории или «своего формата»); с правом на чтение и запись.
+    // Страница узнаёт результат через window.__ltOnDownloadFolder(ключ, true|false); ключ — `cat:<key>` или `rule:<ext>`.
+    private var pendingDownloadFolderKey: String? = null
+
+    private val downloadFolderLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val key = pendingDownloadFolderKey
+            pendingDownloadFolderKey = null
+            val uri = if (result.resultCode == android.app.Activity.RESULT_OK) result.data?.data else null
+            val ok = if (key != null && uri != null) DownloadFolders.setFolder(applicationContext, key, uri) else false
+            if (key != null) {
+                runOnUiThread {
+                    if (!isDestroyed && pageTrusted) {
+                        webView.evaluateJavascript("window.__ltOnDownloadFolder && window.__ltOnDownloadFolder(" + org.json.JSONObject.quote(key) + ", $ok)", null)
+                    }
+                }
+            }
+        }
+
+    /** Вызывается мостом в главном потоке. */
+    fun pickDownloadFolder(key: String) {
+        try {
+            pendingDownloadFolderKey = key
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+            )
+            downloadFolderLauncher.launch(intent)
+        } catch (e: Exception) {
+            pendingDownloadFolderKey = null
             toast("Не удалось открыть выбор папки")
         }
     }

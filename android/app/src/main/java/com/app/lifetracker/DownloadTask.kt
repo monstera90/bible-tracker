@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 4: `targetNote` (пометка «Папка недоступна…» для карточки «Готово»). Откат: DownloadTask.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
 import java.io.File
@@ -37,6 +38,7 @@ class DownloadTask(val id: Long, val url: String, val headers: Map<String, Strin
     @Volatile var source = DlSource.USER
     @Volatile var category = "other" // ключ раздела 13 ТЗ (этап 4)
     @Volatile var targetLabel = "" // «Загрузки» или название папки — для подписи «Готово»
+    @Volatile var targetNote = "" // пометка вместо «→ папка», если пришлось взять запасное место («Папка недоступна — сохранено в «Загрузки»»)
     @Volatile var verify: ((File) -> String?)? = null // проверка готового файла: null — всё хорошо, иначе текст ошибки (этап 5)
     @Volatile var silent = false // без диалога «Обычное / В N потоков»
     @Volatile var showInIsland = true

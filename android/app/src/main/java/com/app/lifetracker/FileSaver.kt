@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 4 (6.7): место сохранения выбирает `DownloadTarget.resolve` (папка пользователя по типу файла, иначе «Загрузки»); в ответе `finish` — `where` и `note`. Откат: FileSaver.kt 1.0.
 
 import android.content.ClipData
 import android.content.ContentResolver
@@ -11,6 +12,7 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.util.Base64
 import android.webkit.MimeTypeMap
@@ -25,7 +27,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Приём файла от страницы по частям (base64) и два назначения:
- *  - SAVE: запись в папку «Загрузки»: через MediaStore на Android 10+ (без разрешений), напрямую в папку на Android 5-9
+ *  - SAVE: запись в папку «Загрузки» либо — если пользователь выбрал папку для этого типа файла на вкладке «Сохранение загрузок»
+ *    (ТЗ скачивания, 6.7; выбор — [DownloadTarget.resolve]) — в неё (по пути или через SAF); запись в «Загрузки»: через MediaStore на Android 10+ (без разрешений), напрямую в папку на Android 5-9
  *    (разрешение WRITE_EXTERNAL_STORAGE; на Android 6-9 запрашивается при первом сохранении);
  *  - STAGE: временный файл в cache/share/ для системного меню «Поделиться» (через FileProvider).
  * Страница режет Blob на куски по ~3 МБ (native-shell.js), поэтому архив любого размера не лежит в памяти целиком.
@@ -70,9 +73,12 @@ class FileSaver(private val context: Context) {
         val mime: String,
         val out: OutputStream,
         val uri: Uri?,
-        val file: File?
+        val file: File?,
+        val saf: Boolean = false, // uri — документ в папке пользователя (SAF), а не запись MediaStore
+        val where: String = DownloadTarget.LABEL_DOWNLOADS // куда сохраняем: «Загрузки» или название папки
     ) {
         var bytes: Long = 0
+        var note: String = "" // «Папка недоступна — сохранено в «Загрузки»»
     }
 
     private val sessions = ConcurrentHashMap<String, Session>()
@@ -81,15 +87,51 @@ class FileSaver(private val context: Context) {
 
     private val resolver: ContentResolver get() = context.contentResolver
 
-    /** Начало сохранения в «Загрузки». Возвращает идентификатор сессии или "" при ошибке. */
+    /**
+     * Начало сохранения: в папку пользователя, если она выбрана для этого типа файла (и доступна), иначе в «Загрузки».
+     * Возвращает идентификатор сессии или "" при ошибке. Папка не открылась — файл идёт в «Загрузки» с пометкой в результате.
+     */
     fun beginSave(rawName: String?): String {
         return try {
             val name = sanitizeName(rawName)
             val mime = mimeForName(name)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) beginSaveMediaStore(name, mime) else beginSaveLegacy(name, mime)
+            var note = ""
+            val target = try { DownloadTarget.resolve(context, name, DlSource.USER) } catch (e: Exception) { null }
+            val folder = target?.folder
+            if (folder != null) {
+                val fid = beginSaveFolder(folder, name, mime)
+                if (fid.isNotEmpty()) return fid
+                note = DownloadTarget.NOTE_FOLDER_LOST
+            } else if (target != null) {
+                note = target.note
+            }
+            val id = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) beginSaveMediaStore(name, mime) else beginSaveLegacy(name, mime)
+            if (id.isNotEmpty() && note.isNotEmpty()) sessions[id]?.note = note
+            id
         } catch (e: Exception) {
             ""
         }
+    }
+
+    /** Запись в папку пользователя: обычным файлом, если путь доступен («Доступ ко всем файлам»), иначе документом SAF. "" — не вышло. */
+    private fun beginSaveFolder(folder: DownloadFolders.Folder, name: String, mime: String): String {
+        val dir = DownloadFolders.directDir(context, folder.treeUri)
+        if (dir != null) {
+            val file = createUniqueFile(dir, name) ?: return ""
+            val out = FileOutputStream(file).buffered(1 shl 16)
+            val id = "s" + counter.incrementAndGet()
+            sessions[id] = Session(Mode.SAVE, file.name, mime, out, null, file, where = folder.label)
+            return id
+        }
+        val doc = DownloadFolders.createDocument(context, folder.treeUri, name) ?: return ""
+        val out = try { resolver.openOutputStream(doc, "w") } catch (e: Exception) { null }
+        if (out == null) {
+            try { DocumentsContract.deleteDocument(resolver, doc) } catch (e: Exception) { }
+            return ""
+        }
+        val id = "s" + counter.incrementAndGet()
+        sessions[id] = Session(Mode.SAVE, name, mime, out.buffered(1 shl 16), doc, null, saf = true, where = folder.label)
+        return id
     }
 
     /** Android 10+: запись через MediaStore, разрешений не нужно. */
@@ -181,19 +223,22 @@ class FileSaver(private val context: Context) {
             when (session.mode) {
                 Mode.SAVE -> {
                     val uri = session.uri
-                    if (uri != null) {
+                    if (uri != null && session.saf) {
+                        // документ в папке пользователя (SAF): IS_PENDING нет, имя — то, под которым создали
+                        saved(session, session.name)
+                    } else if (uri != null) {
                         val done = ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }
                         resolver.update(uri, done, null, null)
-                        JSONObject().put("ok", true).put("name", savedName(uri) ?: session.name).put("bytes", session.bytes).toString()
+                        saved(session, savedName(uri) ?: session.name)
                     } else {
                         // Android 5-9: файл лежит в «Загрузках»; сообщаем медиасканеру, чтобы он появился в файловых менеджерах.
-                        val saved = session.file!!
+                        val savedFile = session.file!!
                         try {
-                            MediaScannerConnection.scanFile(context, arrayOf(saved.absolutePath), arrayOf(session.mime), null)
+                            MediaScannerConnection.scanFile(context, arrayOf(savedFile.absolutePath), arrayOf(session.mime), null)
                         } catch (e: Exception) {
                             // файл уже записан; появится в списках позже
                         }
-                        JSONObject().put("ok", true).put("name", saved.name).put("bytes", session.bytes).toString()
+                        saved(session, savedFile.name)
                     }
                 }
                 Mode.STAGE -> {
@@ -285,7 +330,9 @@ class FileSaver(private val context: Context) {
 
     private fun discard(session: Session) {
         try {
-            if (session.uri != null) resolver.delete(session.uri, null, null)
+            if (session.uri != null) {
+                if (session.saf) DocumentsContract.deleteDocument(resolver, session.uri) else resolver.delete(session.uri, null, null)
+            }
             if (session.file != null) {
                 // В «Загрузках» (Android 5-9) удаляем только сам файл: папку «Загрузки» трогать нельзя.
                 if (session.mode == Mode.STAGE) deleteQuietly(session.file) else session.file.delete()
@@ -303,6 +350,10 @@ class FileSaver(private val context: Context) {
             // не критично
         }
     }
+
+    /** Результат сохранения: имя, размер, куда сохранено ([Session.where]) и пометка, если пришлось взять запасное место. */
+    private fun saved(session: Session, name: String): String =
+        JSONObject().put("ok", true).put("name", name).put("bytes", session.bytes).put("where", session.where).put("note", session.note).toString()
 
     private fun fail(message: String): String =
         JSONObject().put("ok", false).put("error", message).toString()

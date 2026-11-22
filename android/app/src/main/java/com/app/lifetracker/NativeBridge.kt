@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.6 (22.11) — мост версии 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders) — ТЗ TZ_downloads.md, этап 4; `finishSave` называет в сообщении, куда сохранено. Откат: NativeBridge.kt 30.5.
 // Версия: 30.5 (21.11) — мост версии 42: `downloadThreadsGet` / `downloadThreadsSet` — число потоков скачивания по умолчанию (ТЗ TZ_downloads.md, этап 1). Откат: NativeBridge.kt 30.4.
 // Версия: 30.4 (21.11) — мост версии 41: `cardAlarmTap(id)` (решение по нажатию на карточку-будильник: 0 завести, 1 заглушить, 2 выключить, 3 ничего — одно для виджета и приложения) и `silenceCardAlarm(id)`. Откат: NativeBridge.kt 30.3.
 // Версия: 30.3 (21.11) — мост версии 40: `widgetNoteTake` / `widgetNoteAck` (заметки, снятые с виджета двойным нажатием на карточку «Заметки»; QrWidgets.takeNoteRemove/ackNoteRemove). Откат: NativeBridge.kt 30.2.
@@ -69,6 +70,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
+         * 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders): папки по типам файлов и «свои форматы»; `finishSave` отдаёт странице `where` и `note`.
          * 42: `downloadThreadsGet()` / `downloadThreadsSet(n)` — число потоков скачивания по умолчанию, 2–8 (вкладка «Система»; FileDownloads).
          * 39: `widgetTimerTake()` / `widgetTimerAck(ns)` — таймеры, запущенные нажатием в виджете без окна: страница записывает их в журнал событий.
          * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
@@ -77,7 +79,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 42
+        const val BRIDGE_VERSION = 43
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -204,7 +206,11 @@ class NativeBridge(private val activity: MainActivity) {
         val result = activity.fileSaver.finish(id)
         try {
             val json = JSONObject(result)
-            if (json.optBoolean("ok")) activity.toast("Сохранено в «Загрузки»: " + json.optString("name"))
+            if (json.optBoolean("ok")) {
+                val note = json.optString("note")
+                val where = json.optString("where").ifEmpty { DownloadTarget.LABEL_DOWNLOADS }
+                activity.toast((if (note.isNotEmpty()) note else "Сохранено в «$where»") + ": " + json.optString("name"))
+            }
         } catch (e: Exception) {
             // результат всё равно возвращается странице
         }
@@ -1185,6 +1191,60 @@ class NativeBridge(private val activity: MainActivity) {
     fun downloadThreadsSet(n: Int): Int {
         if (!activity.pageTrusted) return 0
         return FileDownloads.setThreads(activity.applicationContext, n)
+    }
+
+    // ---------- «Сохранение загрузок»: папки по типам файлов (мост ≥43; DownloadFolders, DownloadRules) ----------
+
+    /**
+     * Всё для вкладки «Сохранение загрузок»: {"categories":[{key,title,formats,set,enabled,label,ok}], "rules":[{ext,set,enabled,label,ok,overrides?}],
+     * "music":{set,name}, "pdf":{set,name}, "maxRules":50, "maxFormatLen":16, "sdk":N}. Ключи записей для остальных методов: `cat:<key>` и `rule:<ext>`.
+     */
+    @JavascriptInterface
+    fun downloadFoldersGet(): String {
+        if (!activity.pageTrusted) return "{}"
+        return DownloadFolders.stateJson(activity.applicationContext)
+    }
+
+    /** Открывает системное окно выбора папки для записи [key]; по результату страница получает window.__ltOnDownloadFolder(key, true|false). */
+    @JavascriptInterface
+    fun downloadFolderPick(key: String?): Boolean {
+        if (!activity.pageTrusted || key.isNullOrBlank()) return false
+        activity.runOnUiThread { activity.pickDownloadFolder(key) }
+        return true
+    }
+
+    /** Переключатель «Включено» записи [key] (включить можно только при выбранной папке). Возвращает новое состояние. */
+    @JavascriptInterface
+    fun downloadFolderSetEnabled(key: String?, on: Boolean): Boolean {
+        if (!activity.pageTrusted || key.isNullOrBlank()) return false
+        return DownloadFolders.setEnabled(activity.applicationContext, key, on)
+    }
+
+    /** «Сбросить»: папка записи [key] забыта, файлы этого типа снова идут в «Загрузки». */
+    @JavascriptInterface
+    fun downloadFolderReset(key: String?): Boolean {
+        if (!activity.pageTrusted || key.isNullOrBlank()) return false
+        return DownloadFolders.reset(activity.applicationContext, key)
+    }
+
+    /** «Взять папку из вкладки «Музыка» / «PDF»» (which = "music" | "pdf"). false — папки нет или на неё нет права записи. */
+    @JavascriptInterface
+    fun downloadFolderUseLibrary(key: String?, which: String?): Boolean {
+        if (!activity.pageTrusted || key.isNullOrBlank() || which.isNullOrBlank()) return false
+        return DownloadFolders.useLibrary(activity.applicationContext, key, which)
+    }
+
+    /** Новое правило «своего формата»: {"ok":true,"ext":"zip","overrides":"Архивы"?} или {"ok":false,"error":"...","exists":true?}. Папку страница просит следом (downloadFolderPick("rule:<ext>")). */
+    @JavascriptInterface
+    fun downloadRuleAdd(ext: String?, replace: Boolean): String {
+        if (!activity.pageTrusted) return "{\"ok\":false}"
+        return DownloadFolders.addRule(activity.applicationContext, ext, replace)
+    }
+
+    @JavascriptInterface
+    fun downloadRuleRemove(ext: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return DownloadFolders.removeRule(activity.applicationContext, ext)
     }
 
     // ---------- виджеты «Стопка QR-карточек» (мост ≥31) ----------

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 4: место записи выбирает `DownloadTarget.newWorkFile(app, t)`; итог переноса ([DownloadTarget.Saved]) — в `targetLabel`/`targetNote`. Откат: DownloadService.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
 import android.app.Notification
@@ -259,7 +260,7 @@ class DownloadService : Service() {
             }
             var work = t.work
             if (work == null) {
-                work = DownloadTarget.newWorkFile(app, t.id, t.fileName)
+                work = DownloadTarget.newWorkFile(app, t)
                 t.work = work
             }
             FileDownloads.persist(app)
@@ -305,7 +306,9 @@ class DownloadService : Service() {
         }
         try {
             t.copying = true
-            t.targetLabel = DownloadTarget.commit(applicationContext, t, work)
+            val saved = DownloadTarget.commit(applicationContext, t, work)
+            t.targetLabel = saved.label
+            t.targetNote = saved.note
             e.cleanup()
             t.copying = false
             t.finishedAt = System.currentTimeMillis()
