@@ -2,6 +2,7 @@
    my.js
    Основная логика приложения «График чтения Библии»
    Версия: 153.9 (22.11) — крестик удаления появляется сразу при долгом нажатии, вместе с вибрацией (раньше — после отпускания пальца). Откат: my.js 153.8.
+   Версия: 153.9 (22.11) — задачи, дёрганье: (1) «+» при правке другой задачи — предыдущая строка сворачивается сразу (`taskScheduleCollapse`/`taskFinishPendingCollapses`), а не через 500 мс поверх прокрутки к новой строке; (2) Enter в поле правки — `insertLineBreak` вместо `insertText` (`taskEditEnter`): нет блока div/br и схлопывания пустой строки; `taskEditParasOk` не требует пересборки для растянутого span; красная строка нового абзаца ставится сразу (`taskEditPrepareParaAtCaret`). Откат: my.js 153.8.
    Версия: 153.8 (22.11) — задачи: (1) в режиме правки абзацы видны так же, как в обычном виде (красная строка у первой строки абзаца: `taskEditFill`/`bindTaskEditParas`, `<span class="ed-para">` с `::before` 1ch в modals.css; текст, каретка и выделение не меняются); (2) крестик удаления — не плашка, а ещё одна кнопка ряда справа от «Копировать» (`taskShowDeleteBtn`, `.task-delete-btn`): обычно её нет, появляется после долгого нажатия на задачу, пропадает при касании мимо. Откат: my.js 153.7.
    Версия: 153.7 (22.11) — задачи: (1) «домик» на вкладках задач и комментариев (`#taskFabHomeStub`) — кнопка: прокручивает список вниз (начальный экран); (2) подложка под клавиатуру (`liftSpacer`) после конца ввода/сворачивания клавиатуры больше не снимается по таймеру (список дёргался): пустое место под задачей остаётся, пока не уйдёт с экрана при прокрутке, тогда тихо снимается (`retireSpacer`); (3) кнопки внутри строки («Копировать», «В работе» и др.), меняющие свою иконку прямо в обработчике, больше не открывают задачу на правку: нажатие определяется по пути события, а не по `e.target` (`taskEventOnIgnored`). Откат: my.js 153.6.
    Версия: 153.6 (22.11) — вкладка «Сохранение загрузок» (`set2s_17`, кнопка `settingsTabSet2Btn17`, модуль `downloadfolders.js`, `renderSettingsTabDlFolders`; ТЗ TZ_downloads.md, этап 4, раздел 13): язычок режима колеса рядом с «Системой» (регистрация везде, где есть `WHEEL_SYSTEM_TAB_KEY`; `DLFOLDERS_TAB_KEY`/`DLFOLDERS_TAB_BTN_ID`). Откат: my.js 153.5.
@@ -24883,6 +24884,7 @@
       fab.onclick = function(){
         flushPendingTaskEdits(); // не потерять то, что уже набрано в другой строке
         if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards(); // сторож соседней строки не должен откатывать прокрутку к новой
+        taskFinishPendingCollapses(); // предыдущая строка сворачивается сейчас, а не через 500 мс поверх прокрутки к новой
         var id = createTask(tabKey);
         // при выбранном цвете новая задача получает его — иначе при следующей перерисовке она пропала бы из отфильтрованного списка
         var curColorKey = getTaskColorFilter(tabKey);
@@ -24898,6 +24900,7 @@
           var listScroller = document.getElementById("settingsTabContent");
           if(listScroller) listScroller.scrollTop = listScroller.scrollHeight;
           renderTaskRowEdit(id, tabKey);
+          taskFinishPendingCollapses(); // если соседняя строка потеряла фокус только сейчас (от focus() новой) — тоже сворачиваем сразу
           if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow(); // поле ввода — вплотную над клавиатурой
         } else {
           renderTaskTabList(tabKey);
@@ -24905,6 +24908,7 @@
             var sc = document.getElementById("settingsTabContent");
             if(sc) sc.scrollTop = sc.scrollHeight;
             renderTaskRowEdit(id, tabKey);
+            taskFinishPendingCollapses();
             if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
           });
         }
@@ -25586,7 +25590,7 @@
     }
     return last || editable.appendChild(document.createTextNode(EMPTY_ANCHOR_CHAR));
   }
-  // разметка абзацев в поле соответствует тексту? (каждый .ed-para стоит ровно на первой строке абзаца и не захватывает вторую строку)
+  // разметка абзацев в поле соответствует тексту? (каждый .ed-para стоит на первой строке абзаца, а у каждой первой строки абзаца он есть)
   function taskEditParasOk(editable, text){
     var want = taskParaLineSet(text);
     var got = {}, line = 0, ok = true;
@@ -25594,7 +25598,8 @@
       if(!ok) return;
       if(node.nodeType === 3){
         var v = node.nodeValue.split(EMPTY_ANCHOR_CHAR).join("");
-        if(inPara && v.replace(/\n$/, "").indexOf("\n") !== -1){ ok = false; return; } // span растянулся на несколько строк
+        // span, растянувшийся на несколько строк, — не ошибка: красная строка рисуется только у его первой строки, а вторая и
+        // дальше лежат как обычный текст. Абзац, начавшийся внутри такого span'а после пустой строки, ловит сверка got/want ниже.
         line += v.split("\n").length - 1;
         return;
       }
@@ -25691,6 +25696,75 @@
     });
   }
 
+  // Enter в поле правки (ТЗ 22.11, дёрганье при абзаце). Раньше шло через insertText("\n"): Chrome превращал его в абзац-блок
+  // (<div><span><br></span></div>) — пустая строка сразу появлялась, а через 120 мс taskEditRebuild пересобирал поле в текст «...\n»,
+  // где хвостовой перевод строки пустой строки не рисует, — поле схлопывалось и снова росло при первой букве. insertLineBreak в
+  // белом пробеле pre-wrap кладёт в текст обычный «\n» (и сам добавляет служебный хвостовой «\n», чтобы пустая строка была видна), без
+  // блоков: вид не меняется, пересборка не нужна. Если браузер команду не знает — прежний способ.
+  function taskEditEnter(editable){
+    var done = false;
+    try{ done = document.execCommand("insertLineBreak", false, null); }catch(e){}
+    if(!done) document.execCommand("insertText", false, "\n");
+    taskEditPrepareParaAtCaret(editable);
+  }
+  // Каретка стоит на пустой строке, с которой начнётся новый абзац (после пустой строки или заголовка): сразу кладём туда
+  // .ed-para с невидимым якорем и ставим каретку внутрь — красная строка видна уже у каретки, а первая набранная буква остаётся
+  // в этом span'е. Иначе span появлялся бы только после набора слова (пересборка поля), и текст дёргался вправо на 1ch.
+  // Только когда каретка в конце текста (после неё лишь служебный перевод строки браузера) — разрыв посреди текста оставляем
+  // обычной пересборке.
+  function taskEditPrepareParaAtCaret(editable){
+    try{
+      var sel = window.getSelection();
+      if(!sel || !sel.rangeCount || !sel.isCollapsed) return;
+      var rg = sel.getRangeAt(0);
+      if(!editable.contains(rg.startContainer)) return;
+      var pre = document.createRange();
+      pre.selectNodeContents(editable);
+      pre.setEnd(rg.startContainer, rg.startOffset);
+      var before = pre.toString().split(EMPTY_ANCHOR_CHAR).join("");
+      var post = document.createRange();
+      post.selectNodeContents(editable);
+      post.setStart(rg.startContainer, rg.startOffset);
+      var after = post.toString().split(EMPTY_ANCHOR_CHAR).join("");
+      if(after !== "" && after !== "\n") return;
+      var probe = before + "x";
+      if(!taskParaLineSet(probe)[probe.split("\n").length - 1]) return;
+      var sp = document.createElement("span");
+      sp.className = "ed-para";
+      var anchor = document.createTextNode(EMPTY_ANCHOR_CHAR);
+      sp.appendChild(anchor);
+      var at = rg.cloneRange();
+      at.collapse(true);
+      at.insertNode(sp);
+      var r = document.createRange();
+      r.setStart(anchor, anchor.nodeValue.length);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }catch(e){}
+  }
+  // Строки, у которых потеря фокуса уже сохранила текст, а возврат в обычный вид ждёт 500 мс (blur в renderTaskRowEdit/renderRowEdit:
+  // пусть успеет сработать клик по соседней кнопке). Нажатие «+» ждать не должно: к его клику соседняя строка уже отработала.
+  // Если дать ей свернуться через 500 мс, она сдвигает список уже ПОСЛЕ того, как новая строка поднята над клавиатурой, и
+  // возвращает прокрутку к своему старому месту — список «прыгает» туда-сюда. Поэтому «+» сворачивает такие строки сразу.
+  var pendingTaskCollapses = [];
+  function taskScheduleCollapse(finish){
+    var p = { done: false, timer: null };
+    p.run = function(settleNow){
+      if(p.done) return;
+      p.done = true;
+      clearTimeout(p.timer);
+      var i = pendingTaskCollapses.indexOf(p);
+      if(i >= 0) pendingTaskCollapses.splice(i, 1);
+      finish(!!settleNow);
+    };
+    pendingTaskCollapses.push(p);
+    p.timer = setTimeout(function(){ p.run(false); }, 500);
+  }
+  function taskFinishPendingCollapses(){
+    pendingTaskCollapses.slice().forEach(function(p){ p.run(true); });
+  }
+
   // редактирование текста задачи — без отдельной дискеты сохранения: задача сохраняется сама, как
   // только поле теряет фокус.
   function renderTaskRowEdit(id, tabKey, onAfterAction){
@@ -25745,7 +25819,7 @@
     editable.addEventListener("keydown", function(e){
       if(e.key === "Enter"){
         e.preventDefault();
-        document.execCommand("insertText", false, "\n");
+        taskEditEnter(editable);
       }
     });
 
@@ -25773,14 +25847,15 @@
       editable.contentEditable = "false";
       taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
       if(detached) return;
-      setTimeout(function(){
+      taskScheduleCollapse(function(settleNow){
         if(document.body.contains(body)) renderTaskRowView(id, tabKey, onAfterAction);
+        if(settleNow){ if(collapseAnchor) collapseAnchor.stop(); return; } // список дальше двигает вызвавшая «+» — своё прежнее место не возвращаем
         restoreScroll();
         if(collapseAnchor){
           collapseAnchor.restore(); collapseAnchor.stop();
           if(restoreScroll.rebase) restoreScroll.rebase(); // сторож не должен откатывать эту поправку
         }
-      }, 500);
+      });
     });
 
     bindTaskRowActions(body, id, tabKey, onAfterAction);
@@ -26146,6 +26221,7 @@
       document.getElementById("taskProjectCreateFab").addEventListener("click", function(){
         flushPendingTaskEdits();
         if(window.AppKeyboard && window.AppKeyboard.cancelScrollGuards) window.AppKeyboard.cancelScrollGuards();
+        taskFinishPendingCollapses(); // см. #taskAddFab в renderTaskTabList
         var nid = createTask("next");
         var t = getTaskById(nid);
         t.c.nextForProjectId = projectId;
@@ -26156,6 +26232,7 @@
         var projArea = document.getElementById("taskProjectArea");
         if(projArea) projArea.scrollTop = projArea.scrollHeight;
         renderRowEdit(nid);
+        taskFinishPendingCollapses();
         if(window.AppKeyboard && window.AppKeyboard.settleNewRow) window.AppKeyboard.settleNewRow();
       });
 
@@ -26356,7 +26433,7 @@
       editable.addEventListener("keydown", function(e){
         if(e.key === "Enter"){
           e.preventDefault();
-          document.execCommand("insertText", false, "\n");
+          taskEditEnter(editable);
         }
       });
 
@@ -26387,14 +26464,15 @@
         editable.contentEditable = "false";
         taskCollapse(id); // потеря фокуса = конец редактирования: задача сворачивается обратно
         if(detached) return;
-        setTimeout(function(){
+        taskScheduleCollapse(function(settleNow){
           if(document.body.contains(body)) renderRowView(id);
+          if(settleNow){ if(collapseAnchor) collapseAnchor.stop(); return; } // см. renderTaskRowEdit
           restoreScroll();
           if(collapseAnchor){
             collapseAnchor.restore(); collapseAnchor.stop();
             if(restoreScroll.rebase) restoreScroll.rebase();
           }
-        }, 500);
+        });
       });
 
       bindRowActions(body, id);
