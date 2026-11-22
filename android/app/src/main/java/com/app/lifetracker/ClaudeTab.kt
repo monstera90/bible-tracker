@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.7 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: ClaudeTab.kt 1.6.
 // Версия: 1.6 (21.11) — `setDownloadListener`: файлы claude.ai скачивает приложение (DownloadLauncher, ТЗ TZ_downloads.md, этап 1). Откат: ClaudeTab.kt 1.5.
 // Версия: 1.5 (20.11) — кнопки вкладки перенесены в нижний ряд страницы, а claude.ai растянут на всю область и заходит под них: WebView теперь `SiteWebView` с «окнами» ([setHoles], мост `claudeHoles`; Android 10+, как у вкладок-сайтов). Откат: ClaudeTab.kt 1.4.
 // Версия: 1.4 (11.11)
@@ -194,9 +195,9 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         cookies.setAcceptCookie(true)
         cookies.setAcceptThirdPartyCookies(v, true)
 
-        // Файл с claude.ai скачивает само приложение (http/https; ход виден в плавающем острове). blob: и data: — этап 6 ТЗ скачивания.
+        // Файл с claude.ai скачивает само приложение: http/https — движок, ход виден в плавающем острове; blob: и data: — PageDownloads (этап 6).
         v.setDownloadListener { url, ua, cd, mime, _ ->
-            try { DownloadLauncher.handle(activity, url, ua, cd, mime, v.url, "set2s_10") } catch (e: Exception) { }
+            try { DownloadLauncher.handlePage(activity, v, url, ua, cd, mime, v.url, "set2s_10") } catch (e: Exception) { }
         }
 
         v.webViewClient = object : WebViewClient() {

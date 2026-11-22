@@ -1,19 +1,42 @@
 package com.app.lifetracker
+// Версия: 1.1 (22.11) — этап 6 (6.6): [handlePage] — `data:` и `blob:` со вкладок-сайтов и Claude сохраняет приложение ([PageDownloads]), http/https — прежний путь. Откат: DownloadLauncher.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: общий обработчик скачивания для вкладок-сайтов, вкладки Claude и главного WebView (раздел 6.1, 6.4).
 
 import android.app.Activity
 import android.app.AlertDialog
 import android.webkit.CookieManager
+import android.webkit.WebView
 import android.widget.Toast
 
 /**
  * Запуск скачивания из WebView. Один код на все места (UserTabs, ClaudeTab, MainActivity), чтобы не копировать его.
- * Только `http` / `https`: `blob:` и `data:` приходят на этапе 6 — до него вызывающий оставляет прежний путь.
+ * [handle] — только `http` / `https`. [handlePage] — для WebView вкладок-сайтов и Claude: `data:` и `blob:` уходят в [PageDownloads] (этап 6), остальное — в [handle].
  *
  * Порядок: заголовки (cookie, User-Agent, Referer) → разведка в фоне (имя и размер) → окно «Обычное / В N потоков / Отмена» →
  * задача в [FileDownloads] и служба. Если разведка не удалась — окно всё равно показывается, а причину покажет остров.
  */
 object DownloadLauncher {
+
+    /**
+     * Обработчик скачивания для WebView вкладок-сайтов и Claude: `data:` и `blob:` сохраняет приложение ([PageDownloads]), http/https — [handle].
+     * @return true — адрес принят; false — другая схема (вызывающий решает сам, как и раньше).
+     */
+    fun handlePage(
+        activity: MainActivity,
+        view: WebView,
+        url: String?,
+        userAgent: String?,
+        contentDisposition: String?,
+        mimeType: String?,
+        referer: String?,
+        originTab: String
+    ): Boolean {
+        if (PageDownloads.isPageUrl(url)) {
+            PageDownloads.start(activity, view, url!!, contentDisposition, mimeType)
+            return true
+        }
+        return handle(activity, url, userAgent, contentDisposition, mimeType, referer, originTab)
+    }
 
     /**
      * @return true — адрес принят (скачивание начнётся после выбора способа); false — адрес не http/https, обработчик ничего не сделал.
