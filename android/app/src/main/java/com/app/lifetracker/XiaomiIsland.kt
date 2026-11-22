@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.1 (21.11) — `downloadIconBitmap`: значок загрузки для внутреннего острова (ТЗ скачивания файлов, этап 1). Откат: XiaomiIsland.kt 12.0.
 // Версия: 12.0 (15.11)
 // Версия: 8.1 (10.11)
 // Версия: 7.1 (27.10) — кнопка паузы острова тренировки цвета метки (красная/зелёная/жёлтая): `pauseBitmap(..., colorOverride)`, `workoutDotColor`.
@@ -828,6 +829,49 @@ object XiaomiIsland {
             else -> {
                 paint.style = Paint.Style.FILL
                 c.drawCircle(48f, 48f, 17f, paint)
+            }
+        }
+        return bmp
+    }
+
+    /**
+     * Значок загрузки (внутренний остров, ТЗ скачивания): тёмный круг, кольцо прогресса [fraction] (от верха по часовой; < 0 — размер неизвестен,
+     * кольцо не рисуется) и стрелка вниз. [glyph]: 0 — идёт, 1 — «Готово» (галочка), 2 — ошибка (восклицательный знак).
+     * Цвет [DOWNLOAD_COLOR] не повторяет цвета помодоро, таймера, секундомера, музыки, видео и тренировки.
+     */
+    const val DOWNLOAD_COLOR = 0xFF00B8D4.toInt()
+
+    fun downloadIconBitmap(fraction: Float, size: Int = 96, glyph: Int = 0): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF1E1E1E.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        val color = if (glyph == 2) 0xFFE53935.toInt() else DOWNLOAD_COLOR
+        val ring = RectF(10f, 10f, 86f, 86f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 8f
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.color = 0xFF3A3A3A.toInt()
+        c.drawArc(ring, 0f, 360f, false, paint)
+        paint.color = color
+        if (glyph != 0 || fraction >= 0.999f) c.drawArc(ring, 0f, 360f, false, paint)
+        else if (fraction > 0f) c.drawArc(ring, -90f, 360f * fraction, false, paint)
+        paint.color = Color.WHITE
+        paint.strokeWidth = 7f
+        when (glyph) {
+            1 -> c.drawPath(Path().apply { moveTo(34f, 49f); lineTo(44f, 59f); lineTo(63f, 38f) }, paint)
+            2 -> {
+                c.drawLine(48f, 30f, 48f, 52f, paint)
+                paint.style = Paint.Style.FILL
+                c.drawCircle(48f, 65f, 4.5f, paint)
+            }
+            else -> {
+                c.drawLine(48f, 29f, 48f, 61f, paint)
+                c.drawPath(Path().apply { moveTo(35f, 49f); lineTo(48f, 62f); lineTo(61f, 49f) }, paint)
             }
         }
         return bmp

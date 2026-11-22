@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.5 (21.11) — мост версии 42: `downloadThreadsGet` / `downloadThreadsSet` — число потоков скачивания по умолчанию (ТЗ TZ_downloads.md, этап 1). Откат: NativeBridge.kt 30.4.
 // Версия: 30.4 (21.11) — мост версии 41: `cardAlarmTap(id)` (решение по нажатию на карточку-будильник: 0 завести, 1 заглушить, 2 выключить, 3 ничего — одно для виджета и приложения) и `silenceCardAlarm(id)`. Откат: NativeBridge.kt 30.3.
 // Версия: 30.3 (21.11) — мост версии 40: `widgetNoteTake` / `widgetNoteAck` (заметки, снятые с виджета двойным нажатием на карточку «Заметки»; QrWidgets.takeNoteRemove/ackNoteRemove). Откат: NativeBridge.kt 30.2.
 // Версия: 30.2 (20.11) — `claudeHoles(spec)`: окна под кнопки страницы в WebView вкладки Claude (claude.ai растянут под нижний ряд кнопок; Android 10+). Версию моста не меняет — страница проверяет наличие метода.
@@ -68,6 +69,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
+         * 42: `downloadThreadsGet()` / `downloadThreadsSet(n)` — число потоков скачивания по умолчанию, 2–8 (вкладка «Система»; FileDownloads).
          * 39: `widgetTimerTake()` / `widgetTimerAck(ns)` — таймеры, запущенные нажатием в виджете без окна: страница записывает их в журнал событий.
          * 17: вкладка «Тренировки» (workoutStart / workoutPause / workoutStop / workoutState / workoutTakeFinished / workoutAckFinished / openLocationSettings).
          * 16: `getScreenTimeTotals()` — накопленные устройством миллисекунды музыки и таймеров для вкладки «Трекер экранов».
@@ -75,7 +77,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 41
+        const val BRIDGE_VERSION = 42
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1167,6 +1169,22 @@ class NativeBridge(private val activity: MainActivity) {
     fun islandOpenOverlaySettings() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { InAppIsland.openOverlaySettings(activity.applicationContext) }
+    }
+
+    // ---------- скачивание файлов (мост ≥42) ----------
+
+    /** Число потоков по умолчанию для скачивания «В N потоков» (2–8, по умолчанию 4). 0 — страница не доверенная. */
+    @JavascriptInterface
+    fun downloadThreadsGet(): Int {
+        if (!activity.pageTrusted) return 0
+        return FileDownloads.threads(activity.applicationContext)
+    }
+
+    /** Сохранить число потоков по умолчанию (приводится к 2–8); возвращает сохранённое значение. */
+    @JavascriptInterface
+    fun downloadThreadsSet(n: Int): Int {
+        if (!activity.pageTrusted) return 0
+        return FileDownloads.setThreads(activity.applicationContext, n)
     }
 
     // ---------- виджеты «Стопка QR-карточек» (мост ≥31) ----------

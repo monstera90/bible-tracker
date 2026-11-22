@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.7 (21.11) — скачивание файлов со вкладок-сайтов: `setDownloadListener` отдаёт http/https в `DownloadLauncher` (движок и остров, ТЗ TZ_downloads.md, этап 1) вместо внешнего браузера. Откат: UserTabs.kt 8.6.
 // Версия: 8.6 (20.11) — `SiteWebView` (WebView с «окнами» под кнопки) стал `internal`: тот же класс использует вкладка Claude (ClaudeTab.kt 1.5). Поведение вкладок-сайтов не менялось. Откат: UserTabs.kt 8.5.
 // Версия: 8.5 (16.11) — мышь и тачпад: окна под кнопками («поделиться», «весь экран», «домик») пропускают и «общие» события (dispatchGenericMotionEvent), а не только касания.
 // Версия: 8.4 (16.11) — горячие клавиши физической клавиатуры из WebView вкладки-сайта уходят странице (hotkeyForwarder). Откат: UserTabs.kt 8.3.
@@ -1510,8 +1511,11 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
         installFrameHook(v, t)
 
-        v.setDownloadListener { url, _, _, _, _ ->
-            try { activity.openExternalLink(Uri.parse(url)) } catch (e: Exception) { }
+        // http/https — скачивает само приложение (DownloadLauncher, остров показывает ход); blob: и data: до этапа 6 ТЗ остаются на прежнем пути
+        v.setDownloadListener { url, ua, cd, mime, _ ->
+            try {
+                if (!DownloadLauncher.handle(activity, url, ua, cd, mime, v.url, "utab_" + t.id)) activity.openExternalLink(Uri.parse(url))
+            } catch (e: Exception) { }
         }
 
         v.webViewClient = object : WebViewClient() {

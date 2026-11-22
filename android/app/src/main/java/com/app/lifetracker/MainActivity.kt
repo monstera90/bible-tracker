@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.5 (21.11) — главный WebView: `setDownloadListener` → `DownloadLauncher` (скачивание http/https самим приложением, ТЗ TZ_downloads.md, этап 1). Откат: MainActivity.kt 18.4.
 // Версия: 18.4 (17.11) — главный WebView подключён к длинному скриншоту ([InnerScrollCapture.install]): кнопка «Прокрутка» в плашке снимка экрана была неактивна, потому что страница прокручивает внутренний блок, а не сам WebView. Откат: MainActivity.kt 18.3.
 // Версия: 18.3 (15.11) — белый экран после возврата из другого приложения: после возврата (onStop → onResume) проверяется, что страница рисует кадры (requestAnimationFrame отвечает); если нет — встряска окна WebView (INVISIBLE → VISIBLE), затем reload, затем recreate. Откат: MainActivity.kt 18.2.
 // Версия: 18.2 (15.11) — проверка новой сборки APK при запуске и возврате ([ApkUpdater], не чаще раза в 3 часа): диалог «Скачать / Позже»; versionCode установленного APK сообщается WebUpdater (`minApk`).
@@ -1231,6 +1232,11 @@ class MainActivity : ComponentActivity() {
         settings.javaScriptCanOpenWindowsAutomatically = true
 
         webView.addJavascriptInterface(NativeBridge(this), "LifeTrackerNative")
+        // Скачивание http/https из главного WebView — тем же обработчиком, что на вкладках-сайтах (ТЗ скачивания, 6.4). blob: и data: страница
+        // приложения сохраняет сама (native-shell.js → FileSaver), сюда они не доходят; чужие адреса остаются без действия, как и раньше.
+        webView.setDownloadListener { url, ua, cd, mime, _ ->
+            try { DownloadLauncher.handle(this, url, ua, cd, mime, webView.url, "") } catch (e: Exception) { }
+        }
 
         webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {

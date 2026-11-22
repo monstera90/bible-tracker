@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 24.0 (21.11) — занятие «загрузка файла» (`K_DOWNLOAD`, `downloadItem`; ТЗ TZ_downloads.md, этап 1); порядок занятий задаёт `IslandOrder` (помодоро → музыка → видео → загрузки → таймеры → секундомер → тренировка); ряд значков карточки листается вбок (`stripScroll`). Откат: InAppIsland.kt 23.1.
 // Версия: 23.1 (15.11)
 
 import android.app.Activity
@@ -40,13 +41,14 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 
-// Виды занятий на плашке; порядок — приоритет (первое — в капсуле, остальные — кружками справа от неё).
-private const val K_POMO = 0
-private const val K_TIMER = 1
-private const val K_SW = 2
-private const val K_MUSIC = 3
-private const val K_VIDEO = 4
-private const val K_WORKOUT = 5
+// Виды занятий на плашке; порядок на плашке задаёт IslandOrder.rank (первое — в капсуле, остальные — в раскрытой карточке).
+private const val K_POMO = IslandOrder.KIND_POMO
+private const val K_TIMER = IslandOrder.KIND_TIMER
+private const val K_SW = IslandOrder.KIND_SW
+private const val K_MUSIC = IslandOrder.KIND_MUSIC
+private const val K_VIDEO = IslandOrder.KIND_VIDEO
+private const val K_WORKOUT = IslandOrder.KIND_WORKOUT
+private const val K_DOWNLOAD = IslandOrder.KIND_DOWNLOAD
 
 /** Одно занятие на плашке: всё, что нужно нарисовать свёрнутую капсулу, кружок и раскрытую карточку. */
 private class Item(val key: String, val kind: Int) {
@@ -68,6 +70,7 @@ private class Item(val key: String, val kind: Int) {
     var modeKey = "" // кнопка режима вместо значка карточки (видео: фон / фон с плавающим окном); меняется, когда её надо перерисовать
     var modeFn: (() -> Bitmap)? = null
     var onMode: (() -> Unit)? = null // null — у занятия обычный значок, кнопки режима нет
+    var tabKey: String? = null // вкладка, откуда запущено занятие (скачивание): нажатие на карточку открывает её
     var onDone: (() -> Unit)? = null // сработавший таймер: капсула висит прежнего размера, одинарное нажатие гасит вибрацию и убирает её; карточки нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
@@ -166,6 +169,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val plusBtn = ImageView(appCtx) // «+5» помодоро
     private val modeBtn = ImageView(appCtx) // видео: режим «фон» / «фон с плавающим окном» — на месте значка карточки
     private val strip = LinearLayout(appCtx) // карточка с двумя и больше занятиями: ряд значков для переключения
+    private val stripScroll = android.widget.HorizontalScrollView(appCtx) // ряд значков листается вбок, когда занятий так много, что значки уже не помещаются
     private val cardBar = View(appCtx) // полоска внизу карточки (при одном занятии с карточкой)
     private val cardBg = GradientDrawable().apply { setColor(Color.BLACK) }
 
@@ -324,7 +328,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         strip.orientation = LinearLayout.HORIZONTAL
         strip.gravity = Gravity.CENTER
-        strip.visibility = View.GONE
+        stripScroll.visibility = View.GONE
         cardBar.background = GradientDrawable().apply { setColor(0xFF3A3A3A.toInt()) }
         card.addView(cardContent)
         layer.addView(card)
@@ -828,6 +832,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         K_MUSIC -> "set2s_11"
         K_WORKOUT -> "workouts"
         K_VIDEO -> SiteMedia.tabId.takeIf { it.isNotEmpty() }?.let { "utab_$it" }
+        K_DOWNLOAD -> m.tabKey?.takeIf { it.isNotEmpty() }
         else -> null
     }
 
@@ -986,8 +991,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     }
 
     /**
-     * Все занятия, которые сейчас можно показать, по приоритету: помодоро, таймеры карточек (по близости конца), секундомер,
-     * музыка, видео вкладки-сайта. Первое — в капсуле, остальные — кружками справа (см. [bindCompact], [updateDots]). Музыка и видео вне приложения — только при выключенном системном острове.
+     * Все занятия, которые сейчас можно показать, по приоритету ([IslandOrder]): сработавший таймер, помодоро, музыка, видео вкладки-сайта,
+     * загрузки файлов, идущие таймеры карточек (по близости конца), секундомер, тренировка. Первое — в капсуле, остальные — в карточке (см. [bindCompact]). Музыка и видео вне приложения — только при выключенном системном острове.
      */
     private fun collectItems(): List<Item> {
         val out = ArrayList<Item>(6)
@@ -1157,7 +1162,71 @@ class InAppIsland private constructor(private val appCtx: Context) {
                 out.add(m)
             }
         }
-        return out
+        if (outside) {
+            for (t in FileDownloads.islandTasks(now)) out.add(downloadItem(t, now))
+        }
+        return IslandOrder.sort(out) { IslandOrder.rank(it.kind, it.onDone != null) }
+    }
+
+    /** Занятие «загрузка файла» (ТЗ скачивания, 7.1): капсула — значок с кольцом, имя файла и процент; карточка — прогресс, скорость, потоки. */
+    private fun downloadItem(t: DownloadTask, now: Long): Item {
+        val ctx = appCtx
+        val id = t.id
+        val m = Item("dl:" + t.id, K_DOWNLOAD)
+        m.tabKey = t.originTab
+        m.name = t.fileName
+        val total = t.totalBytes
+        val done = t.doneBytes
+        val pct = DownloadLogic.percent(done, total)
+        val frac = if (pct >= 0) pct / 100f else 1f
+        m.samples = if (total > 0) listOf("88 %", "100 %", "Готово") else listOf("888 МБ", "Готово")
+        if (t.state == DlState.DONE) {
+            m.iconKey = "dl-done"
+            m.iconFn = { s -> XiaomiIsland.downloadIconBitmap(1f, s, 1) }
+            m.time = "Готово"
+            m.big = m.time
+            m.sub = t.fileName
+            m.onDone = { FileDownloads.dismiss(ctx, id) }
+            m.onStop = m.onDone
+            return m
+        }
+        val failed = t.state == DlState.FAILED
+        m.iconKey = "dl" + (if (pct >= 0) pct / 2 else -1) + (if (failed) "e" else "")
+        m.iconFn = { s -> XiaomiIsland.downloadIconBitmap(if (pct >= 0) frac else 0f, s, if (failed) 2 else 0) }
+        m.time = if (failed) "Ошибка" else if (pct >= 0) "$pct %" else DownloadLogic.formatSize(done)
+        m.big = m.time
+        val parts = ArrayList<String>()
+        when (t.state) {
+            DlState.QUEUED -> parts.add("в очереди")
+            DlState.WAITING_NET -> parts.add("Нет сети · ждём")
+            DlState.FAILED -> parts.add(t.error.ifEmpty { "Ошибка скачивания" })
+            else -> {
+                if (t.copying) parts.add("копирование…") else parts.add(DownloadLogic.formatProgress(done, total))
+                if (t.state == DlState.PAUSED) parts.add("пауза")
+                else if (!t.copying) {
+                    if (t.speed > 0) parts.add(DownloadLogic.formatSpeed(t.speed))
+                    if (t.mode == DlMode.MULTI && t.note.isEmpty()) parts.add(DownloadLogic.threadsText(t.activeThreads))
+                }
+                if (t.note.isNotEmpty()) parts.add(t.note)
+            }
+        }
+        m.sub = parts.joinToString(" · ")
+        val color = XiaomiIsland.DOWNLOAD_COLOR
+        if (failed) {
+            m.btnKey = "dl-retry"
+            m.btnFn = { XiaomiIsland.pauseBitmap(1f, 0, true, 0xFFE53935.toInt()) }
+            m.onToggle = { FileDownloads.retry(ctx, id) }
+        } else if (t.state == DlState.PAUSED) {
+            m.btnKey = "dl-play" + (frac * 200f).roundToInt()
+            m.btnFn = { XiaomiIsland.pauseBitmap(frac, 0, true, color) }
+            m.onToggle = { FileDownloads.resume(ctx, id) }
+        } else if (t.canPause) {
+            m.btnKey = "dl-pause" + (frac * 200f).roundToInt()
+            m.btnFn = { XiaomiIsland.pauseBitmap(frac, 0, false, color) }
+            m.onToggle = { FileDownloads.pause(ctx, id) }
+        }
+        m.onStop = { FileDownloads.cancel(ctx, id) }
+        return m
     }
 
     private fun refresh() {
@@ -1280,14 +1349,15 @@ class InAppIsland private constructor(private val appCtx: Context) {
         shownStrip = sig
         strip.removeAllViews()
         if (ex.size < 2) {
-            strip.visibility = View.GONE
+            stripScroll.visibility = View.GONE
             cardBar.visibility = View.VISIBLE
             return
         }
         cardBar.visibility = View.GONE
-        strip.visibility = View.VISIBLE
+        stripScroll.visibility = View.VISIBLE
         // много занятий (например, десяток таймеров): значки уменьшаются, чтобы ряд поместился в ширину карточки
-        val sd = min(scrW * 0.032f, scrW * 0.84f / (2 * ex.size - 1)).roundToInt().coerceAtLeast(1)
+        // значки не мельче ~14 dp: если больше не помещаются — ряд листается вбок, выбранное занятие подводится в середину
+        val sd = max(min(scrW * 0.032f, scrW * 0.84f / (2 * ex.size - 1)), min(dp(14f).toFloat(), scrW * 0.032f)).roundToInt().coerceAtLeast(1)
         for ((i, m) in ex.withIndex()) {
             val iv = ImageView(appCtx)
             iv.setImageBitmap(m.iconFn(96))
@@ -1295,6 +1365,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
             val key = m.key
             iv.setOnClickListener { selectCard(key) }
             strip.addView(iv, LinearLayout.LayoutParams(sd, sd).apply { if (i > 0) marginStart = sd })
+        }
+        val cur = ex.indexOfFirst { it.key == current }
+        stripScroll.post {
+            val v = strip.getChildAt(cur.coerceAtLeast(0)) ?: return@post
+            stripScroll.scrollTo((v.left + v.width / 2 - stripScroll.width / 2).coerceAtLeast(0), 0)
         }
     }
 
@@ -1447,7 +1522,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         winW = (cardW * 1.12f).roundToInt()
         winY = pillTop
         winH = (cardTop + cardH * 1.12f).roundToInt() - pillTop
-        for (v in listOf<View>(cardIcon, modeBtn, cardTime, cardName, plusBtn, pauseBtn, stopBtn, cardBar, strip)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(cardIcon, modeBtn, cardTime, cardName, plusBtn, pauseBtn, stopBtn, cardBar, strip, stripScroll)) (v.parent as? ViewGroup)?.removeView(v)
         cardContent.removeAllViews()
         cardTime.setTextSize(TypedValue.COMPLEX_UNIT_PX, screenW * 0.0450f) // высота цифр как у настоящего (замер: 40 px при 1159; было 0.0483 — выше на 7 %)
         cardTime.letterSpacing = 0.06f // цифры у настоящего шире (125 px против 112 у копии)
@@ -1480,7 +1555,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
             bottomMargin = (screenW * 0.008f).roundToInt()
         })
         // ряд значков для переключения между занятиями (при двух и больше карточках) — вместо полоски
-        cardContent.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (screenW * 0.032f).roundToInt()).apply {
+        stripScroll.isHorizontalScrollBarEnabled = false
+        stripScroll.overScrollMode = View.OVER_SCROLL_NEVER
+        stripScroll.removeAllViews()
+        stripScroll.addView(strip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        cardContent.addView(stripScroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, (screenW * 0.032f).roundToInt()).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             bottomMargin = (screenW * 0.005f).roundToInt()
         })

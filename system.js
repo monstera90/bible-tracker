@@ -1,6 +1,7 @@
 /* ===========================================================================
    system.js
-   Версия: 2.1 (09.11)
+   Версия: 2.2 (21.11)
+   2.2 (21.11): блок «Скачивание файлов» — число потоков по умолчанию 2–8 (мост ≥42 `downloadThreadsGet` / `downloadThreadsSet`; FileDownloads.kt).
    Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15; язычок режима колеса — в вертикальном стеке набора 1 самый нижний).
    Здесь — функции, связанные с работой всей системы телефона. Сейчас две: «Использовать системный плавающий остров»
    (галочка, по умолчанию включена; мост ≥27 `islandGet` / `islandSetSystem` / `islandOpenOverlaySettings`; IslandSettings.kt) и
@@ -39,6 +40,17 @@
   function readIsland(){
     var b = islandBridge(); if(!b) return null;
     try{ return JSON.parse(b.islandGet() || "{}"); }catch(e){ return null; }
+  }
+
+  // Скачивание файлов: нужен мост ≥42; на старой оболочке блок не показывается.
+  function dlBridge(){
+    var b = window.LifeTrackerNative;
+    return (b && typeof b.downloadThreadsGet === "function" && typeof b.downloadThreadsSet === "function") ? b : null;
+  }
+  function paintThreads(n){
+    var root = document.getElementById(ROOT_ID); if(!root) return;
+    var btns = root.querySelectorAll(".sys-thr");
+    for(var i = 0; i < btns.length; i++) btns[i].classList.toggle("on", Number(btns[i].getAttribute("data-thr")) === n);
   }
 
   function ensureStyle(){
@@ -150,10 +162,22 @@
         '<div class="sys-status" id="systemIslandHint"></div>' +
         '<button type="button" class="sys-island-perm" id="systemIslandPermBtn" style="display:none">Выдать разрешение</button>' +
       '</div><hr class="sys-divider">' : '';
+    var db = dlBridge();
+    var dlHtml = "";
+    if(db){
+      var thr = "";
+      for(var k = 2; k <= 8; k++) thr += '<button type="button" class="sys-opt sys-thr" data-thr="' + k + '">' + k + '</button>';
+      dlHtml =
+        '<div class="sys-card">' +
+          '<div class="sys-title">Скачивание файлов</div>' +
+          '<div class="sys-sub">Сколько потоков использовать по умолчанию для кнопки «В N потоков» при скачивании файла. По умолчанию — 4. Если сервер не любит параллельные запросы, приложение само снизит число потоков.</div>' +
+          '<div class="sys-opts">' + thr + '</div>' +
+        '</div><hr class="sys-divider">';
+    }
     c.innerHTML =
       '<div id="' + ROOT_ID + '">' +
         '<h3 class="common-tab-title">Система</h3>' +
-        islandHtml +
+        islandHtml + dlHtml +
         '<div class="sys-card">' +
           '<div class="sys-title">Усиление громкости в системе</div>' +
           '<div class="sys-sub">Усиливает звук всех приложений. 100 % — без усиления. Выше 100 % звук может хрипеть, а на полной громкости — вредить слуху и динамикам: начните со 125 %.</div>' +
@@ -171,6 +195,12 @@
       var t = ev.target;
       while(t && t !== root && !(t.classList && t.classList.contains("sys-opt"))) t = t.parentNode;
       if(!t || t === root) return;
+      if(t.classList.contains("sys-thr")){
+        var tn = 0;
+        try{ tn = Number(db.downloadThreadsSet(Number(t.getAttribute("data-thr")))) || 0; }catch(e){ tn = 0; }
+        if(tn) paintThreads(tn);
+        return;
+      }
       if(t.classList.contains("sys-eng")){
         var est = null;
         try{ est = JSON.parse(b.volumeBoostSetEngine(Number(t.getAttribute("data-eng"))) || "{}"); }catch(e){ est = null; }
@@ -196,6 +226,7 @@
     }
     paint(readState());
     paintIsland(readIsland());
+    if(db){ var cur = 0; try{ cur = Number(db.downloadThreadsGet()) || 0; }catch(e){ cur = 0; } paintThreads(cur); }
     startPoll();
   }
 
