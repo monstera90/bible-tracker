@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.2 (22.11) — `downloadExtras`: системный остров загрузок (ТЗ скачивания файлов, этап 3): свёрнутый — кольцо и «45 %», раскрытый — имя, скорость, кнопки «Пауза/Продолжить/Повторить» и «Стоп». Откат: XiaomiIsland.kt 12.1.
 // Версия: 12.1 (21.11) — `downloadIconBitmap`: значок загрузки для внутреннего острова (ТЗ скачивания файлов, этап 1). Откат: XiaomiIsland.kt 12.0.
 // Версия: 12.0 (15.11)
 // Версия: 8.1 (10.11)
@@ -875,6 +876,89 @@ object XiaomiIsland {
             }
         }
         return bmp
+    }
+
+    // ---------- остров загрузки файлов ----------
+
+    private const val PIC_DL_KEY = "miui.focus.pic_dl"
+    private const val PIC_DL_BIG_KEY = "miui.focus.pic_dl_big"
+    private const val ACTION_DL_TOGGLE = "miui.focus.action_dl_toggle"
+    private const val ACTION_DL_STOP = "miui.focus.action_dl_stop"
+
+    /**
+     * Extras острова для уведомления службы загрузки ([DownloadService]) или null, если остров не поддерживается. Показывает одно
+     * занятие — старшую загрузку ([SystemIslandLogic.pick]); остальные — «+N» во второй строке. Свёрнутый остров: значок с кольцом
+     * прогресса слева и «45 %» справа. Раскрытый: имя файла, «12,4 из 80 МБ · 3,2 МБ/с · 4 потока» и две круглые кнопки:
+     * пауза / продолжить / повторить (если у загрузки есть такое действие) и «Стоп» (отмена; у «Готово» кнопок нет).
+     * Картинки получают новый ключ при смене кольца: система не подставит старую из кэша. [float] — раскрыть остров при появлении.
+     */
+    fun downloadExtras(
+        ctx: Context, info: SystemIslandLogic.Info, float: Boolean,
+        toggle: android.app.PendingIntent?, stop: android.app.PendingIntent?
+    ): Bundle? {
+        if (!available(ctx)) return null
+        return try {
+            val glyph = when (info.kind) {
+                SystemIslandLogic.KIND_DONE -> 1
+                SystemIslandLogic.KIND_FAILED -> 2
+                else -> 0
+            }
+            val key = "" + glyph + "_" + (info.fraction * 50f).toInt() // кольцо меняется не чаще, чем раз в 2 %
+            val picKey = PIC_DL_KEY + key
+            val bigKey = PIC_DL_BIG_KEY + key
+            val pic = JSONObject().put("type", 1).put("pic", picKey)
+            val left = JSONObject().put("type", 1).put("picInfo", pic)
+                .put("textInfo", JSONObject().put("title", info.name))
+            val big = JSONObject().put("imageTextInfoLeft", left)
+                .put("imageTextInfoRight", JSONObject().put("type", 2).put("textInfo", JSONObject().put("title", info.time)))
+            val island = JSONObject()
+                .put("islandProperty", 1)
+                .put("islandOrder", true)
+                .put("dismissIsland", false)
+                .put("bigIslandArea", big)
+                .put("smallIslandArea", JSONObject().put("picInfo", pic))
+            val anim = JSONObject().put("type", 0).put("src", bigKey)
+            val base = JSONObject().put("type", 1).put("title", info.name).put("content", info.sub).put("animIconInfo", anim)
+            val v2 = JSONObject()
+                .put("protocol", 1)
+                .put("business", "file_download")
+                .put("islandFirstFloat", float)
+                .put("enableFloat", false)
+                .put("updatable", true)
+                .put("ticker", info.name)
+                .put("tickerPic", picKey)
+                .put("aodTitle", info.name)
+                .put("param_island", island)
+                .put("iconTextInfo", base)
+            val pics = Bundle().apply {
+                putParcelable(picKey, Icon.createWithBitmap(downloadIconBitmap(info.fraction, 96, glyph)))
+                putParcelable(bigKey, Icon.createWithBitmap(downloadIconBitmap(info.fraction, 192, glyph)))
+            }
+            val out = Bundle().apply { putBundle("miui.focus.pics", pics) }
+            val acts = Bundle()
+            val list = org.json.JSONArray()
+            if (toggle != null && info.toggle != SystemIslandLogic.TOGGLE_NONE) {
+                val (bmp, label) = when (info.toggle) {
+                    SystemIslandLogic.TOGGLE_RETRY -> pauseBitmap(1f, STAGE_NORMAL, true, 0xFFE53935.toInt()) to "Повторить"
+                    SystemIslandLogic.TOGGLE_RESUME -> pauseBitmap(info.fraction, STAGE_NORMAL, true, DOWNLOAD_COLOR) to "Продолжить"
+                    else -> pauseBitmap(info.fraction, STAGE_NORMAL, false, DOWNLOAD_COLOR) to "Пауза"
+                }
+                acts.putParcelable(ACTION_DL_TOGGLE, Notification.Action.Builder(Icon.createWithBitmap(bmp), label, toggle).build())
+                list.put(JSONObject().put("action", ACTION_DL_TOGGLE))
+            }
+            if (stop != null && info.kind != SystemIslandLogic.KIND_DONE) {
+                acts.putParcelable(ACTION_DL_STOP, Notification.Action.Builder(crossIcon(), "Стоп", stop).build())
+                list.put(JSONObject().put("action", ACTION_DL_STOP))
+            }
+            if (list.length() > 0) {
+                v2.put("actions", list)
+                out.putBundle("miui.focus.actions", acts)
+            }
+            out.putString("miui.focus.param", JSONObject().put("param_v2", v2).toString())
+            out
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /** Круглая кнопка острова помодоро: 1 — «Начать» (треугольник), 2 — «+5», 3 — «пропустить» (треугольник и черта). */

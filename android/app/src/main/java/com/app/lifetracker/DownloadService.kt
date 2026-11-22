@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (22.11) — этап 3 (системный остров Xiaomi, ТЗ 8): уведомление службы несёт extras острова ([XiaomiIsland.downloadExtras], выбор занятия — [SystemIslandLogic]); кнопки «Пауза/Продолжить/Повторить» и «Стоп» приходят в службу; нажатие на остров открывает вкладку-источник. Откат: DownloadService.kt 1.3.
 // Версия: 1.3 (22.11) — этап 2 (Flibusta, 6.2): [finishHandoff] — готовую книгу отдаём странице ([PageHandoff]), в «Загрузки» не кладём; копия в папку «Книги», если включена. Откат: DownloadService.kt 1.2.
 // Версия: 1.2 (22.11) — этап 5: завершение обновлений (`task.dest`): [UpdateChecks.placeAndVerify], копия APK в папку обновлений, без «Загрузок». Откат: DownloadService.kt 1.1.
 // Версия: 1.1 (22.11) — этап 4: место записи выбирает `DownloadTarget.newWorkFile(app, t)`; итог переноса ([DownloadTarget.Saved]) — в `targetLabel`/`targetNote`. Откат: DownloadService.kt 1.0.
@@ -7,6 +8,7 @@ package com.app.lifetracker
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -28,7 +30,8 @@ import java.util.concurrent.ConcurrentHashMap
  * несколько секунд, будит плашку острова в фоне ([InAppIsland.ensureBackground]) и останавливает службу, когда делать нечего.
  *
  * Уведомление у службы минимальное (обязательное для службы переднего плана): без звука и кнопок, один текст «Скачивание файлов».
- * Вся видимая информация — в плавающем острове. Тип службы — specialUse (не dataSync: на Android 15+ он ограничен ~6 часами в сутки).
+ * Вся видимая информация — в плавающем острове. На Xiaomi с включённым системным островом это же уведомление несёт его extras
+ * ([XiaomiIsland.downloadExtras]): одна старшая загрузка и «+N» (ТЗ 8); без острова уведомление остаётся минимальным. Тип службы — specialUse (не dataSync: на Android 15+ он ограничен ~6 часами в сутки).
  * Потеря сети — `WAITING_NET`, продолжение само при возвращении сети. Убийство процесса — `START_STICKY`, [FileDownloads.restore].
  */
 class DownloadService : Service() {
@@ -38,6 +41,14 @@ class DownloadService : Service() {
         private const val NOTIFICATION_ID = 11
         private const val TICK_MS = 500L
         private const val WAKE_MS = 15L * 60L * 1000L
+
+        // кнопки системного острова (ТЗ 8): служба получает их как команды над задачей `EXTRA_ID`
+        private const val ACTION_PAUSE = "com.app.lifetracker.download.PAUSE"
+        private const val ACTION_RESUME = "com.app.lifetracker.download.RESUME"
+        private const val ACTION_RETRY = "com.app.lifetracker.download.RETRY"
+        private const val ACTION_STOP = "com.app.lifetracker.download.STOP"
+        private const val EXTRA_ID = "dlId"
+        private const val POST_MIN_MS = 1000L // уведомление с островом обновляем не чаще раза в секунду
 
         /** Движки идущих задач: через них пауза и отмена рвут открытые соединения. */
         val engines = ConcurrentHashMap<Long, DownloadEngine>()
@@ -75,9 +86,25 @@ class DownloadService : Service() {
     private var wakeAt = 0L
     private var netCb: ConnectivityManager.NetworkCallback? = null
 
+    // что показано в системном острове сейчас (читает и пишет поток службы/планировщика; в onStartCommand — главный, но до старта планировщика)
+    @Volatile private var shownSig = ""
+    @Volatile private var shownId = -1L
+    @Volatile private var postedAt = 0L
+    private var channelReady = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // кнопка острова: команда над задачей (до обновления уведомления, чтобы оно уже отразило результат)
+        val id = intent?.getLongExtra(EXTRA_ID, -1L) ?: -1L
+        if (id >= 0L) {
+            when (intent?.action) {
+                ACTION_PAUSE -> FileDownloads.pause(applicationContext, id)
+                ACTION_RESUME -> FileDownloads.resume(applicationContext, id)
+                ACTION_RETRY -> FileDownloads.retry(applicationContext, id)
+                ACTION_STOP -> FileDownloads.cancel(applicationContext, id)
+            }
+        }
         if (!enterForeground()) {
             stopSelf()
             return START_NOT_STICKY
@@ -106,7 +133,7 @@ class DownloadService : Service() {
     // ---------- уведомление ----------
 
     private fun enterForeground(): Boolean = try {
-        val n = notification()
+        val n = notification(true)
         if (Build.VERSION.SDK_INT >= 34) {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
@@ -117,23 +144,95 @@ class DownloadService : Service() {
         false
     }
 
-    private fun notification(): Notification {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel(CHANNEL, "Скачивание файлов", NotificationManager.IMPORTANCE_LOW)
-            ch.setShowBadge(false)
-            ch.enableVibration(false)
-            ch.setSound(null, null)
-            nm.createNotificationChannel(ch)
-        }
-        return NotificationCompat.Builder(this, CHANNEL)
+    private fun ensureChannel() {
+        if (channelReady || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val ch = NotificationChannel(CHANNEL, "Скачивание файлов", NotificationManager.IMPORTANCE_LOW)
+        ch.setShowBadge(false)
+        ch.enableVibration(false)
+        ch.setSound(null, null)
+        nm.createNotificationChannel(ch)
+        channelReady = true
+    }
+
+    /**
+     * Уведомление службы. [first] — служба только что перешла на передний план: подпись острова сбрасывается, он всплывает заново.
+     * Без Xiaomi / при выключенном системном острове [XiaomiIsland.downloadExtras] вернёт null — уведомление минимальное.
+     */
+    private fun notification(first: Boolean = false): Notification {
+        ensureChannel()
+        val app = applicationContext
+        val info = try { SystemIslandLogic.info(FileDownloads.islandTasks()) } catch (e: Exception) { null }
+        val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle("Скачивание файлов")
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            .build()
+        var sig = ""
+        if (info != null) {
+            val float = first || info.taskId != shownId
+            val toggle = when (info.toggle) {
+                SystemIslandLogic.TOGGLE_PAUSE -> actionIntent(app, ACTION_PAUSE, info.taskId)
+                SystemIslandLogic.TOGGLE_RESUME -> actionIntent(app, ACTION_RESUME, info.taskId)
+                SystemIslandLogic.TOGGLE_RETRY -> actionIntent(app, ACTION_RETRY, info.taskId)
+                else -> null
+            }
+            val stop = if (info.kind == SystemIslandLogic.KIND_DONE) null else actionIntent(app, ACTION_STOP, info.taskId)
+            val island = XiaomiIsland.downloadExtras(app, info, float, toggle, stop)
+            if (island != null) {
+                b.addExtras(island)
+                b.setContentTitle(info.name)
+                b.setContentText(info.sub)
+                b.setContentIntent(openApp(app, FileDownloads.find(info.taskId)?.originTab ?: ""))
+                sig = info.signature()
+                shownId = info.taskId
+            }
+        }
+        if (sig.isEmpty()) shownId = -1L
+        shownSig = sig
+        postedAt = System.currentTimeMillis()
+        return b.build()
+    }
+
+    /** Кнопка острова: команда службе над задачей [id] (у каждой пары «действие + задача» свой PendingIntent). */
+    private fun actionIntent(ctx: Context, action: String, id: Long): PendingIntent {
+        val i = Intent(ctx, DownloadService::class.java).setAction(action).putExtra(EXTRA_ID, id)
+        val code = (action.hashCode() * 31 + id).toInt()
+        val flags = Compat.pendingFlags()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(ctx, code, i, flags)
+        } else {
+            PendingIntent.getService(ctx, code, i, flags)
+        }
+    }
+
+    /** Нажатие на остров/уведомление: приложение вперёд, сразу на вкладку-источник (если она известна). */
+    private fun openApp(ctx: Context, tab: String): PendingIntent {
+        val i = Intent(ctx, MainActivity::class.java)
+        if (tab.isNotEmpty()) {
+            i.action = MainActivity.ACTION_OPEN_TAB
+            i.putExtra(MainActivity.EXTRA_TAB, tab)
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        return PendingIntent.getActivity(ctx, 6010, i, Compat.pendingFlags())
+    }
+
+    /** Системный остров: пересобрать уведомление, если показанное изменилось (не чаще раза в секунду; смена занятия или вид — сразу). */
+    private fun refreshIsland(now: Long) {
+        try {
+            val app = applicationContext
+            val info = if (XiaomiIsland.available(app)) SystemIslandLogic.info(FileDownloads.islandTasks(now)) else null
+            val want = info?.signature() ?: ""
+            if (want == shownSig) return
+            val sameTask = info != null && info.taskId == shownId
+            if (sameTask && shownSig.isNotEmpty() && now - postedAt < POST_MIN_MS) return // тот же файл, меняется только число
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, notification())
+        } catch (e: Exception) {
+            // остров не должен мешать скачиванию
+        }
     }
 
     // ---------- связь ----------
@@ -235,6 +334,7 @@ class DownloadService : Service() {
                 val anyRunning = all.any { it.state == DlState.RUNNING }
                 setWake(anyRunning)
                 if (FileDownloads.all().any { it.showInIsland }) InAppIsland.ensureBackground(app)
+                refreshIsland(now)
                 if (FileDownloads.needsService(now)) idle = 0 else if (++idle > 3) {
                     running = false
                     stopSelf()
