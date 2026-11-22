@@ -593,6 +593,10 @@ class MainActivity : ComponentActivity() {
         // Открыл приложение (в том числе по уведомлению «Таймер закончился») — вибрация конца таймера карточки больше не нужна.
         CardTimers.stopVibration(applicationContext)
         try { VolumeBoost.restore(applicationContext) } catch (e: Exception) { /* усиление громкости поднимется при следующем входе */ }
+        // Первый вход после перезагрузки телефона: если BOOT_COMPLETED приложению не пришёл (Xiaomi, запрет автозапуска), всё ставится заново здесь;
+        // будильники карточек — при каждом входе (после «Остановить» в настройках они тоже пропадают; повторная постановка безвредна)
+        try { BootRestore.ensure(applicationContext) } catch (e: Exception) { /* ниже будильники ставятся ещё раз */ }
+        try { CardAlarms.restore(applicationContext) } catch (e: Exception) { /* будильники поставятся при следующем входе */ }
         inAppIsland.setActivity(this)
         inAppIsland.start()
         // Подстраховка: будильники пропадают после «Остановить» в настройках, ставим заново из сохранённых данных.

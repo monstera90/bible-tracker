@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.5 (22.11) — после загрузки телефона onUpdate/onEnabled/тик восстанавливают будильники и таймеры (BootRestore.ensure), если BOOT_COMPLETED приложению не пришёл. Откат: QrWidgetProvider.kt 2.4.
 // Версия: 2.4 (14.11)
 
 import android.appwidget.AppWidgetManager
@@ -10,7 +11,14 @@ import android.os.Bundle
 /** Виджет «Стопка QR-карточек» 2×2. Всё содержимое и логика — в [QrWidgets]. */
 class QrWidgetProvider : AppWidgetProvider() {
 
+    override fun onEnabled(context: Context) {
+        try { BootRestore.ensure(context) } catch (e: Exception) { /* виджет работает и без этого */ }
+        super.onEnabled(context)
+    }
+
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
+        // после загрузки телефона система зовёт onUpdate у виджетов, даже когда запрещён автозапуск: заодно ставим будильники заново
+        try { BootRestore.ensure(context) } catch (e: Exception) { /* виджет работает и без этого */ }
         for (id in appWidgetIds) {
             try {
                 QrWidgets.update(context, appWidgetManager, id)
@@ -44,7 +52,10 @@ class QrWidgetProvider : AppWidgetProvider() {
                 val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
                 if (id != AppWidgetManager.INVALID_APPWIDGET_ID) QrWidgets.fireReturn(context, id)
             }
-            QrWidgets.ACTION_TICK -> QrWidgets.refreshAll(context)
+            QrWidgets.ACTION_TICK -> {
+                try { BootRestore.ensure(context) } catch (e: Exception) { /* см. onUpdate */ }
+                QrWidgets.refreshAll(context)
+            }
             QrWidgets.ACTION_BATTERY -> QrWidgets.onBatteryTick(context)
             QrWidgets.ACTION_BT_BURST -> QrWidgets.onBtBurst(
                 context,

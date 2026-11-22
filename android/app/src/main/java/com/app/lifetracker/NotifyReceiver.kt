@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (22.11) — восстановление после перезагрузки вынесено в BootRestore.run (его же зовут виджет и вход в приложение: на Xiaomi BOOT_COMPLETED приложению часто не приходит). Откат: NotifyReceiver.kt 1.3.
 // Версия: 1.3 (04.11)
 // Версия: 1.2 (01.11)
 // Версия: 1.1 (24.10) — после перезагрузки/смены времени/обновления заново ставятся и будильники карточек (CardAlarms.restore).
@@ -53,18 +54,11 @@ class NotifyReceiver : BroadcastReceiver() {
             }
             ACTION_DONE, ACTION_TOMORROW -> handleButton(ctx, intent)
             Intent.ACTION_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON", // Xiaomi/HTC: быстрая загрузка
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED -> {
-                // Просроченное, пока телефон был выключен, показывается сразу (с исходным временем в тексте).
-                ReminderScheduler.fireDue(ctx)
-                ReminderScheduler.scheduleNext(ctx)
-                GroupWatcher.scheduleNextPoll(ctx)
-                CardTimers.restore(ctx) // таймеры карточек: будильники и уведомления заново, закончившиеся — сразу
-                CardAlarms.restore(ctx) // будильники карточек: заново, опоздавшие звонки пропускаются
-                VolumeBoost.restore(ctx) // усиление громкости (вкладка «Система»): эффект и служба заново, если было включено
-                PomodoroTimer.restore(ctx) // помодоро: будильник фазы и служба заново, опоздавшие переходы догоняются
-                StopwatchService.refresh(ctx) // секундомер: служба и остров заново, если он шёл
+                BootRestore.run(ctx) // будильники, таймеры, опрос, помодоро и т. д. — общий код с виджетом и входом в приложение
             }
         }
     }
