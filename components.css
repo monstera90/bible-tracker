@@ -1,5 +1,6 @@
 /* ===========================================================================
    components.css
+   Версия: 26.15 (22.11) — `.cal-wk-trk{z-index:2}`: трекеры занятий поверх мероприятий. Откат: components.css 26.14.
    Версия: 26.14 (21.11) — календарь: перетаскивание блоков недели (`.cal-wk-ghost` — копия за пальцем, `.cal-wk-dragging` — исходный блок, `.cal-wk-drop` — колонка под пальцем, запрет выделения текста у `.cal-wk-ev`), режим «Две недели» (`.cal-wk-two`, граница второй недели `.cal-wk-wk2`), вопрос «Только это / Это и все последующие» (`.cal-scope-ov`, `.cal-scope-box`). Откат: components.css 26.13.
    Версия: 26.13 (19.11) — фильтр «Заметок-карточек» по цвету (`.note-color-menu`, `.note-color-swatches`, `.note-color-swatch`, `.note-color-empty`): круглые образцы только тех цветов, что есть у заметок; меню — то же, что у воронки «QR-кодов» (`.item-filter-menu`). Откат: components.css 26.12.
    Версия: 26.12 (19.11) — красная строка заметок (`.cm-md-para-start`): `::before` шириной 1ch вместо `text-indent` (ручки выделения на первом слове абзаца). Откат: components.css 26.11.
@@ -4906,7 +4907,7 @@ body::after{
 .cal-wk-today-col{ background:rgba(127,127,127,.09); }
 .cal-wk-ev{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--cal-color, var(--wood)); color:var(--cal-fg, var(--parchment)); border-radius:3px; border:1px solid var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; cursor:pointer; -webkit-tap-highlight-color:transparent; z-index:1; }
 .cal-wk-et{ display:block; font-size:9px; opacity:.85; font-variant-numeric:tabular-nums; }
-.cal-wk-trk{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--cal-trk, #2e9e6b); color:var(--cal-trk-fg, var(--parchment)); border-radius:3px; border:1px solid var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; z-index:1; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.cal-wk-trk{ position:absolute; box-sizing:border-box; overflow:hidden; padding:1px 2px; background:var(--cal-trk, #2e9e6b); color:var(--cal-trk-fg, var(--parchment)); border-radius:3px; border:1px solid var(--parchment); font-size:10px; line-height:1.15; word-break:break-word; z-index:2; cursor:pointer; -webkit-tap-highlight-color:transparent; }
 .cal-trk-row{ border-left:3px solid var(--cal-trk, #2e9e6b); padding-left:6px; }
 .cal-hid{ opacity:.7; }
 .cal-wk-ev.cal-hid{ background:var(--cal-hid, var(--cal-color, var(--wood))) !important; color:var(--cal-hid-fg, var(--cal-fg, var(--parchment))) !important; }
