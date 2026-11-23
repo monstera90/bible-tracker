@@ -8,6 +8,7 @@
    Версия: 23.3 (22.11) — полноэкранный режим и режим чтения: полоса приоритета карточки задачи больше не скрывается (`.reading-mode-active .task-card > .task-flag-dot{display:block}`). Откат: modals.css 23.2.
    Версия: 23.2 (21.11) — задачи: `.task-body` берёт размер из `--task-font-size` (свой шаг «Аа» задач); `.task-card > .task-actions` с `margin-top:auto` — кнопки свёрнутой карточки не зависят от размера шрифта. Откат: modals.css 23.1.
    Версия: 23.1 (21.11) — карточки задач: --tc-ratio 2,113 (виджет 4×2, 1063×503 px); `.task-card-open` растёт по тексту при редактировании (как в 23.0). Откат: modals.css 23.0.
+   Версия: 23.1 (23.11) — карточки задач: зазор между карточками 2px (было 8 по вертикали и 16 по горизонтали на широком экране), как у карточек предметов/книг; у верхней карточки отступ 6px; распорка под последней карточкой 49px вместо 60px (зазор до нижнего ряда кнопок ≈ 8px вместо ≈ 22px). Откат: modals.css 23.0.
    Версия: 23.0 (21.11) — карточки задач (my.js 153.0, `taskCardize`/`fitTaskCard`): `.task-row-card`, `.task-card` (рамка, скругление, фиксированное соотношение сторон `--tc-ratio`), полоса приоритета `.task-card > .task-flag-dot` (цвет темы / красный #ff4d52 / оранжевый #ff8a3d), нижний ряд `.task-actions-l`/`.task-actions-r`, развёрнутая `.task-card-open`. Откат: modals.css 22.8.
    Версия: 22.8 (21.11) — жесты строки задачи вместо кнопок «крестик/карандаш/галочка/шеврон» (my.js, bindTaskRowGestures): у обычного текста задачи гасится системное выделение/меню при долгом нажатии (`.task-text-view:not(.task-editable)`, кроме полноэкранного режима).
    Версия: 22.7 (20.11) — вкладка «Claude»: правило `.lt-edge .claude-tab-status` убрано (строка состояния теперь внутри `.claude-tab-bar`, стили — в claudetab.js).
@@ -3024,9 +3025,24 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-row.task-row-card,
 .task-grid-list .task-row.task-row-card{
   border-top:none;
-  padding:4px 0;
+  padding:1px 0; /* 2px между карточками по вертикали — как зазор 2px у карточек предметов и книг (.item-cards-grid, .books-cards-grid); было 4px сверху и снизу = 8px */
 }
-.task-row.task-row-card:first-child{ padding-top:0; }
+/* Самая верхняя карточка (на широком экране — все карточки первого ряда сетки) не липнет к верху окна: небольшой отступ 6px. */
+.task-row.task-row-card:first-child{ padding-top:6px; }
+@media (min-width:788px){
+  .task-grid-list{ column-gap:2px; } /* по горизонтали тоже 2px (было 16px) */
+  .task-grid-list .task-row.task-row-card:nth-child(-n+2){ padding-top:6px; }
+}
+@media (min-width:1182px){
+  .task-grid-list .task-row.task-row-card:nth-child(3){ padding-top:6px; }
+}
+@media (min-width:1576px){
+  .task-grid-list .task-row.task-row-card:nth-child(4){ padding-top:6px; }
+}
+/* Распорка под последней карточкой (60px — для строк без карточек: комментарии, архив) в списках с карточками ниже: нижний ряд кнопок
+   перекрывает последние ~42px прокрутки, так что видимый зазор от последней карточки до кнопок = 49 + 1 − 42 ≈ 8px (был ≈ 22px). За кнопки
+   карточка не заходит. Сестринский селектор (без :has) — работает и в старом WebView. */
+.task-row-card ~ .task-list-bottom-spacer{ height:49px; }
 .task-body.task-card{
   box-sizing:border-box;
   display:flex;
