@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (23.11) — [canAutoMulti] учитывает неудачную разведку (`probeFailed`): движок перепроверит файл сам. Откат: DownloadLogic.kt 1.1.
 // Версия: 1.1 (23.11) — [canAutoMulti]: можно ли качать в несколько потоков без вопроса. Откат: DownloadLogic.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1.
 
@@ -18,8 +19,11 @@ object DownloadLogic {
     const val MIN_THREADS = 2
     const val DEFAULT_THREADS = 4
 
-    /** Можно ли сразу качать в несколько потоков без вопроса: сервер принимает диапазоны и размер известен. */
-    fun canAutoMulti(total: Long, acceptRanges: Boolean): Boolean = acceptRanges && total > 0L
+    /**
+     * Можно ли сразу качать в несколько потоков без вопроса: сервер принимает диапазоны и размер известен, либо разведка не удалась
+     * ([probeFailed]) — тогда ответ неизвестен, и движок разведает файл заново при старте задачи (при неудаче скачает обычным способом).
+     */
+    fun canAutoMulti(total: Long, acceptRanges: Boolean, probeFailed: Boolean = false): Boolean = probeFailed || (acceptRanges && total > 0L)
 
     /** Часть файла: байты от [start] до [end] включительно. */
     data class Range(val start: Long, val end: Long) {

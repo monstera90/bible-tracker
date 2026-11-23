@@ -41,6 +41,8 @@ class DownloadLogicTest {
         assertFalse(DownloadLogic.canAutoMulti(10 * mb, false))
         assertFalse(DownloadLogic.canAutoMulti(-1, true))
         assertFalse(DownloadLogic.canAutoMulti(0, true))
+        assertTrue(DownloadLogic.canAutoMulti(-1, false, true)) // разведка не удалась: решит движок
+        assertFalse(DownloadLogic.canAutoMulti(-1, false, false))
     }
 
     @Test fun contentDispositionNames() {

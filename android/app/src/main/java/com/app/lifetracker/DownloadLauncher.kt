@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (23.11) — разведка не удалась (размер не получен из-за ошибки) — сразу «В N потоков»: движок при старте разведает файл заново и сам выберет способ; окно только если сервер определённо не отдаёт диапазоны или размер не сообщает. Откат: DownloadLauncher.kt 1.3.
 // Версия: 1.3 (23.11) — окно «Обычное / В N потоков» показывается только если многопоточное скачивание недоступно (сервер без диапазонов, размер неизвестен, разведка не удалась); иначе сразу «В N потоков» ([DownloadLogic.canAutoMulti]). Откат: DownloadLauncher.kt 1.2.
 // Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): [startForPage] — скачивание по запросу страницы (мост `downloadStart`): разведка, то же окно «Обычное / В N потоков», задача с `handoffId`. Откат: DownloadLauncher.kt 1.1.
 // Версия: 1.1 (22.11) — этап 6 (6.6): [handlePage] — `data:` и `blob:` со вкладок-сайтов и Claude сохраняет приложение ([PageDownloads]), http/https — прежний путь. Откат: DownloadLauncher.kt 1.0.
@@ -106,8 +107,8 @@ object DownloadLauncher {
     private fun showChoice(activity: Activity, url: String, headers: Map<String, String>, name: String, p: ProbeResult, originTab: String, req: PageHandoff.Req? = null) {
         val app = activity.applicationContext
         val threads = FileDownloads.threads(app)
-        if (DownloadLogic.canAutoMulti(p.total, p.acceptRanges)) {
-            // потоки доступны — выбирать нечего (маленький файл движок сам скачает одним куском)
+        if (DownloadLogic.canAutoMulti(p.total, p.acceptRanges, p.error.isNotEmpty())) {
+            // потоки доступны (или разведка не удалась — движок разведает заново) — выбирать нечего; маленький файл движок скачает одним куском
             start(app, url, headers, name, DlMode.MULTI, threads, originTab, p, req)
             return
         }
