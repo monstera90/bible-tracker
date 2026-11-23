@@ -1,5 +1,6 @@
 /* ===========================================================================
    mdeditor.js
+   Версия: 25.14 (23.11) — «Заметки-карточки», фильтр по цвету теперь работает по ВСЕМ заметкам, а не только по текущей папке: в списке цветов — цвета всех заметок (кроме лежащих в скрытых папках на «.»), а выбранный цвет показывает в одной общей выдаче все заметки этого цвета из любых папок; папок в такой выдаче нет (`allNoteFiles`). Заголовок выдачи — «Заметки-карточки»; PDF печатает ту же выдачу. Откат: mdeditor.js 25.13.
    Версия: 25.13 (21.11) — размер шрифта задач отдельный: `taskFontSizeStep`/`applyTaskFontSize`/`getTaskFontSizeStep`/`setTaskFontSizeStep` (ключ IndexedDB `taskFontSizeStep`, переменная `--task-font-size`); `bindFontSizeBar` принимает getStep. Откат: mdeditor.js 25.12.
    Версия: 25.12 (21.11) — только комментарии: карточка «Сегодня» теперь «Мой дневник» (itemcards.js 49.6). Код не менялся.
    Версия: 25.11 (21.11) — из нижнего ряда открытой заметки убрана кнопка «Копировать» (`#mdEditorCopyBtn`, её обработчик и строка в окне подсказки): копирование есть в круговом контекстном меню (ctxmenu.js). Откат: mdeditor.js 25.10.
@@ -3577,6 +3578,17 @@ window.initMdEditorModule = function(deps){
       return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]);
     });
   }
+  // все заметки из всех папок (кроме лежащих в скрытых папках на «.», которых в списке не видно) — для фильтра по цвету
+  function allNoteFiles(){
+    var out = [];
+    notesMap.forEach(function(rec, id){
+      if(!rec || rec.deleted || !rec.name || isCardMetaRec(rec)) return;
+      var parts = String(rec.path || "").split("/").filter(Boolean);
+      for(var i = 0; i < parts.length; i++){ if(parts[i].charAt(0) === ".") return; }
+      out.push({ type: "file", name: rec.name, id: id });
+    });
+    return out;
+  }
   function closeNoteColorMenu(){
     var m = document.getElementById("mdNotesColorMenu");
     if(m) m.style.display = "none";
@@ -3795,19 +3807,29 @@ window.initMdEditorModule = function(deps){
     });
     var items = folderItems.concat(fileItems);
     var cardsMode = getNotesViewMode() === "cards"; // «Заметки-карточки» вместо «Списка моих заметок»
-    // фильтр по цвету: в списке цветов — только те, что выбраны у заметок этой папки; выбранный цвет оставляет только заметки этого цвета (папки остаются)
+    // фильтр по цвету работает по ВСЕМ заметкам (из любых папок): в списке цветов — цвета всех заметок; выбранный цвет заменяет
+    // содержимое папки общей выдачей заметок этого цвета, без папок
     var colorsHere = [], activeColor = "";
     if(cardsMode){
       var seenColors = {};
-      fileItems.forEach(function(f){
+      var everyFile = allNoteFiles();
+      everyFile.forEach(function(f){
         f.color = noteColorOf(f.id);
         if(f.color && !seenColors[f.color]){ seenColors[f.color] = true; colorsHere.push(f.color); }
       });
       colorsHere = noteColorsSorted(colorsHere);
       if(noteColorFilter && seenColors[noteColorFilter]) activeColor = noteColorFilter;
       if(activeColor){
-        fileItems = fileItems.filter(function(f){ return f.color === activeColor; });
-        items = folderItems.concat(fileItems);
+        fileItems = everyFile.filter(function(f){ return f.color === activeColor; });
+        fileItems.sort(function(a, b){
+          var da = /^\d/.test(a.name) ? 1 : 0;
+          var db = /^\d/.test(b.name) ? 1 : 0;
+          if(da !== db) return da - db;
+          return a.name.localeCompare(b.name, "ru", { sensitivity: "base" });
+        });
+        items = fileItems;
+      } else {
+        fileItems.forEach(function(f){ f.color = noteColorOf(f.id); });
       }
     }
 
@@ -3820,7 +3842,7 @@ window.initMdEditorModule = function(deps){
     var hasAnyNotes = false;
     notesMap.forEach(function(rec){ if(rec && !rec.deleted && rec.name && !isCardMetaRec(rec)) hasAnyNotes = true; });
     var html = '<div class="mdeditor-tab">';
-    html += isRoot ? '<h3 class="common-tab-title">' + (cardsMode ? 'Заметки-карточки' : 'Список моих заметок') + '</h3>' : '<h3 class="common-tab-title">' + escName(node.name) + '</h3>'; // заголовок корня — название режима
+    html += (isRoot || activeColor) ? '<h3 class="common-tab-title">' + (cardsMode ? 'Заметки-карточки' : 'Список моих заметок') + '</h3>' : '<h3 class="common-tab-title">' + escName(node.name) + '</h3>'; // заголовок корня (и общей выдачи по цвету) — название режима
     if(!items.length){
       html += '<div class="mdeditor-empty">' + (isRoot ? "Заметок пока нет." : "Здесь пока пусто.") + '</div>';
     } else {
