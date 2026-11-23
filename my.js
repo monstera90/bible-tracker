@@ -1,8 +1,9 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.11 (23.11) — файлы в облаке: скачивание картинок в 3 потока (`FILE_SYNC_DOWNLOAD_CONCURRENCY`=3), заливка по-прежнему по одной (`runFileUploadSerial`); байты в облаке не удаляются после скачивания и живут сутки после заливки (`FILE_RELAY_TTL_MS`=24 ч), uploadedAt после скачивания не сбрасывается — личный и групповой каналы. Откат: my.js 153.10.
+   Версия: 153.10 (23.11) — задачи, дёрганье: (1) «+» при правке другой задачи — предыдущая строка сворачивается сразу (`taskScheduleCollapse`/`taskFinishPendingCollapses`), а не через 500 мс поверх прокрутки к новой строке; (2) Enter в поле правки — `insertLineBreak` вместо `insertText` (`taskEditEnter`): нет блока div/br и схлопывания пустой строки; `taskEditParasOk` не требует пересборки для растянутого span; красная строка нового абзаца ставится сразу (`taskEditPrepareParaAtCaret`). Откат: my.js 153.9.
    Версия: 153.9 (22.11) — крестик удаления появляется сразу при долгом нажатии, вместе с вибрацией (раньше — после отпускания пальца). Откат: my.js 153.8.
-   Версия: 153.9 (22.11) — задачи, дёрганье: (1) «+» при правке другой задачи — предыдущая строка сворачивается сразу (`taskScheduleCollapse`/`taskFinishPendingCollapses`), а не через 500 мс поверх прокрутки к новой строке; (2) Enter в поле правки — `insertLineBreak` вместо `insertText` (`taskEditEnter`): нет блока div/br и схлопывания пустой строки; `taskEditParasOk` не требует пересборки для растянутого span; красная строка нового абзаца ставится сразу (`taskEditPrepareParaAtCaret`). Откат: my.js 153.8.
    Версия: 153.8 (22.11) — задачи: (1) в режиме правки абзацы видны так же, как в обычном виде (красная строка у первой строки абзаца: `taskEditFill`/`bindTaskEditParas`, `<span class="ed-para">` с `::before` 1ch в modals.css; текст, каретка и выделение не меняются); (2) крестик удаления — не плашка, а ещё одна кнопка ряда справа от «Копировать» (`taskShowDeleteBtn`, `.task-delete-btn`): обычно её нет, появляется после долгого нажатия на задачу, пропадает при касании мимо. Откат: my.js 153.7.
    Версия: 153.7 (22.11) — задачи: (1) «домик» на вкладках задач и комментариев (`#taskFabHomeStub`) — кнопка: прокручивает список вниз (начальный экран); (2) подложка под клавиатуру (`liftSpacer`) после конца ввода/сворачивания клавиатуры больше не снимается по таймеру (список дёргался): пустое место под задачей остаётся, пока не уйдёт с экрана при прокрутке, тогда тихо снимается (`retireSpacer`); (3) кнопки внутри строки («Копировать», «В работе» и др.), меняющие свою иконку прямо в обработчике, больше не открывают задачу на правку: нажатие определяется по пути события, а не по `e.target` (`taskEventOnIgnored`). Откат: my.js 153.6.
    Версия: 153.6 (22.11) — вкладка «Сохранение загрузок» (`set2s_17`, кнопка `settingsTabSet2Btn17`, модуль `downloadfolders.js`, `renderSettingsTabDlFolders`; ТЗ TZ_downloads.md, этап 4, раздел 13): язычок режима колеса рядом с «Системой» (регистрация везде, где есть `WHEEL_SYSTEM_TAB_KEY`; `DLFOLDERS_TAB_KEY`/`DLFOLDERS_TAB_BTN_ID`). Откат: my.js 153.5.
@@ -12007,7 +12008,7 @@
   // была хоть одна успешная синхронизация в пределах этого окна — так надолго выключенное или
   // удалённое устройство рано или поздно перестаёт блокировать удаление байтов из fileBlobs.
   // =====================================================================
-  var FILE_RELAY_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 дня ПОСЛЕ ЗАЛИВКИ байтов в fileBlobs
+  var FILE_RELAY_TTL_MS = 24 * 60 * 60 * 1000; // сутки ПОСЛЕ ЗАЛИВКИ байтов в fileBlobs: раньше их из облака не убираем (23.11, ТЗ пользователя) — даже если кто-то уже скачал; было 3 дня, но на деле копию стирало первое же скачивание
   var DEVICE_KNOWN_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 дней
 
   // Лимит размера файла для облачного синка (TASK_FILE_SYNC_RTDB.md, раздел 7 — порог согласован с
@@ -12195,7 +12196,18 @@
 
   // Заливает файл в RTDB как одноразовую точечную запись (PATCH одного ключа через patchNotesCloud)
   // — НЕ через подписку, см. предупреждение в комментарии к разделу выше. ⚠️ 26.09.
+  // Очередь заливок: пул сверки (FILE_SYNC_DOWNLOAD_CONCURRENCY) гоняет скачивание в несколько потоков, а заливки байтов в облако
+  // выстраиваются здесь по одной — каждой достаётся вся полоса и шанс уложиться в таймаут (см. пояснение выше).
+  var fileUploadChain = Promise.resolve();
+  function runFileUploadSerial(task){
+    var run = fileUploadChain.then(task, task);
+    fileUploadChain = run.then(function(){}, function(){});
+    return run;
+  }
   function uploadFileToCloud(kind, hash, bytes){
+    return runFileUploadSerial(function(){ return uploadFileToCloudNow(kind, hash, bytes); });
+  }
+  function uploadFileToCloudNow(kind, hash, bytes){
     var uploadedAt = Date.now();
     return encryptFileBytes(bytes).then(function(encBytes){
       return bytesToBase64Async(encBytes);
@@ -12387,7 +12399,10 @@
   // уложиться в таймаут и наконец завершиться, а не только "начаться и оборваться" раз за разом.
   // Цена — сверка большой библиотеки файлов идёт дольше (по одному, не пачками), это не страшно: он
   // и так фоновый, не блокирует UI.
-  var FILE_SYNC_DOWNLOAD_CONCURRENCY = 1;
+  // 23.11 (ТЗ пользователя): СКАЧИВАНИЕ картинок — в 3 потока. Довод выше (затор на мобильном канале) относился к ЗАЛИВКЕ: она по-прежнему
+  // идёт строго по одной (runFileUploadSerial вокруг uploadFileToCloud/uploadFileToGroupCloud), поэтому запись в облако не делит полосу.
+  // Скачивание одного файла, оборвавшееся по таймауту, лишь повторится по бэкоффу (uploadBackoff*), облако при этом не меняется.
+  var FILE_SYNC_DOWNLOAD_CONCURRENCY = 3;
 
   function syncFileRegistry(kind, adapters, opts){
     adapters = adapters || FILE_REGISTRY_ADAPTERS[kind];
@@ -12520,14 +12535,13 @@
             try{ if(window.__retryTaskImageHydration) window.__retryTaskImageHydration(entry.name || hash); }catch(eHydrate){
               if(window.Debug) window.Debug.log("syncFileRegistry(\"" + kind + "\"): __retryTaskImageHydration бросил исключение — " + (eHydrate && eHydrate.message ? eHydrate.message : eHydrate));
             }
-            // Пользователь явно потребовал другое: одно устройство скачало — байты в облаке больше
-            // не нужны, удаляем сразу. Если файл понадобится ещё кому-то — сработает заявка
-            // (fileRequests, пункт "2)" ниже) — это и есть "по запросу".
-            return deleteFileFromCloud(kind, hash).catch(function(){});
+            // 23.11 (ТЗ пользователя): скачавшее устройство больше НЕ стирает байты из облака и не сбрасывает uploadedAt — копия
+            // лежит сутки (FILE_RELAY_TTL_MS) после заливки, чтобы остальные устройства могли подгрузить её сами, без заявки.
+            // Убирает её только пункт "3)" ниже, по истечении срока. Файл понадобится позже — сработает заявка (fileRequests).
+            return null;
           }).then(function(){
             var patch = {};
             patch["files/" + kind + "/" + hash + "/confirmedBy/" + myId] = true;
-            patch["files/" + kind + "/" + hash + "/uploadedAt"] = null;
             Object.keys(patch).forEach(function(k){ pendingRegistryPatch[k] = patch[k]; });
           }).then(function(){
             // Файл наконец забрали — если это была НАША заявка, снимаем её.
@@ -12731,6 +12745,9 @@
   // chunked-хелперы, что и у личного канала, ничего группового им не нужно). ----
   function groupFileBlobCloudPath(hash){ return "fileBlobs/images/" + hash; }
   function uploadFileToGroupCloud(groupId, hash, bytes){
+    return runFileUploadSerial(function(){ return uploadFileToGroupCloudNow(groupId, hash, bytes); });
+  }
+  function uploadFileToGroupCloudNow(groupId, hash, bytes){
     var uploadedAt = Date.now();
     return encryptGroupFileBytes(groupId, bytes).then(function(encBytes){
       return bytesToBase64Async(encBytes);
@@ -12937,10 +12954,10 @@
               uploadBackoffClear(downloadBackoffKey);
               return adapters.saveIncoming(hash, entry.name || hash, new Uint8Array(buf));
             }).then(function(){
-              return deleteFileFromGroupCloud(groupId, hash).catch(function(){});
+              // 23.11: байты после скачивания не стираем (см. личный канал) — их убирает только пункт "3)" по истечении суток
+              return null;
             }).then(function(){
               pendingGroupPatch["files/images/" + hash + "/confirmedBy/" + myId] = true;
-              pendingGroupPatch["files/images/" + hash + "/uploadedAt"] = null;
             }).then(function(){
               return (pendingRequest && pendingRequest.by === myId) ? clearGroupFileRequest(groupId, hash) : null;
             }).catch(function(){});
