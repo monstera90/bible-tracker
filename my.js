@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 153.12 (23.11) — карточки задач (вкладки задач): поворот экрана больше не сбивает место в списке. Вертикальный и горизонтальный режимы (1/2/3/4 колонки) показывают одни и те же карточки; если в режиме ничего не листали после прошлого выхода из него — список возвращается ровно в то положение, в каком был оставлен; если листали в другом режиме — встаёт у той же карточки (якорь: первая видимая карточка + смещение, «самый верх»/«самый низ» — отдельно): `taskOrient*`. Откат: my.js 153.11.
    Версия: 153.11 (23.11) — файлы в облаке: скачивание картинок в 3 потока (`FILE_SYNC_DOWNLOAD_CONCURRENCY`=3), заливка по-прежнему по одной (`runFileUploadSerial`); байты в облаке не удаляются после скачивания и живут сутки после заливки (`FILE_RELAY_TTL_MS`=24 ч), uploadedAt после скачивания не сбрасывается — личный и групповой каналы. Откат: my.js 153.10.
    Версия: 153.10 (23.11) — задачи, дёрганье: (1) «+» при правке другой задачи — предыдущая строка сворачивается сразу (`taskScheduleCollapse`/`taskFinishPendingCollapses`), а не через 500 мс поверх прокрутки к новой строке; (2) Enter в поле правки — `insertLineBreak` вместо `insertText` (`taskEditEnter`): нет блока div/br и схлопывания пустой строки; `taskEditParasOk` не требует пересборки для растянутого span; красная строка нового абзаца ставится сразу (`taskEditPrepareParaAtCaret`). Откат: my.js 153.9.
    Версия: 153.9 (22.11) — крестик удаления появляется сразу при долгом нажатии, вместе с вибрацией (раньше — после отпускания пальца). Откат: my.js 153.8.
@@ -11236,6 +11237,10 @@
       tabScrollPercents[tab] = Math.max(0, Math.min(1, container.scrollTop / max));
       scheduleTabScrollSave();
     }, { passive: true });
+    // позиция вкладок задач при повороте экрана (см. «ПОЗИЦИЯ ВКЛАДОК ЗАДАЧ ПРИ ПОВОРОТЕ ЭКРАНА» ниже)
+    container.addEventListener("scroll", taskOrientOnScroll, { passive: true });
+    window.addEventListener("resize", taskOrientOnResize);
+    window.addEventListener("orientationchange", taskOrientOnResize);
   }
   // Восстанавливает сохранённую позицию скролла вкладки. Для синхронно рендерящихся вкладок (все
   // вкладки задач) достаточно вызвать сразу после рендера. Для АСИНХРОННО дорисовывающихся вкладок
@@ -11262,6 +11267,7 @@
       container.scrollTop = target();
       var setTo = container.scrollTop;
       tabScrollRestorePending = false;
+      taskOrientInit(tab);
       // картинки задач и перерисовка окна (layoutSettingsModal) чуть позже меняют высоту — если человек ничего не листал,
       // доводим до нужного места ещё дважды
       [250, 800].forEach(function(ms){
@@ -11271,10 +11277,139 @@
           if(Math.abs(container.scrollTop - setTo) > 1.5) return; // сдвинули не мы (и не человек) — не мешаем
           var t = target();
           if(Math.abs(t - container.scrollTop) > 1){ container.scrollTop = t; setTo = container.scrollTop; }
+          taskOrientInit(tab);
         }, ms);
       });
     }
     requestAnimationFrame(step);
+  }
+
+  // ===================== ПОЗИЦИЯ ВКЛАДОК ЗАДАЧ ПРИ ПОВОРОТЕ ЭКРАНА =====================
+  // Вертикальный режим — одна колонка карточек, горизонтальный — сетка из 2–4 колонок (.task-grid-list, media по ширине),
+  // карточки те же. Раньше scrollTop просто оставался прежним в пикселях (или менялся на процент), и после поворота список
+  // оказывался в другом месте. Теперь на каждую вкладку задач помнится:
+  //  • якорь — первая видимая карточка (id) + её смещение от верха окна; «самый верх» и «самый низ» помнятся отдельно;
+  //  • для каждого режима (число колонок) — точная позиция scrollTop, с отметкой seq: номер последней прокрутки списка.
+  // При смене числа колонок: если в этом режиме после прошлого выхода из него ничего не листали в другом (seq совпал и высота
+  // списка та же) — возвращается ровно прежняя позиция режима; иначе список встаёт у якорной карточки. Позиция ставится
+  // несколько раз (320 мс, 500 мс, 1 с): окно настроек пересчитывает высоту с задержкой (layoutSettingsModal), картинки догружаются.
+  var taskOrient = null;            // {tab, cols, seq, anchor, modes:{cols:{top,sh,ch,seq}}}
+  var taskOrientToken = 0;
+  var taskOrientBusyUntil = 0;      // пока идёт поворот/расстановка — собственные scroll-события в память не пишем
+  var taskOrientScrollTimer = null;
+  function taskOrientCols(){
+    var w = window.innerWidth || document.documentElement.clientWidth || 0;
+    return w >= 1576 ? 4 : (w >= 1182 ? 3 : (w >= 788 ? 2 : 1));
+  }
+  function taskOrientTab(){
+    var tab = currentSettingsTab;
+    if(!TASK_TAB_IDS.hasOwnProperty(tab)) return "";
+    if(tab === "projects" && activeProjectPickerId) return ""; // там свой контейнер и своя память
+    return tab;
+  }
+  function taskOrientBox(){
+    var c = document.getElementById("settingsTabContent");
+    if(!c || !c.clientHeight || !c.getClientRects().length) return null; // окно скрыто — scrollTop ничего не значит
+    return c;
+  }
+  function taskOrientFresh(tab, cols){
+    taskOrient = { tab: tab, cols: cols, seq: 0, anchor: null, modes: {} };
+  }
+  function taskOrientRead(c){
+    var rows = c.querySelectorAll("#taskListWrap > .task-row");
+    if(!rows.length) return null;
+    var max = c.scrollHeight - c.clientHeight;
+    var st = c.scrollTop;
+    var a = { pos: "mid", id: "", off: 0 };
+    if(st <= 1) a.pos = "top";
+    else if(max > 0 && st >= max - 2) a.pos = "bottom";
+    var ctop = c.getBoundingClientRect().top;
+    var lo = 0, hi = rows.length - 1;
+    while(lo < hi){ // первая строка, чей низ ниже верха окна (DOM-порядок = порядок сверху вниз, слева направо)
+      var mid = (lo + hi) >> 1;
+      if(rows[mid].getBoundingClientRect().bottom > ctop + 1) hi = mid; else lo = mid + 1;
+    }
+    a.id = rows[lo].getAttribute("data-id") || "";
+    a.off = rows[lo].getBoundingClientRect().top - ctop;
+    return a.id ? a : null;
+  }
+  function taskOrientPlace(c, a){
+    if(!a) return;
+    var max = c.scrollHeight - c.clientHeight;
+    if(a.pos === "top"){ c.scrollTop = 0; return; }
+    if(a.pos === "bottom"){ c.scrollTop = max > 0 ? max : 0; return; }
+    var row = c.querySelector('#taskListWrap > .task-row[data-id="' + a.id + '"]');
+    if(!row) return;
+    var delta = row.getBoundingClientRect().top - c.getBoundingClientRect().top - a.off;
+    if(Math.abs(delta) > 0.5) c.scrollTop = c.scrollTop + delta;
+  }
+  function taskOrientSnap(c, seq){
+    return { top: c.scrollTop, sh: c.scrollHeight, ch: c.clientHeight, seq: seq };
+  }
+  // позиция выставлена восстановлением вкладки (restoreTabScroll) — это новая точка отсчёта
+  function taskOrientInit(tab){
+    try{
+      if(taskOrientTab() !== tab) return;
+      var c = taskOrientBox(); if(!c) return;
+      var cols = taskOrientCols();
+      taskOrientFresh(tab, cols);
+      taskOrientToken++; // отменяет незавершённую расстановку после поворота
+      var a = taskOrientRead(c);
+      if(!a) return;
+      taskOrient.anchor = a;
+      taskOrient.modes[cols] = taskOrientSnap(c, 0);
+    }catch(e){}
+  }
+  // любая прокрутка списка (палец, «домик», кнопки) — после паузы 180 мс читаем, где остановились
+  function taskOrientOnScroll(){
+    if(!taskOrientTab()) return;
+    clearTimeout(taskOrientScrollTimer);
+    taskOrientScrollTimer = setTimeout(taskOrientRecord, 180);
+  }
+  function taskOrientRecord(){
+    try{
+      var tab = taskOrientTab(); if(!tab) return;
+      if(tabScrollRestorePending || Date.now() < taskOrientBusyUntil) return;
+      var c = taskOrientBox(); if(!c) return;
+      var cols = taskOrientCols();
+      if(!taskOrient || taskOrient.tab !== tab) taskOrientFresh(tab, cols);
+      if(taskOrient.cols !== cols) return; // экран уже повернулся, а resize ещё не пришёл — это не прокрутка человека
+      var a = taskOrientRead(c); if(!a) return;
+      taskOrient.anchor = a;
+      taskOrient.seq++;
+      taskOrient.modes[cols] = taskOrientSnap(c, taskOrient.seq);
+    }catch(e){}
+  }
+  function taskOrientOnResize(){
+    try{
+      var tab = taskOrientTab();
+      if(!tab || !taskOrient || taskOrient.tab !== tab) return;
+      var cols = taskOrientCols();
+      if(cols === taskOrient.cols) return; // экранная клавиатура и т.п. — число колонок то же
+      taskOrient.cols = cols;
+      clearTimeout(taskOrientScrollTimer);
+      var token = ++taskOrientToken;
+      var userBefore = tabScrollUserAt;
+      taskOrientBusyUntil = Date.now() + 1500;
+      var steps = [0, 320, 500, 1000];
+      steps.forEach(function(ms, i){
+        setTimeout(function(){ taskOrientApply(tab, cols, token, userBefore, i === steps.length - 1); }, ms);
+      });
+    }catch(e){}
+  }
+  function taskOrientApply(tab, cols, token, userBefore, last){
+    try{
+      if(token !== taskOrientToken) return;
+      if(tabScrollUserAt !== userBefore) return; // человек уже листает — не мешаем
+      if(currentSettingsTab !== tab || !taskOrient || taskOrient.tab !== tab || taskOrient.cols !== cols) return;
+      if(document.activeElement && document.activeElement.isContentEditable) return; // идёт правка — каретку не трогаем
+      var c = taskOrientBox(); if(!c) return;
+      var m = taskOrient.modes[cols];
+      var saved = !!(m && m.seq === taskOrient.seq && Math.abs(m.sh - c.scrollHeight) <= 4 && Math.abs(m.ch - c.clientHeight) <= 4);
+      taskOrientBusyUntil = Math.max(taskOrientBusyUntil, Date.now() + 500);
+      if(saved) c.scrollTop = m.top; else taskOrientPlace(c, taskOrient.anchor);
+      if(last && !saved) taskOrient.modes[cols] = taskOrientSnap(c, taskOrient.seq);
+    }catch(e){}
   }
 
   function switchSettingsTab(tab){
