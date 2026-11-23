@@ -1,6 +1,7 @@
 /* ===========================================================================
    system.js
-   Версия: 2.2 (21.11)
+   Версия: 2.3 (23.11)
+   2.3 (23.11): починено — выбранное число потоков скачивания пропадало (раз в 2 с `paint` усиления громкости снимал «on» со всех кнопок `.sys-opt`, в том числе потоков); теперь он трогает только кнопки с `data-pct`. Откат: system.js 2.2.
    2.2 (21.11): блок «Скачивание файлов» — число потоков по умолчанию 2–8 (мост ≥42 `downloadThreadsGet` / `downloadThreadsSet`; FileDownloads.kt).
    Вкладка «Система» (set2s_15, кнопка settingsTabSet2Btn15; язычок режима колеса — в вертикальном стеке набора 1 самый нижний).
    Здесь — функции, связанные с работой всей системы телефона. Сейчас две: «Использовать системный плавающий остров»
@@ -90,7 +91,7 @@
     var root = document.getElementById(ROOT_ID);
     if(!root) return;
     var pct = st ? st.pct : 100;
-    var btns = root.querySelectorAll(".sys-opt");
+    var btns = root.querySelectorAll(".sys-opt[data-pct]");
     for(var i = 0; i < btns.length; i++){
       btns[i].classList.toggle("on", Number(btns[i].getAttribute("data-pct")) === pct);
     }
