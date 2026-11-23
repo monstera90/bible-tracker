@@ -2,6 +2,7 @@ package com.app.lifetracker
 // Версия: 1.0 (21.11) — тесты чистой логики скачивания (ТЗ TZ_downloads.md, этап 1). Запуск: ./gradlew testDebugUnitTest
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -33,6 +34,13 @@ class DownloadLogicTest {
         assertEquals(3, DownloadLogic.splitRanges(3 * mb + 10, 8).size)
         assertTrue(DownloadLogic.splitRanges(0, 4).isEmpty())
         assertTrue(DownloadLogic.splitRanges(-1, 4).isEmpty())
+    }
+
+    @Test fun autoMultiOnlyWhenRangesAndSizeKnown() {
+        assertTrue(DownloadLogic.canAutoMulti(10 * mb, true))
+        assertFalse(DownloadLogic.canAutoMulti(10 * mb, false))
+        assertFalse(DownloadLogic.canAutoMulti(-1, true))
+        assertFalse(DownloadLogic.canAutoMulti(0, true))
     }
 
     @Test fun contentDispositionNames() {

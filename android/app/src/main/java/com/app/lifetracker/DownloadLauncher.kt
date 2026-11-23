@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (23.11) — окно «Обычное / В N потоков» показывается только если многопоточное скачивание недоступно (сервер без диапазонов, размер неизвестен, разведка не удалась); иначе сразу «В N потоков» ([DownloadLogic.canAutoMulti]). Откат: DownloadLauncher.kt 1.2.
 // Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): [startForPage] — скачивание по запросу страницы (мост `downloadStart`): разведка, то же окно «Обычное / В N потоков», задача с `handoffId`. Откат: DownloadLauncher.kt 1.1.
 // Версия: 1.1 (22.11) — этап 6 (6.6): [handlePage] — `data:` и `blob:` со вкладок-сайтов и Claude сохраняет приложение ([PageDownloads]), http/https — прежний путь. Откат: DownloadLauncher.kt 1.0.
 // Версия: 1.0 (21.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 1: общий обработчик скачивания для вкладок-сайтов, вкладки Claude и главного WebView (раздел 6.1, 6.4).
@@ -13,8 +14,9 @@ import android.widget.Toast
  * Запуск скачивания из WebView. Один код на все места (UserTabs, ClaudeTab, MainActivity), чтобы не копировать его.
  * [handle] — только `http` / `https`. [handlePage] — для WebView вкладок-сайтов и Claude: `data:` и `blob:` уходят в [PageDownloads] (этап 6), остальное — в [handle].
  *
- * Порядок: заголовки (cookie, User-Agent, Referer) → разведка в фоне (имя и размер) → окно «Обычное / В N потоков / Отмена» →
- * задача в [FileDownloads] и служба. Если разведка не удалась — окно всё равно показывается, а причину покажет остров.
+ * Порядок: заголовки (cookie, User-Agent, Referer) → разведка в фоне (имя и размер) → если сервер отдаёт файл частями, сразу
+ * «В N потоков»; иначе окно «Обычное / В N потоков / Отмена» → задача в [FileDownloads] и служба.
+ * Если разведка не удалась — окно показывается, а причину покажет остров.
  */
 object DownloadLauncher {
 
@@ -104,6 +106,11 @@ object DownloadLauncher {
     private fun showChoice(activity: Activity, url: String, headers: Map<String, String>, name: String, p: ProbeResult, originTab: String, req: PageHandoff.Req? = null) {
         val app = activity.applicationContext
         val threads = FileDownloads.threads(app)
+        if (DownloadLogic.canAutoMulti(p.total, p.acceptRanges)) {
+            // потоки доступны — выбирать нечего (маленький файл движок сам скачает одним куском)
+            start(app, url, headers, name, DlMode.MULTI, threads, originTab, p, req)
+            return
+        }
         val size = if (p.total >= 0) DownloadLogic.formatSize(p.total) else "размер неизвестен"
         val msg = StringBuilder(name).append('\n').append(size)
         if (p.total >= 0 && !p.acceptRanges) msg.append("\nСервер не поддерживает потоки: файл скачается обычным способом")
