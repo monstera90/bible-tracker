@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.11) — autoClickReady / recordNote для автоскачивания карточки fix.zip (auto_fix.js). Откат: AutoCommit.kt 1.0.
 // Версия: 1.0 (24.11) — ТЗ «автокоммит fix.zip» (TASK_AUTO_COMMIT.md): перехват скачивания fix.zip во вкладке Claude, настройки и токен, итог тостом.
 
 import android.content.Context
@@ -128,6 +129,14 @@ object AutoCommit {
         plain(ctx).edit().putLong(K_LAST_TIME, System.currentTimeMillis()).putString(K_LAST_STATUS, status).putString(K_LAST_TEXT, text).apply()
     }
 
+    /** Включено ли автоскачивание карточки fix.zip (auto_fix.js): переключатель включён и токен задан. */
+    fun autoClickReady(ctx: Context): Boolean = enabled(ctx) && token(ctx).isNotEmpty()
+
+    /** Ошибка автоскачивания со страницы (скрипт не нашёл карточку или кнопку) — в «Последний результат». */
+    fun recordNote(ctx: Context, text: String) {
+        record(ctx, "error", text)
+    }
+
     private fun toast(activity: MainActivity, text: String) {
         activity.runOnUiThread {
             try { Toast.makeText(activity, text, Toast.LENGTH_LONG).show() } catch (e: Exception) { }
@@ -157,6 +166,8 @@ object AutoCommit {
             return false
         }
         val u = url.trim()
+        // Сообщаем скрипту автоскачивания (auto_fix.js), что файл забрало приложение: вторую кнопку «Скачать» он нажимать не будет.
+        try { view.evaluateJavascript("window.__ltFixDl=Date.now();", null) } catch (e: Exception) { }
         val got = { bytes: ByteArray?, err: String? ->
             if (bytes == null) fail(activity, err ?: "не удалось получить файл") else worker.execute { process(activity, bytes) }
         }

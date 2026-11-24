@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.2 (24.11) — автоскачивание fix.zip: injectAutoFix (assets/claude/auto_fix.js), настройка и ошибки скрипта через statusPoll. Откат: ClaudeTab.kt 2.1.
 // Версия: 2.1 (24.11) — скачивание fix.zip перехватывает AutoCommit (автокоммит в GitHub). Откат: ClaudeTab.kt 2.0.
 
 import android.annotation.SuppressLint
@@ -471,6 +472,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
             override fun onPageFinished(view: WebView?, url: String?) {
                 injectDownloadHook(view)
                 injectAuto(view)
+                injectAutoFix(view)
                 onTaskPageFinished(view, url)
             }
 
@@ -509,12 +511,28 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         return v
     }
 
+    private var fixSeq = 0
+
     private val statusPoll = object : Runnable {
         override fun run() {
             val v = view
             if (v != null) {
                 v.evaluateJavascript("(window.__ltAuto?window.__ltAuto.status():null)") { raw ->
                     if (raw != null && raw != "null" && raw.startsWith("{")) lastStatus = raw
+                }
+                // Автоскачивание fix.zip (auto_fix.js): свежая настройка в страницу и ошибка скрипта — в «Последний результат».
+                v.evaluateJavascript("window.__ltFixCfg={enabled:" + AutoCommit.autoClickReady(activity) + "};(window.__ltFix?window.__ltFix.status():null)") { raw ->
+                    try {
+                        if (raw != null && raw.startsWith("{")) {
+                            val o = JSONObject(raw)
+                            val sq = o.optInt("seq", 0)
+                            if (sq != fixSeq) {
+                                fixSeq = sq
+                                val err = o.optString("error", "")
+                                if (err.isNotEmpty()) AutoCommit.recordNote(activity, err)
+                            }
+                        }
+                    } catch (e: Exception) { }
                 }
                 handler.postDelayed(this, STATUS_POLL_MS)
             }
@@ -524,6 +542,17 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     /** Страница запоминает имена из `<a download>`, чтобы скачанный файл получил своё имя и расширение. */
     private fun injectDownloadHook(v: WebView?) {
         try { v?.evaluateJavascript(PageDownloadLogic.nameHookScript(), null) } catch (e: Exception) { }
+    }
+
+    /** Скрипт автоскачивания fix.zip (auto_fix.js): сам нажимает на новую карточку fix.zip после ответа агента. */
+    private fun injectAutoFix(v: WebView?) {
+        if (v == null) return
+        val script = try {
+            activity.assets.open("claude/auto_fix.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: Exception) {
+            return
+        }
+        v.evaluateJavascript("window.__ltFixCfg={enabled:" + AutoCommit.autoClickReady(activity) + "};\n" + script, null)
     }
 
     private fun injectAuto(v: WebView?) {
