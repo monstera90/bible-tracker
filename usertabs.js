@@ -1,5 +1,6 @@
 /* ===========================================================================
    usertabs.js
+   Версия: 5.4 (24.11) — в форме адреса галочка «Скрывать пустые рекламные блоки» (по вкладке, по умолчанию включена; хранит оболочка, `utabAdHide` / `utabAdHideGet`, UserTabs.kt 8.9). Без нового метода моста галочки нет. Откат: usertabs.js 5.3.
    Версия: 5.3 (20.11) — `syncEdge`: «Claude» (#claudeTabView) тоже получает `.lt-site` — под рядом кнопок нет светлой подложки окна, как у вкладок-сайтов.
    Версия: 5.2 (16.11) — «Поделиться» отдаёт ссылку читаемой: процентные последовательности кириллицы и других не-ASCII символов (%D0%B...) декодируются в буквы (`readableUrl`), служебные %XX (пробел, /, ?, &, #, %) остаются, чтобы ссылка не ломалась; флаг SHARE_STRIP_SCHEME убирает «https://» (по умолчанию выключен). Откат: usertabs.js 5.1.
    Версия: 5.1 (15.11) — в форме адреса (долгое нажатие на кнопку вкладки) галочка «Зафиксировать иконку для этой вкладки» (`locks`, localStorage `userTabIconLock_v1`, только на этом устройстве): значок на кнопке остаётся тем, что был на момент включения, сайт его больше не меняет (`syncIcon`); снять галочку — значок снова обновляется. Kotlin не менялся. Откат: usertabs.js 5.0.
@@ -53,6 +54,12 @@
   function bridge(){
     var b = window.LifeTrackerNative;
     return (b && typeof b.utabShow === "function") ? b : null;
+  }
+  // скрываются ли на вкладке пустые рекламные блоки: true/false, а null — оболочка так не умеет (галочку не показываем)
+  function adHideOn(id){
+    var b = window.LifeTrackerNative;
+    if(!b || typeof b.utabAdHide !== "function" || typeof b.utabAdHideGet !== "function") return null;
+    try{ return !!b.utabAdHideGet(id); }catch(e){ return null; }
   }
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -413,6 +420,7 @@
         '<input id="utUrl" type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="example.com" value="' + esc(t.home) + '">' +
         '<div class="ut-err" id="utErr"></div>' +
         '<label class="ut-lock"><input type="checkbox" id="utLockIcon"' + (locked(t.id) ? ' checked' : '') + '>Зафиксировать иконку для этой вкладки</label>' +
+        (adHideOn(t.id) === null ? '' : '<label class="ut-lock"><input type="checkbox" id="utAdHide"' + (adHideOn(t.id) ? ' checked' : '') + '>Скрывать пустые рекламные блоки</label>') +
         '<div class="ut-btns">' +
           '<button type="button" class="primary" id="utOpen">Открыть</button>' +
           (hasHome ? '<button type="button" id="utBack">К странице</button><button type="button" id="utReload">Обновить</button><button type="button" id="utDel">Удалить вкладку</button>' : '') +
@@ -447,6 +455,11 @@
       else{ delete locks[t.id]; syncIcon(t.id); }
       saveLocks();
       updateButton(t);
+    });
+    var adBox = el("utAdHide");
+    if(adBox) adBox.addEventListener("change", function(){
+      var nb = bridge();
+      if(nb && typeof nb.utabAdHide === "function"){ try{ nb.utabAdHide(t.id, !!this.checked); }catch(e){} }
     });
     el("utOpen").addEventListener("click", openIt);
     input.addEventListener("keydown", function(e){ if(e.key === "Enter" || e.keyCode === 13){ e.preventDefault(); openIt(); } });

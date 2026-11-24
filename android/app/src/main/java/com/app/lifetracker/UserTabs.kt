@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 8.9 (24.11) — скрытие пустых рекламных блоков на странице (AdHider.kt): `setAdHide` / `adHide` (по вкладке, по умолчанию включено), скрипт ставится на начало документа, а если WebView так не умеет — после загрузки страницы. Откат: UserTabs.kt 8.8.
 // Версия: 8.8 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: UserTabs.kt 8.7.
 // Версия: 8.7 (21.11) — скачивание файлов со вкладок-сайтов: `setDownloadListener` отдаёт http/https в `DownloadLauncher` (движок и остров, ТЗ TZ_downloads.md, этап 1) вместо внешнего браузера. Откат: UserTabs.kt 8.6.
 // Версия: 8.6 (20.11) — `SiteWebView` (WebView с «окнами» под кнопки) стал `internal`: тот же класс использует вкладка Claude (ClaudeTab.kt 1.5). Поведение вкладок-сайтов не менялось. Откат: UserTabs.kt 8.5.
@@ -37,6 +38,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
@@ -451,6 +453,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         var frameSec = 0
         var frameSeen = 0L     // когда кадр сообщил состояние последний раз
         var diagAt = 0L        // когда он записан (пробы раз в секунду пишут не чаще раза в DIAG_EVERY_MS)
+        var adScript: ScriptHandler? = null // скрипт скрытия пустых рекламных блоков (AdHider), поставленный на начало документа
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -696,7 +699,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         stateFile(id).delete()
         iconFile(id).delete()
         val e = prefs.edit()
-        for (name in listOf("home", "url", "sy", "title", "rev")) e.remove(k(id, name))
+        for (name in listOf("home", "url", "sy", "title", "rev", "adhide")) e.remove(k(id, name))
         if (prefs.getString(KEY_LAST, null) == id) e.remove(KEY_LAST)
         e.apply()
     }
@@ -1318,6 +1321,38 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         }
     }
 
+    // ---------- скрытие пустых рекламных блоков (AdHider) ----------
+
+    /** Скрывать ли пустые рекламные блоки на вкладке [id]; по умолчанию да. */
+    fun adHide(id: String): Boolean = prefs.getBoolean(k(id, "adhide"), true)
+
+    /** Включает или выключает скрытие для вкладки [id]: открытая страница меняется сразу, без перезагрузки. Главный поток. */
+    fun setAdHide(id: String, on: Boolean) {
+        if (!ID_RE.matches(id)) return
+        prefs.edit().putBoolean(k(id, "adhide"), on).apply()
+        val t = tabs[id] ?: return
+        val v = t.view ?: return
+        if (on) {
+            installAdHider(v, t)
+            v.evaluateJavascript(AdHider.JS, null)
+        } else {
+            try { t.adScript?.remove() } catch (e: Throwable) { }
+            t.adScript = null
+            v.evaluateJavascript("(function(){try{if(window.__ltAdHideOff)window.__ltAdHideOff();}catch(e){}})()", null)
+        }
+    }
+
+    private fun installAdHider(v: WebView, t: Tab) {
+        if (t.adScript != null) return
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                t.adScript = WebViewCompat.addDocumentStartJavaScript(v, AdHider.JS, setOf("*"))
+            }
+        } catch (e: Throwable) {
+            // скрипт на начало документа недоступен — страница получит его после загрузки (pageFinished)
+        }
+    }
+
     // ---------- ролик в iframe (чужое происхождение): сообщения скрипта FRAME_JS ----------
 
     private fun installFrameHook(v: WebView, t: Tab) {
@@ -1511,6 +1546,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
         cookies.setAcceptThirdPartyCookies(v, true)
 
         installFrameHook(v, t)
+        if (adHide(t.id)) installAdHider(v, t)
 
         // http/https — скачивает само приложение (DownloadLauncher, остров показывает ход); blob: и data: — тоже само (PageDownloads, этап 6)
         v.setDownloadListener { url, ua, cd, mime, _ ->
@@ -1643,6 +1679,7 @@ return (location.host||'?')+' | медиа='+o.length+(o.length?' ['+o.join('; '
 
     private fun pageFinished(t: Tab, v: WebView?) {
         if (v == null || t.view !== v) return
+        if (t.adScript == null && adHide(t.id)) v.evaluateJavascript(AdHider.JS, null) // WebView без скриптов на начало документа: ставим после загрузки
         t.canBack = v.canGoBack()
         val u = v.url
         if (!u.isNullOrEmpty() && u != "about:blank") t.curUrl = u

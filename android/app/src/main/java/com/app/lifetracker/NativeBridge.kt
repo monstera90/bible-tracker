@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.9 (24.11) — `utabAdHide(id, on)` / `utabAdHideGet(id)`: скрытие пустых рекламных блоков на вкладке-сайте (UserTabs 8.9, AdHider). Версию моста не меняет: страница проверяет наличие метода.
 // Версия: 30.8 (24.11) — `claudeSendTask(tabId, reqId, text)` / `claudeTaskResults()`: сундучок у задачи отправляет её в новый диалог выбранной вкладки Claude вместе с архивом репозитория (ClaudeTabs.sendTask, ClaudeTask.kt). Версию моста не меняет — страница проверяет наличие методов. Откат: NativeBridge.kt 30.7.
 // Версия: 30.7 (22.11) — мост версии 44: `downloadStart` / `downloadStatus` / `downloadCancel` / `downloadRelease` — скачивание по запросу страницы через общий движок с показом в острове (Flibusta → библиотека «Книги»; PageHandoff, ТЗ TZ_downloads.md, этап 2). Откат: NativeBridge.kt 30.6.
 // Версия: 30.6 (22.11) — мост версии 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders) — ТЗ TZ_downloads.md, этап 4; `finishSave` называет в сообщении, куда сохранено. Откат: NativeBridge.kt 30.5.
@@ -1036,6 +1037,20 @@ class NativeBridge(private val activity: MainActivity) {
     fun utabGetState(id: String?): String {
         if (!activity.pageTrusted || id == null) return "{}"
         return try { activity.userTabs.stateJson(id) } catch (e: Exception) { "{}" }
+    }
+
+    /** Включает/выключает скрытие пустых рекламных блоков на вкладке-сайте [id]; действует на открытую страницу сразу. */
+    @JavascriptInterface
+    fun utabAdHide(id: String?, on: Boolean) {
+        if (!activity.pageTrusted || id == null) return
+        activity.runOnUiThread { activity.userTabs.setAdHide(id, on) }
+    }
+
+    /** Скрываются ли пустые рекламные блоки на вкладке-сайте [id] (по умолчанию да). */
+    @JavascriptInterface
+    fun utabAdHideGet(id: String?): Boolean {
+        if (!activity.pageTrusted || id == null) return true
+        return try { activity.userTabs.adHide(id) } catch (e: Exception) { true }
     }
 
     /** Значок сайта как data:image/png;base64 (пусто, пока сайт его не отдал). */
