@@ -1,5 +1,6 @@
 /* auto_fix.js
-   Версия: 1.0 (24.11)
+   Версия: 1.1 (24.11)
+   1.1 (24.11): карточка в claude.ai подписана «Fix / ZIP» (без «.zip»), значок скачивания без текста — поиск по подписи «ZIP» и имени «Fix», нажатие на значок справа.
    Скрипт вкладки Claude (ClaudeTab.kt вставляет его в страницу claude.ai после загрузки; перед ним подставляется `window.__ltFixCfg = {enabled: true|false};`).
    Автоскачивание fix.zip для автокоммита (AutoCommit.kt): когда агент закончил ответ и в диалоге ПОЯВИЛАСЬ новая карточка файла fix.zip,
    скрипт сам нажимает на неё (и на кнопку «Скачать», если она нужна). Дальше скачивание перехватывает приложение и коммитит файл.
@@ -25,20 +26,41 @@
     return !!document.querySelector('button[aria-label*="Stop" i], button[aria-label*="Останов" i]');
   }
 
-  // элементы, чей собственный текст — имя fix.zip (не в коде/цитатах, без дублей от вложенных элементов)
+  var TITLE_RE = /^fix(\s*\(\d+\)|-\d+)?(\.zip)?$/i;
+
+  function inCode(el){ return !!(el.closest && el.closest("code,pre")); }
+  function hasTitle(root){
+    var list = root.querySelectorAll("div,span,p,a,h1,h2,h3,h4");
+    for(var i = 0; i < list.length; i++){
+      if(list[i].children.length === 0 && TITLE_RE.test(txt(list[i]))) return true;
+    }
+    return false;
+  }
+
+  // Карточки файла fix.zip. Так их рисует claude.ai сейчас: крупное имя без расширения («Fix»), под ним подпись «ZIP», справа значок скачивания.
+  // Запасной вариант: элемент с текстом «fix.zip» целиком. В коде/цитатах ничего не ищется.
   function cards(){
-    var out = [], all = document.querySelectorAll("div,span,p,a,button,h1,h2,h3,h4");
+    var out = [], all = document.querySelectorAll("div,span,p");
     for(var i = 0; i < all.length; i++){
       var el = all[i];
-      if(el.children.length > 2) continue;
+      if(el.children.length !== 0 || inCode(el)) continue;
       var t = txt(el);
-      if(t.length > 40 || !NAME_RE.test(t)) continue;
-      if(el.closest && el.closest("code,pre")) continue;
-      var dup = false;
-      for(var c = 0; c < el.children.length; c++){ if(NAME_RE.test(txt(el.children[c]))){ dup = true; break; } }
-      if(!dup) out.push(el);
+      if(/^zip$/i.test(t)){
+        var e = el.parentElement;
+        for(var up = 0; up < 5 && e && e !== document.body; up++){
+          if(hasTitle(e)){ if(out.indexOf(e) === -1) out.push(e); break; }
+          e = e.parentElement;
+        }
+      } else if(t.length <= 40 && NAME_RE.test(t)){
+        var holder = el.parentElement || el;
+        if(out.indexOf(holder) === -1 && !out.some(function(c){ return c.contains(el); })) out.push(holder);
+      }
     }
-    return out;
+    // вложенные дубли (внешний контейнер и внутренний) — оставляем самый внутренний
+    return out.filter(function(c){
+      for(var k = 0; k < out.length; k++){ if(out[k] !== c && c.contains(out[k])) return false; }
+      return true;
+    });
   }
 
   function clickable(el){
@@ -102,27 +124,23 @@
   function start(card, count){
     busy = true;
     var t0 = Date.now();
-    // 1) кнопка «Скачать» уже есть рядом с карточкой
-    var e = card;
-    for(var up = 0; up < 6 && e && e.parentElement && e !== document.body; up++){
-      var found = controlsIn(e);
-      if(found.length){
-        var others = 0, ins = cards();
-        for(var k = 0; k < ins.length; k++){ if(e.contains(ins[k])) others++; }
-        if(others <= 1){
-          fire(found[0]);
-          setTimeout(function(){
-            if((window.__ltFixDl || 0) >= t0){ errText = ""; done(count); }
-            else waitDownload(t0, count, Array.prototype.slice.call(allControls()));
-          }, 3000);
-          return;
-        }
-        break;
-      }
-      e = e.parentElement;
+    var snapshot = Array.prototype.slice.call(allControls());
+    // 1) значок/кнопка скачивания прямо на карточке: по подписи, иначе последний значок справа
+    var ctrl = null, found = controlsIn(card);
+    if(found.length) ctrl = found[found.length - 1];
+    if(!ctrl){
+      var icons = card.querySelectorAll("svg");
+      if(icons.length) ctrl = clickable(icons[icons.length - 1]);
+    }
+    if(ctrl){
+      fire(ctrl);
+      setTimeout(function(){
+        if((window.__ltFixDl || 0) >= t0){ errText = ""; done(count); }
+        else waitDownload(t0, count, snapshot);   // нажатие открыло просмотр — ищем кнопку «Скачать» в нём
+      }, 3000);
+      return;
     }
     // 2) нажать на саму карточку и подождать, что появится
-    var snapshot = Array.prototype.slice.call(allControls());
     fire(clickable(card));
     waitDownload(t0, count, snapshot);
   }
