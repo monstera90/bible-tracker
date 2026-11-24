@@ -1,11 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.10 (24.11) — сундучок: отправка задачи больше не зависит от того, открыта ли вкладка. (1) Пока идёт отправка и вкладка не на экране, её WebView стоит НЕ за краем, а под главным WebView (translationZ=-1, на месте, но закрыт): так Chromium его рисует и не усыпляет, как при заходе на вкладку; после отправки уезжает за край, как раньше. (2) Сторож: если страница не запустила скрипт отправки (потерялся onPageFinished, страница перезагрузилась) — отправка перезапускается (до 3 раз); заход на вкладку тоже подталкивает застрявшую отправку. (3) При сбое по времени в сообщении указан этап, на котором встало. Откат: ClaudeTab.kt 1.9.
-// Версия: 1.9 (24.11) — отправка задачи в НОВЫЙ диалог вкладки (сундучок у задачи): очередь [enqueueTask] → страница https://claude.ai/new грузится заново (так задача всегда попадает в новый чат, а не в открытый у пользователя), в неё кусками base64 кладётся архив репозитория (assets/claude/send_task.js), затем прикрепляется, вставляется текст и нажимается «Отправить»; ход проверяется опросом статуса страницы, итог — [ClaudeTaskResults]. Откат: ClaudeTab.kt 1.8.
-// Версия: 1.8 (24.11) — несколько вкладок Claude: у экземпляра свой [tabId]; вкладка «main» работает как раньше (общий вход приложения), остальные — каждая в своём профиле WebView (androidx.webkit Profile `claude_<id>`: свои cookie и хранилище, вход не смешивается). Настройки «Авто» — отдельные для каждой вкладки. [purge] — удалить вкладку вместе с её входом. Откат: ClaudeTab.kt 1.7.
-// Версия: 1.7 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: ClaudeTab.kt 1.6.
-// Версия: 1.6 (21.11) — `setDownloadListener`: файлы claude.ai скачивает приложение (DownloadLauncher, ТЗ TZ_downloads.md, этап 1). Откат: ClaudeTab.kt 1.5.
-// Версия: 1.5 (20.11) — кнопки вкладки перенесены в нижний ряд страницы, а claude.ai растянут на всю область и заходит под них: WebView теперь `SiteWebView` с «окнами» ([setHoles], мост `claudeHoles`; Android 10+, как у вкладок-сайтов). Откат: ClaudeTab.kt 1.4.
-// Версия: 1.4 (11.11)
+// Версия: 2.0 (24.11)
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -440,8 +434,22 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         cookies.setAcceptThirdPartyCookies(v, true)
 
         // Файл с claude.ai скачивает само приложение: http/https — движок, ход виден в плавающем острове; blob: и data: — PageDownloads (этап 6).
+        // Имя из атрибута `download` WebView не передаёт (приходит пусто → «download» без расширения): спрашиваем у страницы, что она запомнила ([injectDownloadHook]).
         v.setDownloadListener { url, ua, cd, mime, _ ->
-            try { DownloadLauncher.handlePage(activity, v, url, ua, cd, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+            val go = { disposition: String? ->
+                try { DownloadLauncher.handlePage(activity, v, url, ua, disposition, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+            }
+            if (!cd.isNullOrBlank() || url.isNullOrBlank()) {
+                go(cd)
+            } else {
+                try {
+                    v.evaluateJavascript(PageDownloadLogic.nameLookupScript(url)) { raw ->
+                        go(PageDownloadLogic.dispositionFor(PageDownloadLogic.nameFromJsResult(raw)) ?: cd)
+                    }
+                } catch (e: Exception) {
+                    go(cd)
+                }
+            }
         }
 
         v.webViewClient = object : WebViewClient() {
@@ -453,6 +461,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 handleUrl(if (url == null) null else Uri.parse(url))
 
             override fun onPageFinished(view: WebView?, url: String?) {
+                injectDownloadHook(view)
                 injectAuto(view)
                 onTaskPageFinished(view, url)
             }
@@ -502,6 +511,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 handler.postDelayed(this, STATUS_POLL_MS)
             }
         }
+    }
+
+    /** Страница запоминает имена из `<a download>`, чтобы скачанный файл получил своё имя и расширение. */
+    private fun injectDownloadHook(v: WebView?) {
+        try { v?.evaluateJavascript(PageDownloadLogic.nameHookScript(), null) } catch (e: Exception) { }
     }
 
     private fun injectAuto(v: WebView?) {

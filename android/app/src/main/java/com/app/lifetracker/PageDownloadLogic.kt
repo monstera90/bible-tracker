@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 6: чистая логика `data:` и `blob:` (разбор адреса, имя файла, протокол канала со страницей, скрипт страницы).
+// Версия: 2.0 (24.11)
 
 import java.io.ByteArrayOutputStream
 
@@ -115,6 +115,68 @@ object PageDownloadLogic {
         val slash = rest.indexOf('/', schemeEnd)
         val origin = if (slash < 0) rest else rest.substring(0, slash)
         return if (origin.length > schemeEnd) origin else null
+    }
+
+    /**
+     * Скрипт для страницы вкладки: запоминает имя из атрибута `download` у ссылок (`<a download="имя.ext" href="…">`), потому что
+     * WebView в слушатель скачивания это имя не передаёт. Ловит и настоящий клик по ссылке, и программный `a.click()` / `dispatchEvent`
+     * (так сайты обычно и скачивают). Записи — адрес ссылки → имя, хранятся последние 50. Ставится один раз на страницу.
+     */
+    fun nameHookScript(): String =
+        "(function(){if(window.__ltDlHook)return;window.__ltDlHook=1;var M=window.__ltDlNames={},K=[];" +
+            "function rec(a){try{if(!a||a.tagName!==\"A\")return;var n=a.getAttribute(\"download\");" +
+            "if(!n||!a.href)return;if(!(a.href in M))K.push(a.href);M[a.href]=n;" +
+            "while(K.length>50){delete M[K.shift()];}}catch(x){}}" +
+            "document.addEventListener(\"click\",function(e){var t=e.target;while(t&&t.tagName!==\"A\")t=t.parentNode;rec(t);},true);" +
+            "var c=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){rec(this);return c.apply(this,arguments);};" +
+            "var d=EventTarget.prototype.dispatchEvent;EventTarget.prototype.dispatchEvent=function(e){" +
+            "try{if(e&&e.type===\"click\")rec(this);}catch(x){}return d.apply(this,arguments);};})();"
+
+    /** Скрипт-запрос: имя, которое страница запомнила для этого адреса (пустая строка — не запомнила). Результат — JSON-строка. */
+    fun nameLookupScript(url: String): String =
+        "(function(){try{var m=window.__ltDlNames;return (m&&m[" + jsString(url) + "])||\"\";}catch(x){return \"\";}})()"
+
+    /** Ответ `evaluateJavascript` (JSON-строка в кавычках, `null` или пусто) → имя; пусто — имени нет. Без org.json: логика проверяется на JVM. */
+    fun nameFromJsResult(raw: String?): String {
+        val r = raw?.trim() ?: return ""
+        if (r.length < 2 || r[0] != '"' || r[r.length - 1] != '"') return ""
+        val sb = StringBuilder()
+        var i = 1
+        val end = r.length - 1
+        while (i < end) {
+            val c = r[i]
+            if (c != '\\') { sb.append(c); i++; continue }
+            if (i + 1 >= end) break
+            when (val e = r[i + 1]) {
+                'n' -> sb.append('\n')
+                'r' -> sb.append('\r')
+                't' -> sb.append('\t')
+                'b' -> sb.append('\b')
+                'f' -> sb.append('\u000C')
+                'u' -> {
+                    val code = if (i + 6 <= end) r.substring(i + 2, i + 6).toIntOrNull(16) else null
+                    if (code == null) return ""
+                    sb.append(code.toChar())
+                    i += 4
+                }
+                else -> sb.append(e)
+            }
+            i += 2
+        }
+        return sb.toString().trim()
+    }
+
+    /** Имя файла → заголовок Content-Disposition, который понимает остальной код (`filename*` в UTF-8). Пустое имя → null. */
+    fun dispositionFor(name: String?): String? {
+        val n = name?.trim().orEmpty()
+        if (n.isEmpty()) return null
+        val sb = StringBuilder("attachment; filename*=UTF-8''")
+        for (b in n.toByteArray(Charsets.UTF_8)) {
+            val c = b.toInt() and 0xFF
+            val plain = (c in 'A'.code..'Z'.code) || (c in 'a'.code..'z'.code) || (c in '0'.code..'9'.code) || c == '.'.code || c == '-'.code || c == '_'.code
+            if (plain) sb.append(c.toChar()) else sb.append('%').append("%02X".format(c))
+        }
+        return sb.toString()
     }
 
     /** Разбор сообщения страницы по протоколу (см. шапку). */

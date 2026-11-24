@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 1.0 (22.11) — тесты чистой логики `data:` и `blob:` (ТЗ TZ_downloads.md, этап 6). Запуск: ./gradlew testDebugUnitTest
+// Версия: 1.1 (24.11)
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -125,5 +125,28 @@ class PageDownloadLogicTest {
         assertTrue(s.contains("var T=\"tok123\""))
         assertTrue(s.contains("U=\"blob:https://x.y/a\\\"b\""))
         assertFalse(s.contains("\n"))
+    }
+
+    @Test fun dispositionFromPageNameKeepsNameAndExtension() {
+        val cd = PageDownloadLogic.dispositionFor("Отчёт 2026.docx")
+        assertEquals("Отчёт 2026.docx", PageDownloadLogic.pageFileName(cd, "application/octet-stream"))
+        assertEquals("report.pdf", PageDownloadLogic.pageFileName(PageDownloadLogic.dispositionFor("report.pdf"), ""))
+        assertEquals("a b;c.zip", PageDownloadLogic.pageFileName(PageDownloadLogic.dispositionFor("a b;c.zip"), ""))
+        assertNull(PageDownloadLogic.dispositionFor(""))
+        assertNull(PageDownloadLogic.dispositionFor(null))
+    }
+
+    @Test fun nameFromJsResult() {
+        assertEquals("a.pdf", PageDownloadLogic.nameFromJsResult("\"a.pdf\""))
+        assertEquals("Отчёт.docx", PageDownloadLogic.nameFromJsResult("\"\\u041e\\u0442\\u0447\\u0451\\u0442.docx\""))
+        assertEquals("", PageDownloadLogic.nameFromJsResult("\"\""))
+        assertEquals("", PageDownloadLogic.nameFromJsResult("null"))
+        assertEquals("", PageDownloadLogic.nameFromJsResult(null))
+        assertEquals("", PageDownloadLogic.nameFromJsResult("12"))
+    }
+
+    @Test fun lookupScriptEscapesUrl() {
+        assertTrue(PageDownloadLogic.nameLookupScript("blob:https://x.y/a\"b").contains("\"blob:https://x.y/a\\\"b\""))
+        assertTrue(PageDownloadLogic.nameHookScript().contains("__ltDlNames"))
     }
 }
