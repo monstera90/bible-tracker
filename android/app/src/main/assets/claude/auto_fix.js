@@ -1,4 +1,6 @@
 /* auto_fix.js
+   Версия: 1.2 (24.11)
+   1.2 (24.11): метка window.__ltFixExpect (скачивание zip сразу после нажатия считается fix.zip, даже без имени); в тексте ошибки — что нажато и что появилось на экране.
    Версия: 1.1 (24.11)
    1.1 (24.11): карточка в claude.ai подписана «Fix / ZIP» (без «.zip»), значок скачивания без текста — поиск по подписи «ZIP» и имени «Fix», нажатие на значок справа.
    Скрипт вкладки Claude (ClaudeTab.kt вставляет его в страницу claude.ai после загрузки; перед ним подставляется `window.__ltFixCfg = {enabled: true|false};`).
@@ -16,7 +18,7 @@
   var POLL_MS = 1000;
 
   var baseline = -1, sawGen = false, stable = 0, lastPath = location.pathname, busy = false;
-  var seq = 0, errText = "";
+  var seq = 0, errText = "", lastClicked = "";
 
   function enabled(){ var c = window.__ltFixCfg || {}; return !!c.enabled; }
   function visible(el){ return !!(el && (el.offsetWidth || el.offsetHeight || (el.getClientRects && el.getClientRects().length))); }
@@ -96,6 +98,18 @@
   }
   function allControls(){ return document.querySelectorAll('button,a,[role="menuitem"],[role="button"]'); }
 
+  function describe(el){
+    var l = (el.getAttribute("aria-label") || el.getAttribute("title") || txt(el) || "").slice(0, 24);
+    return el.tagName.toLowerCase() + (l ? "[" + l + "]" : "");
+  }
+  function newControls(snapshot){
+    var all = allControls(), out = [];
+    for(var i = 0; i < all.length && out.length < 6; i++){
+      if(snapshot.indexOf(all[i]) === -1 && visible(all[i])) out.push(describe(all[i]));
+    }
+    return out.join(", ");
+  }
+
   function done(count){ baseline = count; sawGen = false; stable = 0; busy = false; }
   function fail(msg, count){ errText = "автоскачивание fix.zip: " + msg; seq++; done(count); }
 
@@ -117,13 +131,18 @@
         }, 6000);
         return;
       }
-      if(tries >= 12){ clearInterval(iv); fail("после нажатия на карточку не нашёл кнопку «Скачать»", count); }
+      if(tries >= 12){
+        clearInterval(iv);
+        var nc = newControls(snapshot);
+        fail("после нажатия на " + (lastClicked || "карточку") + " не нашёл кнопку «Скачать»; нового на экране: " + (nc || "ничего"), count);
+      }
     }, 700);
   }
 
   function start(card, count){
     busy = true;
     var t0 = Date.now();
+    window.__ltFixExpect = t0; // приложению: ближайшее скачивание zip — это ожидаемый fix.zip, даже если имя файла не передалось
     var snapshot = Array.prototype.slice.call(allControls());
     // 1) значок/кнопка скачивания прямо на карточке: по подписи, иначе последний значок справа
     var ctrl = null, found = controlsIn(card);
@@ -133,6 +152,7 @@
       if(icons.length) ctrl = clickable(icons[icons.length - 1]);
     }
     if(ctrl){
+      lastClicked = describe(ctrl);
       fire(ctrl);
       setTimeout(function(){
         if((window.__ltFixDl || 0) >= t0){ errText = ""; done(count); }

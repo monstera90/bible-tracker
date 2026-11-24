@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (24.11) — intercept(expected): скачивание zip сразу после автонажатия на карточку считается fix.zip даже без имени. Откат: AutoCommit.kt 1.1.
 // Версия: 1.1 (24.11) — autoClickReady / recordNote для автоскачивания карточки fix.zip (auto_fix.js). Откат: AutoCommit.kt 1.0.
 // Версия: 1.0 (24.11) — ТЗ «автокоммит fix.zip» (TASK_AUTO_COMMIT.md): перехват скачивания fix.zip во вкладке Claude, настройки и токен, итог тостом.
 
@@ -155,9 +156,12 @@ object AutoCommit {
      * @return true — файл забрало приложение (обычное скачивание не нужно); false — загрузка идёт как раньше.
      */
     fun intercept(
-        activity: MainActivity, view: WebView, name: String?, url: String?, userAgent: String?, mime: String?, cookies: CookieManager
+        activity: MainActivity, view: WebView, name: String?, url: String?, userAgent: String?, mime: String?, cookies: CookieManager,
+        expected: Boolean = false
     ): Boolean {
-        if (!isFixZipName(name)) return false
+        // expected — скрипт автоскачивания только что нажал на карточку fix.zip: zip без имени (WebView его часто не передаёт) тоже берём.
+        val zipLike = (mime?.contains("zip", ignoreCase = true) == true) || (name?.endsWith(".zip", ignoreCase = true) == true) || (name?.startsWith("download", ignoreCase = true) == true)
+        if (!isFixZipName(name) && !(expected && zipLike)) return false
         // Временный лог (ТЗ, раздел 1): какой из способов реально приходит — только схема и хост, без пути и параметров.
         Log.d(TAG, "fix.zip: scheme=" + schemeOf(url) + " host=" + hostOf(url) + " mime=" + mime + " sdk=" + Build.VERSION.SDK_INT)
         if (!enabled(activity) || url.isNullOrBlank()) return false

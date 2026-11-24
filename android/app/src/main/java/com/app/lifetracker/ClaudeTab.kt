@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.3 (24.11) — перехват fix.zip учитывает метку автоскачивания (__ltFixExpect). Откат: ClaudeTab.kt 2.2.
 // Версия: 2.2 (24.11) — автоскачивание fix.zip: injectAutoFix (assets/claude/auto_fix.js), настройка и ошибки скрипта через statusPoll. Откат: ClaudeTab.kt 2.1.
 // Версия: 2.1 (24.11) — скачивание fix.zip перехватывает AutoCommit (автокоммит в GitHub). Откат: ClaudeTab.kt 2.0.
 
@@ -441,11 +442,19 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         v.setDownloadListener { url, ua, cd, mime, _ ->
             val go = { disposition: String? ->
                 // fix.zip с ответом агента забирает автокоммит (AutoCommit); любой другой файл — как раньше.
-                val taken = try {
-                    AutoCommit.intercept(activity, v, PageDownloadLogic.pageFileName(disposition, mime), url, ua, mime, cookieMgr())
-                } catch (e: Exception) { false }
-                if (!taken) {
-                    try { DownloadLauncher.handlePage(activity, v, url, ua, disposition, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+                // Скрипт автоскачивания (auto_fix.js) только что нажал на карточку? Тогда zip без имени — тоже ожидаемый fix.zip.
+                val decide = { expected: Boolean ->
+                    val taken = try {
+                        AutoCommit.intercept(activity, v, PageDownloadLogic.pageFileName(disposition, mime), url, ua, mime, cookieMgr(), expected)
+                    } catch (e: Exception) { false }
+                    if (!taken) {
+                        try { DownloadLauncher.handlePage(activity, v, url, ua, disposition, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+                    }
+                }
+                try {
+                    v.evaluateJavascript("(Date.now()-(window.__ltFixExpect||0)<30000)") { raw -> decide(raw?.trim() == "true") }
+                } catch (e: Exception) {
+                    decide(false)
                 }
             }
             if (!cd.isNullOrBlank() || url.isNullOrBlank()) {
