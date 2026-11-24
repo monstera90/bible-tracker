@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 2.0 (24.11)
+// Версия: 2.1 (24.11) — скачивание fix.zip перехватывает AutoCommit (автокоммит в GitHub). Откат: ClaudeTab.kt 2.0.
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -435,9 +435,17 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
         // Файл с claude.ai скачивает само приложение: http/https — движок, ход виден в плавающем острове; blob: и data: — PageDownloads (этап 6).
         // Имя из атрибута `download` WebView не передаёт (приходит пусто → «download» без расширения): спрашиваем у страницы, что она запомнила ([injectDownloadHook]).
+        // Android 5.0–5.1: blob: отдаётся узким мостом (на 6.0+ — одноразовым каналом PageDownloads); ставится до загрузки страницы.
+        AutoCommit.LegacyBlob.install(v)
         v.setDownloadListener { url, ua, cd, mime, _ ->
             val go = { disposition: String? ->
-                try { DownloadLauncher.handlePage(activity, v, url, ua, disposition, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+                // fix.zip с ответом агента забирает автокоммит (AutoCommit); любой другой файл — как раньше.
+                val taken = try {
+                    AutoCommit.intercept(activity, v, PageDownloadLogic.pageFileName(disposition, mime), url, ua, mime, cookieMgr())
+                } catch (e: Exception) { false }
+                if (!taken) {
+                    try { DownloadLauncher.handlePage(activity, v, url, ua, disposition, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
+                }
             }
             if (!cd.isNullOrBlank() || url.isNullOrBlank()) {
                 go(cd)

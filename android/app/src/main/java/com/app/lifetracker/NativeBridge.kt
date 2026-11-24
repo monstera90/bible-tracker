@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.10 (24.11) — `autoCommitGet` / `autoCommitSave` / `autoCommitSetToken`: настройки автокоммита fix.zip (AutoCommit); токен в страницу не отдаётся. Версию моста не меняет. Откат: NativeBridge.kt 30.9.
 // Версия: 30.9 (24.11) — `utabAdHide(id, on)` / `utabAdHideGet(id)`: скрытие пустых рекламных блоков на вкладке-сайте (UserTabs 8.9, AdHider). Версию моста не меняет: страница проверяет наличие метода.
 // Версия: 30.8 (24.11) — `claudeSendTask(tabId, reqId, text)` / `claudeTaskResults()`: сундучок у задачи отправляет её в новый диалог выбранной вкладки Claude вместе с архивом репозитория (ClaudeTabs.sendTask, ClaudeTask.kt). Версию моста не меняет — страница проверяет наличие методов. Откат: NativeBridge.kt 30.7.
 // Версия: 30.7 (22.11) — мост версии 44: `downloadStart` / `downloadStatus` / `downloadCancel` / `downloadRelease` — скачивание по запросу страницы через общий движок с показом в острове (Flibusta → библиотека «Книги»; PageHandoff, ТЗ TZ_downloads.md, этап 2). Откат: NativeBridge.kt 30.6.
@@ -1311,6 +1312,30 @@ class NativeBridge(private val activity: MainActivity) {
     fun downloadFoldersGet(): String {
         if (!activity.pageTrusted) return "{}"
         return DownloadFolders.stateJson(activity.applicationContext)
+    }
+
+    /**
+     * «Автокоммит fix.zip» (AutoCommit): состояние для настроек. JSON {"enabled","owner","repo","branch","tokenSet","secureOk",
+     * "last":{"time","status","text"}}. Сам токен странице не отдаётся никогда. Версию моста не меняет — страница проверяет наличие методов.
+     */
+    @JavascriptInterface
+    fun autoCommitGet(): String {
+        if (!activity.pageTrusted) return "{}"
+        return try { AutoCommit.stateJson(activity.applicationContext) } catch (e: Exception) { "{}" }
+    }
+
+    /** Сохраняет owner / repo / branch (пусто → main) и переключатель «Автокоммит fix.zip». */
+    @JavascriptInterface
+    fun autoCommitSave(owner: String?, repo: String?, branch: String?, enabled: Boolean): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { AutoCommit.save(activity.applicationContext, owner, repo, branch, enabled); true } catch (e: Exception) { false }
+    }
+
+    /** Записывает токен GitHub в защищённое хранилище (пустая строка стирает). false — хранилище недоступно. */
+    @JavascriptInterface
+    fun autoCommitSetToken(token: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { AutoCommit.setToken(activity.applicationContext, token) } catch (e: Exception) { false }
     }
 
     /** Открывает системное окно выбора папки для записи [key]; по результату страница получает window.__ltOnDownloadFolder(key, true|false). */

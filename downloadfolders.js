@@ -1,6 +1,7 @@
 /* ===========================================================================
    downloadfolders.js
-   Версия: 1.0 (22.11)
+   Версия: 1.1 (24.11)
+   1.1 (24.11): блок «Автокоммит fix.zip» внизу вкладки (ТЗ TASK_AUTO_COMMIT.md): токен GitHub, owner / repo / branch, переключатель и «Последний результат». Всё решает оболочка (AutoCommit.kt через мост: autoCommitGet / autoCommitSave / autoCommitSetToken); токен уходит в оболочку и страницей не хранится (ни в localStorage, ни в my.js). Откат: downloadfolders.js 1.0.
    1.0 (22.11): вкладка «Сохранение загрузок» (set2s_17, кнопка settingsTabSet2Btn17; рядом с «Системой» в ряду «Настройки и статистика»).
    ТЗ TZ_downloads.md, этап 4 (раздел 13): куда приложение кладёт скачанные файлы. По умолчанию всё идёт в «Загрузки»; пользователь сам
    включает нужные типы файлов (картинки, видео, PDF, книги, музыка, документы, архивы, APK, обновление приложения, «всё остальное») и
@@ -24,6 +25,10 @@
   function bridge(){
     var b = window.LifeTrackerNative;
     return (b && typeof b.downloadFoldersGet === "function" && typeof b.downloadFolderPick === "function") ? b : null;
+  }
+  function acBridge(){
+    var b = window.LifeTrackerNative;
+    return (b && typeof b.autoCommitGet === "function" && typeof b.autoCommitSave === "function" && typeof b.autoCommitSetToken === "function") ? b : null;
   }
   function esc(s){
     return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
@@ -115,6 +120,77 @@
     return h;
   }
 
+  function fmtTime(ms){
+    if(!ms) return "";
+    var d = new Date(ms);
+    function p2(n){ return (n < 10 ? "0" : "") + n; }
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
+  }
+
+  // Блок «Автокоммит fix.zip»: токен вводится здесь, но сразу уходит в оболочку и в странице не остаётся (поле очищается).
+  function acSection(keep){
+    var b = acBridge();
+    if(!b){
+      return '<div class="dlf-h">Автокоммит fix.zip</div><div class="dlf-hint">Нужно обновить приложение (APK): блок работает только с обновлённой оболочкой.</div>';
+    }
+    var a = null;
+    try{ a = JSON.parse(b.autoCommitGet() || "{}"); }catch(e){ a = null; }
+    if(!a) a = {};
+    var last = a.last || {};
+    var lastLine = "—";
+    if(last.time){
+      var mark = last.status === "ok" ? "✓ " : (last.status === "error" ? "✗ " : "");
+      lastLine = fmtTime(last.time) + " — " + mark + (last.text || last.status || "");
+    }
+    var owner = keep.owner != null ? keep.owner : (a.owner || "");
+    var repo = keep.repo != null ? keep.repo : (a.repo || "");
+    var branch = keep.branch != null ? keep.branch : (a.branch || "main");
+    var tokenHint = a.tokenSet ? "Токен задан. Чтобы заменить, введите новый." : "Токен не задан.";
+    if(a.secureOk === false) tokenHint = "Защищённое хранилище токена недоступно на этом устройстве — токен сохранить нельзя.";
+    return '<div class="dlf-h">Автокоммит fix.zip</div>' +
+      '<div class="dlf-hint">Когда вкладка Claude скачивает файл fix.zip, приложение само распаковывает его и коммитит содержимое в указанную ветку (без подтверждений). ' +
+        'Токен — fine-grained, только этот репозиторий, право Contents: write.</div>' +
+      '<div class="dlf-row" id="acBox">' +
+        '<div class="dlf-top"><div class="dlf-name">Автокоммит fix.zip</div>' +
+        '<label class="dlf-switch"><span>Включено</span><input type="checkbox" id="acEnabled"' + (a.enabled === false ? "" : " checked") + '></label></div>' +
+        '<div class="dlf-add"><input type="password" id="acToken" placeholder="Токен GitHub" autocomplete="off" autocapitalize="off" spellcheck="false"></div>' +
+        '<div class="dlf-hint">' + esc(tokenHint) + '</div>' +
+        '<div class="dlf-add"><input type="text" id="acOwner" placeholder="owner" value="' + esc(owner) + '" autocomplete="off" autocapitalize="off" spellcheck="false"></div>' +
+        '<div class="dlf-add"><input type="text" id="acRepo" placeholder="repo" value="' + esc(repo) + '" autocomplete="off" autocapitalize="off" spellcheck="false"></div>' +
+        '<div class="dlf-add"><input type="text" id="acBranch" placeholder="branch (main)" value="' + esc(branch) + '" autocomplete="off" autocapitalize="off" spellcheck="false"></div>' +
+        '<div class="dlf-btns"><button type="button" class="dlf-btn main" data-act="ac-save">Сохранить</button>' +
+        (a.tokenSet ? '<button type="button" class="dlf-btn danger" data-act="ac-clear">Стереть токен</button>' : '') + '</div>' +
+        '<div class="dlf-over">Последний результат: ' + esc(lastLine) + '</div>' +
+      '</div>';
+  }
+
+  function acRead(){
+    function v(id){ var el = document.getElementById(id); return el ? el.value : null; }
+    return { owner: v("acOwner"), repo: v("acRepo"), branch: v("acBranch"), token: v("acToken") };
+  }
+
+  function acSave(clearToken){
+    var b = acBridge(); if(!b) return;
+    var f = acRead();
+    var cb = document.getElementById("acEnabled");
+    var ok = false;
+    try{ ok = !!b.autoCommitSave(f.owner || "", f.repo || "", f.branch || "", cb ? !!cb.checked : true); }catch(e){ ok = false; }
+    if(!ok){ setStatus("Не удалось сохранить настройки автокоммита.", "err"); return; }
+    if(clearToken){
+      var cleared = false;
+      try{ cleared = !!b.autoCommitSetToken(""); }catch(e){ cleared = false; }
+      setStatus(cleared ? "Токен стёрт." : "Не удалось стереть токен.", cleared ? "ok" : "err");
+    } else if(f.token){
+      var saved = false;
+      try{ saved = !!b.autoCommitSetToken(f.token); }catch(e){ saved = false; }
+      var tin = document.getElementById("acToken"); if(tin) tin.value = "";
+      setStatus(saved ? "Настройки автокоммита и токен сохранены." : "Токен сохранить не удалось: защищённое хранилище недоступно.", saved ? "ok" : "err");
+    } else {
+      setStatus("Настройки автокоммита сохранены.", "ok");
+    }
+    render();
+  }
+
   function render(){
     var c = document.getElementById("settingsTabContent");
     if(!c) return;
@@ -134,6 +210,8 @@
     var keepInput = "";
     var oldInput = document.getElementById("dlFoldersAddInput");
     if(oldInput) keepInput = oldInput.value;
+    var acKeep = document.getElementById("acOwner") ? acRead() : {};
+    var acTokenKeep = acKeep.token || "";
     var rows = "";
     for(var i = 0; i < st.categories.length; i++) rows += catRow(st.categories[i], st);
     var rules = "";
@@ -158,10 +236,13 @@
         '<div class="dlf-add"><input type="text" id="dlFoldersAddInput" maxlength="' + esc(st.maxFormatLen || 16) + '" placeholder="Формат, например zip или fb2.zip" autocomplete="off" autocapitalize="off" spellcheck="false">' +
           '<button type="button" class="dlf-btn main" data-act="add">Добавить формат</button></div>' +
         replaceHtml +
+        acSection(acKeep) +
         '<div class="dlf-status ' + statusCls + '" id="dlFoldersStatus">' + esc(statusText) + '</div>' +
       '</div>';
     var inp = document.getElementById("dlFoldersAddInput");
     if(inp && keepInput) inp.value = keepInput;
+    var tin = document.getElementById("acToken");
+    if(tin && acTokenKeep) tin.value = acTokenKeep;
     bind();
   }
 
@@ -198,6 +279,8 @@
     if(!t || t.nodeType !== 1) return;
     var act = t.getAttribute("data-act");
     var key = keyOf(t);
+    if(act === "ac-save"){ acSave(false); return; }
+    if(act === "ac-clear"){ acSave(true); return; }
     if(act === "add"){ addRule(false); return; }
     if(act === "replace-yes"){ addRule(true); return; }
     if(act === "replace-no"){ replaceAsk = ""; setStatus("", ""); render(); return; }
@@ -225,6 +308,7 @@
   function onChange(ev){
     var b = bridge(); if(!b) return;
     var t = ev.target;
+    if(t && t.id === "acEnabled"){ acSave(false); return; }
     if(!t || !t.classList || !t.classList.contains("dlf-cb")) return;
     var key = keyOf(t);
     if(!key) return;

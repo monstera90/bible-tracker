@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.11) — `fetchBlobBytes`: тот же канал, но байты собираются в памяти (автокоммит fix.zip, AutoCommit). Откат: PageDownloads.kt 1.0.
 // Версия: 1.0 (22.11) — ТЗ «скачивание файлов» (TZ_downloads.md 1.1), этап 6 (6.6): сохранение `data:` и `blob:` со вкладок-сайтов и вкладки Claude внутри приложения, без внешнего браузера.
 
 import android.net.Uri
@@ -116,6 +117,109 @@ object PageDownloads {
             }
         } catch (e: Exception) {
             toast(activity, "Не удалось сохранить файл: не удалось связаться со страницей")
+        }
+    }
+
+    /**
+     * Тот же канал, что и для сохранения файла, но байты собираются в памяти (автокоммит fix.zip, [AutoCommit]).
+     * [onDone] вызывается один раз: (байты, null) или (null, причина). Android 6.0+.
+     */
+    @RequiresApi(Build.VERSION_CODES.M)
+    fun fetchBlobBytes(activity: MainActivity, view: WebView, blobUrl: String, limit: Long, onDone: (ByteArray?, String?) -> Unit) {
+        try {
+            val ports = view.createWebMessageChannel()
+            val token = newToken()
+            val job = MemJob(ports[0], limit, onDone)
+            ports[0].setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
+                override fun onMessage(port: WebMessagePort, message: WebMessage) {
+                    job.onMessage(message.data)
+                }
+            }, worker)
+            job.arm()
+            view.evaluateJavascript(PageDownloadLogic.blobScript(token, blobUrl)) {
+                try {
+                    val origin = PageDownloadLogic.blobOrigin(blobUrl)
+                    view.postWebMessage(WebMessage(token, arrayOf(ports[1])), Uri.parse(origin ?: "*"))
+                } catch (e: Exception) {
+                    job.fail("не удалось связаться со страницей")
+                }
+            }
+        } catch (e: Exception) {
+            onDone(null, "не удалось связаться со страницей")
+        }
+    }
+
+    /** Одна загрузка `blob:` в память: протокол тот же, что у [BlobJob]. */
+    @RequiresApi(Build.VERSION_CODES.M)
+    private class MemJob(
+        private val port: WebMessagePort,
+        private val limit: Long,
+        private val onDone: (ByteArray?, String?) -> Unit
+    ) {
+        private val buf = java.io.ByteArrayOutputStream()
+        @Volatile private var closed = false
+        @Volatile private var last = SystemClock.uptimeMillis()
+
+        private val watchdog = Runnable {
+            worker.post { if (SystemClock.uptimeMillis() - last >= SILENCE_MS) failNow("страница не отвечает") }
+        }
+
+        fun arm() {
+            last = SystemClock.uptimeMillis()
+            main.removeCallbacks(watchdog)
+            main.postDelayed(watchdog, SILENCE_MS)
+        }
+
+        fun onMessage(raw: String?) {
+            if (closed) return
+            arm()
+            when (val m = PageDownloadLogic.parseMessage(raw)) {
+                is PageDownloadLogic.Msg.Header -> {
+                    if (m.size > limit) failNow("файл слишком большой") else reply("a")
+                }
+                is PageDownloadLogic.Msg.Data -> {
+                    try {
+                        val part = Base64.decode(m.base64, Base64.DEFAULT)
+                        buf.write(part, 0, part.size)
+                        if (buf.size() > limit) failNow("файл слишком большой") else reply("a")
+                    } catch (e: Exception) {
+                        failNow("кусок файла повреждён")
+                    }
+                }
+                is PageDownloadLogic.Msg.End -> {
+                    close(false)
+                    onDone(buf.toByteArray(), null)
+                }
+                is PageDownloadLogic.Msg.Error -> failNow(PageDownloadLogic.errorText(m.reason))
+                is PageDownloadLogic.Msg.Unknown -> { }
+            }
+        }
+
+        fun fail(reason: String) {
+            worker.post { failNow(reason) }
+        }
+
+        private fun failNow(reason: String) {
+            if (closed) return
+            close(true)
+            onDone(null, reason)
+        }
+
+        private fun reply(text: String) {
+            main.post {
+                try { port.postMessage(WebMessage(text)) } catch (e: Exception) { }
+            }
+        }
+
+        private fun close(tellPage: Boolean) {
+            closed = true
+            main.removeCallbacks(watchdog)
+            main.post {
+                try {
+                    if (tellPage) port.postMessage(WebMessage("c"))
+                    port.close()
+                } catch (e: Exception) { }
+            }
         }
     }
 
