@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.9 (24.11) — отправка задачи в НОВЫЙ диалог вкладки (сундучок у задачи): очередь [enqueueTask] → страница https://claude.ai/new грузится заново (так задача всегда попадает в новый чат, а не в открытый у пользователя), в неё кусками base64 кладётся архив репозитория (assets/claude/send_task.js), затем прикрепляется, вставляется текст и нажимается «Отправить»; ход проверяется опросом статуса страницы, итог — [ClaudeTaskResults]. Откат: ClaudeTab.kt 1.8.
 // Версия: 1.8 (24.11) — несколько вкладок Claude: у экземпляра свой [tabId]; вкладка «main» работает как раньше (общий вход приложения), остальные — каждая в своём профиле WebView (androidx.webkit Profile `claude_<id>`: свои cookie и хранилище, вход не смешивается). Настройки «Авто» — отдельные для каждой вкладки. [purge] — удалить вкладку вместе с её входом. Откат: ClaudeTab.kt 1.7.
 // Версия: 1.7 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: ClaudeTab.kt 1.6.
 // Версия: 1.6 (21.11) — `setDownloadListener`: файлы claude.ai скачивает приложение (DownloadLauncher, ТЗ TZ_downloads.md, этап 1). Откат: ClaudeTab.kt 1.5.
@@ -12,6 +13,7 @@ import android.os.Build
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
@@ -25,6 +27,12 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import android.widget.FrameLayout
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.util.ArrayDeque
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
@@ -39,6 +47,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
     companion object {
         const val HOME_URL = "https://claude.ai/"
+        /** Новый чат: загрузка этого адреса всегда открывает пустой диалог. */
+        const val NEW_URL = "https://claude.ai/new"
+        private const val TASK_TIMEOUT_MS = 240_000L
+        private const val TASK_POLL_MS = 1500L
+        private const val TASK_CHUNK = 393216 // кратно 3: куски base64 декодируются по отдельности
         const val MAIN_ID = "main"
         /** Умеет ли установленный Android System WebView отдельные профили (отдельный вход на вкладку). */
         fun profilesSupported(): Boolean = try {
@@ -182,6 +195,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     fun pause() { try { cookieMgr().flush() } catch (e: Throwable) { } }
 
     fun destroy() {
+        failAllTasks("вкладка закрыта")
         handler.removeCallbacksAndMessages(null)
         val v = view ?: return
         view = null
@@ -195,6 +209,136 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         prefs.edit().remove(k(KEY_ENABLED)).remove(k(KEY_TEXT)).apply()
         val pn = profileName ?: return
         try { if (profilesSupported()) ProfileStore.getInstance().deleteProfile(pn) } catch (e: Throwable) { }
+    }
+
+    // ---------- отправка задачи в новый диалог ----------
+    private class TaskJob(val reqId: String, val text: String, val zip: File) {
+        @Volatile var gen = 0
+        @Volatile var done = false
+    }
+    private val taskQueue = ArrayDeque<TaskJob>()
+    private var job: TaskJob? = null
+
+    /** Поток интерфейса. Задачи одной вкладки идут по очереди: каждая — в свой новый чат. */
+    fun enqueueTask(reqId: String, text: String, zip: File) {
+        taskQueue.addLast(TaskJob(reqId, text, zip))
+        if (job == null) nextTask()
+    }
+
+    private fun nextTask() {
+        val j = taskQueue.pollFirst() ?: return
+        job = j
+        val v = ensureView()
+        v.loadUrl(NEW_URL)
+        handler.postDelayed(jobTimeout, TASK_TIMEOUT_MS)
+        handler.postDelayed(taskPoll, TASK_POLL_MS)
+    }
+
+    private val jobTimeout = Runnable { job?.let { finishJob(it, false, "время ожидания вышло") } }
+
+    private val taskPoll = object : Runnable {
+        override fun run() {
+            val j = job ?: return
+            val v = view
+            if (v == null) { finishJob(j, false, "страница Claude не открыта"); return }
+            v.evaluateJavascript("(window.__ltTask?window.__ltTask.status():null)") { raw ->
+                if (job !== j || raw == null || !raw.startsWith("{")) return@evaluateJavascript
+                val o = try { JSONObject(raw) } catch (e: Exception) { return@evaluateJavascript }
+                if (o.optString("reqId") != j.reqId) return@evaluateJavascript
+                when (o.optString("state")) {
+                    "sent" -> finishJob(j, true, "")
+                    "error" -> finishJob(j, false, o.optString("msg").ifEmpty { "не удалось отправить" })
+                }
+            }
+            handler.postDelayed(this, TASK_POLL_MS)
+        }
+    }
+
+    private fun finishJob(j: TaskJob, ok: Boolean, msg: String) {
+        if (j.done) return
+        j.done = true
+        handler.removeCallbacks(jobTimeout)
+        handler.removeCallbacks(taskPoll)
+        ClaudeTaskResults.add(j.reqId, ok, msg)
+        try { j.zip.delete() } catch (e: Exception) { }
+        if (job === j) job = null
+        nextTask()
+    }
+
+    private fun failAllTasks(msg: String) {
+        job?.let { finishJobNoNext(it, msg) }
+        job = null
+        while (true) { val q = taskQueue.pollFirst() ?: break; finishJobNoNext(q, msg) }
+    }
+
+    private fun finishJobNoNext(j: TaskJob, msg: String) {
+        if (j.done) return
+        j.done = true
+        ClaudeTaskResults.add(j.reqId, false, msg)
+        try { j.zip.delete() } catch (e: Exception) { }
+    }
+
+    private fun onTaskPageFinished(v: WebView?, url: String?) {
+        val j = job ?: return
+        if (v == null || j.done) return
+        val u = try { Uri.parse(url) } catch (e: Exception) { return }
+        if (u.host?.lowercase() != "claude.ai") return
+        val path = u.path ?: "/"
+        if (path.startsWith("/login") || path.startsWith("/logout")) {
+            finishJob(j, false, "во вкладке нет входа в Claude — войдите и повторите")
+            return
+        }
+        if (path == "/new" || path == "/" || path.isEmpty()) startUpload(v, j)
+    }
+
+    /** Страница нового чата загружена: кладём в неё архив кусками и запускаем отправку. Новая загрузка страницы начинает заново (gen). */
+    private fun startUpload(v: WebView, j: TaskJob) {
+        val myGen = ++j.gen
+        val script = try {
+            activity.assets.open("claude/send_task.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: Exception) {
+            finishJob(j, false, "в приложении нет скрипта отправки")
+            return
+        }
+        v.evaluateJavascript(script + "\nwindow.__ltTaskInit(" + j.zip.length() + ");", null)
+        Thread {
+            try {
+                j.zip.inputStream().use { ins ->
+                    val raw = ByteArray(TASK_CHUNK)
+                    while (true) {
+                        if (j.done || j.gen != myGen) return@Thread
+                        val n = readFully(ins, raw)
+                        if (n <= 0) break
+                        val b64 = Base64.encodeToString(raw, 0, n, Base64.NO_WRAP)
+                        val latch = CountDownLatch(1)
+                        activity.runOnUiThread {
+                            val cur = view
+                            if (cur == null || j.done || j.gen != myGen) latch.countDown()
+                            else cur.evaluateJavascript("window.__ltTaskPut&&window.__ltTaskPut('" + b64 + "')") { latch.countDown() }
+                        }
+                        if (!latch.await(30, TimeUnit.SECONDS)) throw IOException("страница не отвечает")
+                        if (n < raw.size) break
+                    }
+                }
+                if (j.done || j.gen != myGen) return@Thread
+                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).toString()
+                activity.runOnUiThread {
+                    if (!j.done && j.gen == myGen) view?.evaluateJavascript("window.__ltTaskStart(" + cfg + ")", null)
+                }
+            } catch (e: Exception) {
+                activity.runOnUiThread { if (j.gen == myGen) finishJob(j, false, "не удалось передать архив странице: " + (e.message ?: "ошибка")) }
+            }
+        }.start()
+    }
+
+    private fun readFully(ins: InputStream, buf: ByteArray): Int {
+        var total = 0
+        while (total < buf.size) {
+            val n = ins.read(buf, total, buf.size - total)
+            if (n < 0) break
+            total += n
+        }
+        return total
     }
 
     private fun cfgJson(): String = JSONObject().put("enabled", autoEnabled()).put("text", autoText()).toString()
@@ -248,6 +392,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 injectAuto(view)
+                onTaskPageFinished(view, url)
             }
 
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
@@ -261,6 +406,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                     }
                     lastStatus = "{}"
                     if (shown) shown = false
+                    job?.let { finishJob(it, false, "страница Claude перезапустилась, повторите") }
                 }
                 return true
             }

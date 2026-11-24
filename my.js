@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.0 (24.11) — структурная правка: (1) вкладки «Claude» (set2s_10) и «Задачи в работе» (сундучок) по умолчанию скрыты у всех: включаются галочкой на вкладке «Скрытие вкладок» (`DEFAULT_HIDDEN_TAB_IDS`; включение хранится как «+id» в `__hiddenTabs`); (2) нажатие на сундучок у задачи открывает плашку с номерами вкладок Claude (`openClaudeTaskPicker`): выбор отмечает задачу «в работе», значок становится цифрой вкладки в закрашенном круге (`taskWorktasksBtnHtml`), а оболочка в фоне скачивает свежий архив репозитория и отправляет его с текстом задачи в новый диалог выбранной вкладки (`sendTaskToClaude` → `ClaudeTabMod.sendTask`; итог — `onClaudeTaskResult`, при сбое сундучок возвращается в прежнее состояние); какая вкладка выбрана — только на этом устройстве (localStorage `claudeTaskTabs_v1`); долгое нажатие по-прежнему снимает отметку. Цикл «в работе → нужно проверить» по нажатию убран (`cycleTaskWorkState` остался в коде). Откат: my.js 153.12.
    Версия: 153.12 (23.11) — карточки задач (вкладки задач): поворот экрана больше не сбивает место в списке. Вертикальный и горизонтальный режимы (1/2/3/4 колонки) показывают одни и те же карточки; если в режиме ничего не листали после прошлого выхода из него — список возвращается ровно в то положение, в каком был оставлен; если листали в другом режиме — встаёт у той же карточки (якорь: первая видимая карточка + смещение, «самый верх»/«самый низ» — отдельно): `taskOrient*`. Откат: my.js 153.11.
    Версия: 153.11 (23.11) — файлы в облаке: скачивание картинок в 3 потока (`FILE_SYNC_DOWNLOAD_CONCURRENCY`=3), заливка по-прежнему по одной (`runFileUploadSerial`); байты в облаке не удаляются после скачивания и живут сутки после заливки (`FILE_RELAY_TTL_MS`=24 ч), uploadedAt после скачивания не сбрасывается — личный и групповой каналы. Откат: my.js 153.10.
    Версия: 153.10 (23.11) — задачи, дёрганье: (1) «+» при правке другой задачи — предыдущая строка сворачивается сразу (`taskScheduleCollapse`/`taskFinishPendingCollapses`), а не через 500 мс поверх прокрутки к новой строке; (2) Enter в поле правки — `insertLineBreak` вместо `insertText` (`taskEditEnter`): нет блока div/br и схлопывания пустой строки; `taskEditParasOk` не требует пересборки для растянутого span; красная строка нового абзаца ставится сразу (`taskEditPrepareParaAtCaret`). Откат: my.js 153.9.
@@ -20112,8 +20113,19 @@
   var HIDDEN_TABS_STATE_KEY = "__hiddenTabs";
   // значение — строка «v1:id1,id2» (а не массив): Firebase отбрасывает пустые массивы, и «показать все вкладки» не дошло бы до других устройств
   var HIDDEN_TABS_PREFIX = "v1:";
-  var hiddenSettingsTabIds = null; // {id кнопки: true}
+  var hiddenSettingsTabIds = null; // {id кнопки: true}; ключ «+id» — пользователь сам включил вкладку, скрытую по умолчанию
+  // Вкладки, скрытые по умолчанию у всех: «Claude» (set2s_10) и «Задачи в работе» (сундучок). Включаются галочкой на этой же вкладке
+  // («Скрытие вкладок»); включение хранится как «+id» в той же строке `__hiddenTabs` (старые версии приложения лишний ключ игнорируют).
+  var DEFAULT_HIDDEN_TAB_IDS = ["settingsTabSet2Btn10", "settingsTabWorkTasksBtn"];
   function loadHiddenSettingsTabs(){
+    if(hiddenSettingsTabIds) return hiddenSettingsTabIds;
+    loadHiddenSettingsTabsRaw();
+    DEFAULT_HIDDEN_TAB_IDS.forEach(function(id){
+      if(!hiddenSettingsTabIds[id] && !hiddenSettingsTabIds["+" + id]) hiddenSettingsTabIds[id] = true;
+    });
+    return hiddenSettingsTabIds;
+  }
+  function loadHiddenSettingsTabsRaw(){
     if(hiddenSettingsTabIds) return hiddenSettingsTabIds;
     hiddenSettingsTabIds = {};
     var rec = state[HIDDEN_TABS_STATE_KEY];
@@ -20249,7 +20261,13 @@
       cb.addEventListener("change", function(){
         var id = this.getAttribute("data-tab-btn");
         var h = loadHiddenSettingsTabs();
-        if(this.checked) delete h[id]; else h[id] = true;
+        if(this.checked){
+          delete h[id];
+          if(DEFAULT_HIDDEN_TAB_IDS.indexOf(id) >= 0) h["+" + id] = true; // включена вручную: по умолчанию её больше не скрываем
+        }else{
+          h[id] = true;
+          delete h["+" + id];
+        }
         saveHiddenSettingsTabs();
         applyHiddenSettingsTabs();
       });
@@ -23690,6 +23708,7 @@
     if(isGroupTaskId(id) && isGroupTasksReadOnly()) return null;
     var task = getTaskById(id);
     if(!task) return null;
+    claudeTaskMapDel(id); // цифра вкладки Claude (только на этом устройстве) снимается вместе с отметкой
     task.c.inWork = false;
     saveTaskData(id, task.c);
     return "off";
@@ -23703,6 +23722,133 @@
     if(st === "check") return " needs-check";
     return "";
   }
+  // ---- сундучок: «отправить задачу в Claude» ----
+  // Нажатие на сундучок открывает плашку с номерами вкладок Claude (как в ряду вкладок Claude: 1, 2, 3 …). Выбор: задача получает
+  // отметку «в работе» (c.inWork = "work", попадает на вкладку «Задачи в работе»), значок становится цифрой выбранной вкладки в закрашенном
+  // круге, а оболочка в фоне скачивает свежий архив репозитория и отправляет его вместе с текстом задачи в НОВЫЙ диалог этой вкладки
+  // (ClaudeTabMod.sendTask → мост claudeSendTask). Какая вкладка выбрана, помнит только это устройство (localStorage `claudeTaskTabs_v1`:
+  // {id задачи: {tab: id вкладки Claude, prev: прежнее состояние сундучка, t}}) — вкладки Claude на устройствах свои, в облако это не идёт.
+  var CLAUDE_TASK_MAP_KEY = "claudeTaskTabs_v1";
+  function claudeTaskMapLoad(){
+    try{
+      var o = JSON.parse(localStorage.getItem(CLAUDE_TASK_MAP_KEY) || "{}");
+      return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    }catch(e){ return {}; }
+  }
+  function claudeTaskMapSave(m){
+    var keys = Object.keys(m);
+    if(keys.length > 300){ // храним только свежие
+      keys.sort(function(a, b){ return ((m[b] && m[b].t) || 0) - ((m[a] && m[a].t) || 0); });
+      keys.slice(300).forEach(function(k){ delete m[k]; });
+    }
+    try{ localStorage.setItem(CLAUDE_TASK_MAP_KEY, JSON.stringify(m)); }catch(e){}
+  }
+  function claudeTaskMapSet(id, tabId, prev){
+    var m = claudeTaskMapLoad();
+    m[id] = {tab: tabId, prev: prev === undefined ? false : prev, t: Date.now()};
+    claudeTaskMapSave(m);
+  }
+  function claudeTaskMapDel(id){
+    var m = claudeTaskMapLoad();
+    if(!m[id]) return;
+    delete m[id];
+    claudeTaskMapSave(m);
+  }
+  // номер вкладки Claude, в которую отправлена задача (1, 2, 3 …), или 0, если задача не «в работе» / вкладки уже нет
+  function claudeTaskNumber(task, id){
+    if(getTaskWorkState(task) === "off") return 0;
+    var rec = claudeTaskMapLoad()[id], mod = window.ClaudeTabMod;
+    if(!rec || !mod || typeof mod.tabIds !== "function") return 0;
+    var i = mod.tabIds().indexOf(rec.tab);
+    return i >= 0 ? i + 1 : 0;
+  }
+  // кнопка-сундучок строки задачи (одна на все места, где она рисуется); с цифрой — вместо пиктограммы
+  function taskWorktasksBtnHtml(task, id){
+    var n = claudeTaskNumber(task, id);
+    return '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + (n ? ' has-claude-num' : '') + '" data-id="' + id + '" title="' +
+      (n ? 'В работе: отправлено в Claude ' + n : 'В работе') + '">' + (n ? '<span class="task-claude-num">' + n + '</span>' : TASK_MOVE_ICON_SVG("worktasks")) + '</button>';
+  }
+  function closeClaudeTaskPicker(){
+    var ov = document.getElementById("claudePickOverlay");
+    if(ov && ov.parentNode) ov.parentNode.removeChild(ov);
+  }
+  // плашка выбора вкладки Claude; onPick(tabId) вызывается после выбора
+  function openClaudeTaskPicker(id, onPick){
+    closeClaudeTaskPicker();
+    var mod = window.ClaudeTabMod;
+    var canSend = !!(mod && typeof mod.canSendTask === "function" && mod.canSendTask());
+    try{ if(mod && typeof mod.ensureStyle === "function") mod.ensureStyle(); }catch(e){}
+    var openedAt = Date.now();
+    var ov = document.createElement("div");
+    ov.id = "claudePickOverlay";
+    ov.className = "claude-pick-overlay";
+    var box = document.createElement("div");
+    box.className = "claude-pick";
+    if(!canSend){
+      box.innerHTML = '<div class="claude-pick-note">Отправка задачи в Claude работает только в приложении (APK) с обновлённой оболочкой. Обновите приложение.</div>';
+    }else{
+      var rec = claudeTaskMapLoad()[id], cur = rec ? rec.tab : null;
+      box.innerHTML = '<div class="claude-pick-title">Отправить задачу в Claude</div><div class="claude-pick-row"></div>';
+      var row = box.querySelector(".claude-pick-row");
+      mod.tabIds().forEach(function(tid, i){
+        var bt = document.createElement("button");
+        bt.type = "button";
+        bt.className = "claude-sub-tab" + (tid === cur ? " active" : "");
+        bt.title = "Claude " + (i + 1); bt.setAttribute("aria-label", bt.title);
+        bt.innerHTML = mod.tabIconHtml(i + 1);
+        bt.addEventListener("click", function(e){
+          e.stopPropagation();
+          closeClaudeTaskPicker();
+          onPick(tid);
+        });
+        row.appendChild(bt);
+      });
+    }
+    ov.addEventListener("click", function(e){
+      if(e.target === ov && Date.now() - openedAt > 350) closeClaudeTaskPicker(); // тап мимо плашки; «призрак» того же нажатия игнорируем
+    });
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+  }
+  // отправка: true — оболочка приняла задачу, сундучок переведён в «в работе» с номером вкладки
+  function sendTaskToClaude(id, tabId){
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return false;
+    var task = getTaskById(id), mod = window.ClaudeTabMod;
+    if(!task) return false;
+    var text = String(task.c.text || "").trim();
+    if(!text){ showShortToast("У задачи нет текста — отправлять нечего", 2600); return false; }
+    if(!mod || typeof mod.sendTask !== "function" || !mod.sendTask(tabId, id, text)){
+      showShortToast("Не удалось начать отправку в Claude", 2800);
+      return false;
+    }
+    var old = claudeTaskMapLoad()[id];
+    var prev = old && old.prev !== undefined ? old.prev : (task.c.inWork || false); // при повторной отправке помним состояние ДО первой
+    claudeTaskMapSet(id, tabId, prev);
+    task.c.inWork = "work";
+    saveTaskData(id, task.c);
+    var n = mod.tabIds().indexOf(tabId) + 1;
+    showShortToast("Отправляю в Claude" + (n ? " " + n : "") + "…", 2200);
+    return true;
+  }
+  // итог фоновой отправки (claudetab.js опрашивает оболочку): успех — короткое сообщение; сбой — возвращаем сундучок в прежнее состояние
+  function onClaudeTaskResult(taskId, ok, msg){
+    var rec = claudeTaskMapLoad()[taskId], mod = window.ClaudeTabMod;
+    var n = (rec && mod && typeof mod.tabIds === "function") ? mod.tabIds().indexOf(rec.tab) + 1 : 0;
+    var label = "Claude" + (n ? " " + n : "");
+    if(ok){ showShortToast("Задача отправлена в " + label, 2600); return; }
+    showShortToast("Не отправлено в " + label + (msg ? ": " + msg : ""), 6000);
+    if(!rec) return;
+    var task = getTaskById(taskId);
+    if(task && !(isGroupTaskId(taskId) && isGroupTasksReadOnly()) && getTaskWorkState(task) !== "off"){
+      task.c.inWork = rec.prev || false;
+      saveTaskData(taskId, task.c);
+    }
+    claudeTaskMapDel(taskId);
+    try{ // если список задач на экране — перерисовать строку
+      if(document.querySelector('.task-worktasks-btn[data-id="' + taskId + '"]') && currentSettingsTab) renderTaskTabList(currentSettingsTab, taskId);
+    }catch(e){}
+  }
+  try{ if(window.ClaudeTabMod) window.ClaudeTabMod.onTaskResult = onClaudeTaskResult; }catch(e){}
   // ---- напоминание для задачи ----
   // c.remindAt — время напоминания в мс (локальное время устройства); null/нет поля — напоминания
   // нет. Состояния кнопки: нет (часы) / стоит на другую дату (часы в закрашенном круге, как «в
@@ -25408,7 +25554,7 @@
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + task.id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + task.id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        taskWorktasksBtnHtml(task, task.id) +
         taskReminderBtnHtml(task) +
       '</span>';
     // строка, которую можно править (не чужая/общая «только для чтения») — по этому признаку
@@ -25491,10 +25637,10 @@
     );
     html += iconRow(
       TASK_MOVE_ICON_SVG("worktasks"), false,
-      "Чемоданчик отмечает задачу «в работе». Нажатие переключает по кругу: " +
+      "Сундучок отправляет задачу в Claude и отмечает её «в работе»: " +
       '<span class="task-icon-btn task-worktasks-btn">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> не в работе → ' +
-      '<span class="task-icon-btn task-worktasks-btn active">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> в работе → ' +
-      '<span class="task-icon-btn task-worktasks-btn needs-check">' + TASK_MOVE_ICON_SVG("worktasks") + '</span> нужно проверить — и снова «в работе», по кругу. ' +
+      '<span class="task-icon-btn task-worktasks-btn active has-claude-num"><span class="task-claude-num">2</span></span> в работе, отправлена во вкладку Claude 2. ' +
+      "Нажатие открывает выбор вкладки Claude (1, 2, 3 …, сколько их создано). Приложение в фоне скачивает свежую версию репозитория и отправляет архив вместе с текстом задачи в новый диалог выбранной вкладки; сама задача переходит на вкладку «Задачи в работе». " +
       "Долгое нажатие (около четверти секунды) снимает отметку совсем."
     );
     html += iconRow(
@@ -25630,10 +25776,11 @@
         else renderTaskRowView(id, tabKey, onAfterAction);
       };
       bindTapOrHold(worktasksBtn, function(){
-        taskKeepListStill(body, function(){
-          flushPendingTaskEdits();
-          cycleTaskWorkState(id);
-          afterWorktasksChange();
+        flushPendingTaskEdits();
+        openClaudeTaskPicker(id, function(tabId){
+          taskKeepListStill(body, function(){
+            if(sendTaskToClaude(id, tabId)) afterWorktasksChange();
+          });
         });
       }, function(){
         taskKeepListStill(body, function(){
@@ -25937,7 +26084,7 @@
         (isProjectsTab ? '<button type="button" class="task-icon-btn task-next-btn" title="Все задачи проекта">' + LINK_NEXT_ICON_SVG + '</button>' : '') +
         '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
         '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
-        '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+        taskWorktasksBtnHtml(task, id) +
         taskReminderBtnHtml(task) +
       '</span>';
     var editable = document.getElementById("taskEditable_" + id);
@@ -26438,7 +26585,7 @@
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          taskWorktasksBtnHtml(task, id) +
           taskReminderBtnHtml(task) +
         '</span>';
       body.setAttribute("data-editable", "1");
@@ -26508,7 +26655,10 @@
       var worktasksBtn = body.querySelector(".task-worktasks-btn");
       if(worktasksBtn){
         bindTapOrHold(worktasksBtn, function(){
-          taskKeepListStill(body, function(){ flushPendingTaskEdits(); cycleTaskWorkState(id); renderRowView(id); });
+          flushPendingTaskEdits();
+          openClaudeTaskPicker(id, function(tabId){
+            taskKeepListStill(body, function(){ if(sendTaskToClaude(id, tabId)) renderRowView(id); });
+          });
         }, function(){
           taskKeepListStill(body, function(){ flushPendingTaskEdits(); clearTaskWorkState(id); renderRowView(id); });
         });
@@ -26554,7 +26704,7 @@
           '<button type="button" class="task-icon-btn task-bottom-btn" title="В конец списка">' + ARROW_BOTTOM_ICON_SVG + '</button>' +
           '<button type="button" class="task-icon-btn task-copy-btn" title="Копировать">' + COPY_ICON_SVG + '</button>' +
           '<button type="button" class="task-flag-dot' + flagClass + '" data-id="' + id + '" title="Приоритет"><span class="task-flag-dot-inner"></span></button>' +
-          '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + '" data-id="' + id + '" title="В работе">' + TASK_MOVE_ICON_SVG("worktasks") + '</button>' +
+          taskWorktasksBtnHtml(task, id) +
           taskReminderBtnHtml(task) +
         '</span>';
       var editable = document.getElementById("taskEditable_" + id);

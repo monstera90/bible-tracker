@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (24.11) — [sendTask]: задача из сундучка уходит в НОВЫЙ диалог указанной вкладки, не меняя текущую вкладку (скачивание архива в фоне — ClaudeTask.kt, отправка — ClaudeTab.enqueueTask). Откат: ClaudeTabs.kt 1.0.
 // Версия: 1.0 (24.11) — несколько вкладок Claude: диспетчер экземпляров [ClaudeTab]. Вкладка «main» — прежняя (общий вход приложения), остальные создаются кнопкой «+» ряда внутри вкладки Claude (claudetab.js), каждая со своим входом (профиль WebView). Методы повторяют [ClaudeTab]: вызовы моста claude* и MainActivity идут к ТЕКУЩЕЙ вкладке ([select]).
 
 import android.content.Context
@@ -10,6 +11,8 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
         private const val PREFS = "claude_tabs"
         private const val KEY_IDS = "ids"
         private val ID_RE = Regex("^[a-z0-9]{1,24}$")
+        private val REQ_RE = Regex("^[A-Za-z0-9]{1,64}$")
+        private const val MAX_TASK_CHARS = 100_000
     }
 
     private val prefs = activity.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -57,6 +60,31 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
             val ids = savedIds()
             if (want !in ids) saveIds(ids + want)
         }
+        return true
+    }
+
+    /**
+     * Сундучок у задачи: в фоне скачать свежий архив репозитория и отправить его вместе с текстом [text] в новый диалог вкладки [id]
+     * (текущая вкладка не меняется). true — задача принята; итог (успех/причина сбоя) страница забирает через [ClaudeTaskResults] по [reqId].
+     */
+    fun sendTask(id: String?, reqId: String?, text: String?): Boolean {
+        val rid = reqId ?: return false
+        if (!REQ_RE.matches(rid)) return false
+        val body = (text ?: "").trim().take(MAX_TASK_CHARS)
+        if (body.isEmpty()) return false
+        val want = (id ?: ClaudeTab.MAIN_ID).ifEmpty { ClaudeTab.MAIN_ID }
+        val tab: ClaudeTab = synchronized(this) {
+            if (want != ClaudeTab.MAIN_ID && (!supported() || want !in savedIds())) return false
+            obtain(want) ?: return false
+        }
+        Thread {
+            try {
+                val zip = ClaudeTaskZip.download(activity.cacheDir, rid)
+                activity.runOnUiThread { tab.enqueueTask(rid, body, zip) }
+            } catch (e: Exception) {
+                ClaudeTaskResults.add(rid, false, "не удалось скачать репозиторий: " + (e.message ?: "нет сети"))
+            }
+        }.start()
         return true
     }
 

@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.6 (24.11) — отправка задачи в новый диалог выбранной вкладки Claude (сундучок у задачи, my.js): `ClaudeTabMod.sendTask(tabId, taskId, text)` → мост `claudeSendTask` (оболочка в фоне скачивает архив репозитория, открывает claude.ai/new в этой вкладке, прикрепляет архив и отправляет текст задачи); итог приходит опросом `claudeTaskResults` → `ClaudeTabMod.onTaskResult(taskId, ok, msg)`. Также наружу: `tabIds()` (номера вкладок для выбора), `canSendTask()`, `ensureStyle()`, `tabIconHtml(n)`. Нужен мост с методами claudeSendTask/claudeTaskResults (иначе выбор показывает пояснение).
    Версия: 1.5 (24.11) — ряд вкладок Claude внутри вкладки: колонка слева от бокового ряда (выходит из его вкладок, начиная со второй: нижняя вкладка бокового ряда стоит над нижним рядом кнопок приложения, из неё ничего не выходит). Первая вкладка нового ряда — прежняя «Claude» (вход общий, как раньше), над ней «+»: новая вкладка Claude БЕЗ входа, у каждой вкладки свой вход (профиль WebView, ClaudeTabs.kt/ClaudeTab.kt 1.8). Долгое нажатие на добавленную вкладку (1 с) → крестик, следующее нажатие закрывает её вместе со входом. Список вкладок — localStorage `claudeTabs_v1` ({tabs:[id], cur}), только на этом устройстве. Нужны методы моста claudeSelect/claudeRemove/claudeTabsSupported (иначе ряда нет, вкладка одна, как раньше). claude.ai укорачивается по колонке (она не должна лежать под нативным WebView).
    Версия: 1.4 (24.11) — убрана верхняя полоса («Что отправлять» + статус): текст автоотправки остаётся прежним (сохранённый, по умолчанию «Дальше»), статус автоотправки — во всплывающей подсказке кнопки «Авто». Добавлена кнопка «i» (самая левая в нижнем ряду): экран с короткими пояснениями ко всем кнопкам вкладки.
    Версия: 1.3 (20.11) — кнопки «Авто», «⏱ 5 ч», «Тест», «⟳» перенесены в нижний ряд (#siteFabRow, слева от «полного экрана» и «домика»), а claude.ai растянут на всю область и заходит под них: оболочка прорезывает «окна» под кнопки (мост claudeHoles, как у вкладок-сайтов; без него сайт заканчивается над рядом). Вверху остались только поле «Что отправлять» и статус (виден, пока включено «Авто»).
@@ -85,7 +86,14 @@
       ".claude-sub-tab svg{width:26px;height:26px;}" +
       ".claude-sub-tab.active{background:var(--wood);color:var(--parchment);}" +
       ".claude-sub-tab .claude-sub-num{position:absolute;bottom:3px;inset-inline-start:5px;font-size:10px;line-height:1;font-weight:700;}" +
-      ".claude-sub-tab.armed{background:#b23b3b;color:#fff;}";
+      ".claude-sub-tab.armed{background:#b23b3b;color:#fff;}" +
+      // плашка выбора вкладки Claude для задачи (сундучок): те же кнопки, что в ряду вкладок, но россыпью
+      ".claude-pick-overlay{position:fixed;inset:0;z-index:1700;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);padding:16px;box-sizing:border-box;}" +
+      ".claude-pick{max-width:92vw;max-height:80vh;overflow:auto;box-sizing:border-box;padding:12px 14px 14px;border-radius:16px;background:var(--parchment,#f4f0f8);color:var(--wood,#5b4a8a);border:1px solid var(--wood,#5b4a8a);box-shadow:0 4px 18px rgba(0,0,0,.4);}" +
+      ".claude-pick-title{font-size:14px;line-height:1.3;margin:0 0 10px;text-align:center;}" +
+      ".claude-pick-note{font-size:13px;line-height:1.4;max-width:260px;}" +
+      ".claude-pick-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}" +
+      ".claude-pick-row .claude-sub-tab{width:44px;height:56px;flex:0 0 44px;border-radius:12px;border:1px solid var(--wood,#5b4a8a);box-shadow:1px 2px 5px rgba(0,0,0,.3);}";
     document.head.appendChild(st);
   }
 
@@ -439,5 +447,47 @@
   }
   function onSwitch(tab){ if(tab !== TAB) hide(); }
 
-  window.ClaudeTabMod = { render: render, onSwitch: onSwitch, hide: hide };
+  // ---------- отправка задачи в новый диалог вкладки Claude (сундучок у задачи) ----------
+  // Номера для выбора: порядок вкладок ряда (1 — первая, «main»); без поддержки нескольких вкладок — только первая.
+  function tabIds(){
+    var b = bridge(), ids = [MAIN];
+    try{ if(b && multiOk(b)) ids = ids.concat(extra); }catch(e){}
+    return ids;
+  }
+  function canSendTask(){
+    var b = window.LifeTrackerNative;
+    return !!(b && typeof b.claudeSendTask === "function" && typeof b.claudeTaskResults === "function");
+  }
+  function tabIconHtml(n){ return ICON_CLAUDE + '<span class="claude-sub-num">' + n + '</span>'; }
+
+  var taskPollTimer = null, taskPendingCount = 0;
+  function taskPoll(){
+    var b = window.LifeTrackerNative;
+    if(!b || typeof b.claudeTaskResults !== "function") return;
+    var arr = [];
+    try{ arr = JSON.parse(b.claudeTaskResults() || "[]"); }catch(e){ arr = []; }
+    if(!Array.isArray(arr)) arr = [];
+    arr.forEach(function(r){
+      if(!r || typeof r.id !== "string") return;
+      if(taskPendingCount > 0) taskPendingCount--;
+      try{ if(typeof api.onTaskResult === "function") api.onTaskResult(r.id, !!r.ok, String(r.msg || "")); }catch(e){}
+    });
+    if(taskPendingCount <= 0 && taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer = null; taskPendingCount = 0; }
+  }
+  function taskPollStart(){ if(!taskPollTimer) taskPollTimer = setInterval(taskPoll, 2000); }
+  // true — оболочка приняла задачу (дальше всё в фоне; итог — onTaskResult)
+  function sendTask(tabId, taskId, text){
+    var b = window.LifeTrackerNative;
+    if(!canSendTask() || typeof taskId !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(taskId)) return false;
+    var ok = false;
+    try{ ok = !!b.claudeSendTask(String(tabId || MAIN), taskId, String(text || "")); }catch(e){ ok = false; }
+    if(ok){ taskPendingCount++; taskPollStart(); }
+    return ok;
+  }
+  // итоги прежних отправок (страницу могли перезагрузить, пока шла отправка)
+  setTimeout(function(){ if(canSendTask()){ taskPendingCount = 1; taskPoll(); } }, 3000);
+
+  var api = { render: render, onSwitch: onSwitch, hide: hide,
+    tabIds: tabIds, canSendTask: canSendTask, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
+  window.ClaudeTabMod = api;
 })();

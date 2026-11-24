@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.8 (24.11) — `claudeSendTask(tabId, reqId, text)` / `claudeTaskResults()`: сундучок у задачи отправляет её в новый диалог выбранной вкладки Claude вместе с архивом репозитория (ClaudeTabs.sendTask, ClaudeTask.kt). Версию моста не меняет — страница проверяет наличие методов. Откат: NativeBridge.kt 30.7.
 // Версия: 30.7 (22.11) — мост версии 44: `downloadStart` / `downloadStatus` / `downloadCancel` / `downloadRelease` — скачивание по запросу страницы через общий движок с показом в острове (Flibusta → библиотека «Книги»; PageHandoff, ТЗ TZ_downloads.md, этап 2). Откат: NativeBridge.kt 30.6.
 // Версия: 30.6 (22.11) — мост версии 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders) — ТЗ TZ_downloads.md, этап 4; `finishSave` называет в сообщении, куда сохранено. Откат: NativeBridge.kt 30.5.
 // Версия: 30.5 (21.11) — мост версии 42: `downloadThreadsGet` / `downloadThreadsSet` — число потоков скачивания по умолчанию (ТЗ TZ_downloads.md, этап 1). Откат: NativeBridge.kt 30.4.
@@ -956,6 +957,23 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeRemove(id: String?) {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.claudeTab.remove(id) }
+    }
+
+    /**
+     * Сундучок у задачи: в фоне скачать свежий архив репозитория и отправить его вместе с текстом задачи в НОВЫЙ диалог вкладки [tabId]
+     * ("main" — первая). [reqId] — id задачи (a-zA-Z0-9). true — принято; итог приходит через [claudeTaskResults].
+     */
+    @JavascriptInterface
+    fun claudeSendTask(tabId: String?, reqId: String?, text: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { activity.claudeTab.sendTask(tabId, reqId, text) } catch (e: Exception) { false }
+    }
+
+    /** Итоги фоновых отправок: JSON-массив [{id, ok, msg}], очередь очищается. */
+    @JavascriptInterface
+    fun claudeTaskResults(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try { ClaudeTaskResults.take() } catch (e: Exception) { "[]" }
     }
 
     /** Проверка: отправить текст в чат прямо сейчас. */
