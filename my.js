@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.1 (24.11) — задачи, правка текста: «прыгающий пробел» — красная строка абзаца (1ch, `.ed-para`) появлялась/пропадала через 120 мс после Enter в середине текста или Backspace на стыке абзацев, и текст дёргался вбок. Теперь сверка абзацев (`bindTaskEditParas`) идёт сразу в событии ввода, а в момент набора слова клавиатурой — сразу после него; каретка на пустой строке, с которой начнётся абзац (касание, стрелки, после Enter), получает красную строку ещё до первой буквы (`taskEditPrepareParaAtCaret`, слушатель selectionchange); `.ed-para` на пустой строке больше не считается ошибкой (`taskEditParasOk`). Текст, каретка и выделение не меняются. Откат: my.js 154.0.
    Версия: 154.0 (24.11) — структурная правка: (1) вкладки «Claude» (set2s_10) и «Задачи в работе» (сундучок) по умолчанию скрыты у всех: включаются галочкой на вкладке «Скрытие вкладок» (`DEFAULT_HIDDEN_TAB_IDS`; включение хранится как «+id» в `__hiddenTabs`); (2) нажатие на сундучок у задачи открывает плашку с номерами вкладок Claude (`openClaudeTaskPicker`): выбор отмечает задачу «в работе», значок становится цифрой вкладки в закрашенном круге (`taskWorktasksBtnHtml`), а оболочка в фоне скачивает свежий архив репозитория и отправляет его с текстом задачи в новый диалог выбранной вкладки (`sendTaskToClaude` → `ClaudeTabMod.sendTask`; итог — `onClaudeTaskResult`, при сбое сундучок возвращается в прежнее состояние); какая вкладка выбрана — только на этом устройстве (localStorage `claudeTaskTabs_v1`); долгое нажатие по-прежнему снимает отметку. Цикл «в работе → нужно проверить» по нажатию убран (`cycleTaskWorkState` остался в коде). Откат: my.js 153.12.
    Версия: 153.12 (23.11) — карточки задач (вкладки задач): поворот экрана больше не сбивает место в списке. Вертикальный и горизонтальный режимы (1/2/3/4 колонки) показывают одни и те же карточки; если в режиме ничего не листали после прошлого выхода из него — список возвращается ровно в то положение, в каком был оставлен; если листали в другом режиме — встаёт у той же карточки (якорь: первая видимая карточка + смещение, «самый верх»/«самый низ» — отдельно): `taskOrient*`. Откат: my.js 153.11.
    Версия: 153.11 (23.11) — файлы в облаке: скачивание картинок в 3 потока (`FILE_SYNC_DOWNLOAD_CONCURRENCY`=3), заливка по-прежнему по одной (`runFileUploadSerial`); байты в облаке не удаляются после скачивания и живут сутки после заливки (`FILE_RELAY_TTL_MS`=24 ч), uploadedAt после скачивания не сбрасывается — личный и групповой каналы. Откат: my.js 153.10.
@@ -25917,9 +25918,10 @@
     var top = editable.childNodes;
     for(var i = 0; i < top.length; i++) walk(top[i], false);
     if(!ok) return false;
-    var k;
+    var k, textLines = String(text == null ? "" : text).split("\n");
     for(k in want) if(!got[k]) return false;
-    for(k in got) if(!want[k]) return false;
+    // .ed-para на ПУСТОЙ строке — не ошибка: так красная строка видна у каретки ещё до первой буквы (taskEditPrepareParaAtCaret)
+    for(k in got) if(!want[k] && String(textLines[k] == null ? "" : textLines[k]).trim() !== "") return false;
     return true;
   }
   function taskEditTextBefore(editable, node){
@@ -25978,21 +25980,29 @@
   }
   // вешается на поле правки один раз после taskEditFill: следит, чтобы абзацы совпадали с текстом
   function bindTaskEditParas(editable){
-    var composing = false, timer = null;
+    var composing = false;
+    // Сверка — сразу, в том же событии, что и правка (до следующей отрисовки): раньше через 120 мс, и красная строка (1ch) появлялась/пропадала
+    // с опозданием — текст «прыгал» вбок на ширину пробела. Во время набора слова клавиатурой (composition) поле не трогаем — только после него.
     function sync(){
-      timer = null;
       if(composing || !editable.isConnected || editable.contentEditable !== "true") return;
       if(document.activeElement !== editable) return;
       if(taskEditParasOk(editable, getEditableNoteText(editable))) return;
       taskEditRebuild(editable);
     }
-    function later(ms){ clearTimeout(timer); timer = setTimeout(sync, ms); }
-    editable.addEventListener("compositionstart", function(){ composing = true; clearTimeout(timer); });
-    editable.addEventListener("compositionend", function(){ composing = false; later(0); });
+    editable.addEventListener("compositionstart", function(){ composing = true; });
+    editable.addEventListener("compositionend", function(){ composing = false; sync(); });
     editable.addEventListener("input", function(e){
       if(composing || (e && e.isComposing)) return;
-      later(120);
+      sync();
     });
+    // Каретка встала на пустую строку, с которой начнётся абзац (касанием, стрелками, после Enter): красная строка — сразу, до первой
+    // буквы; иначе она возникала бы только после набора слова и сдвигала его вправо.
+    function onSel(){
+      if(!editable.isConnected){ document.removeEventListener("selectionchange", onSel); return; }
+      if(composing || document.activeElement !== editable || editable.contentEditable !== "true") return;
+      taskEditPrepareParaAtCaret(editable);
+    }
+    document.addEventListener("selectionchange", onSel);
   }
 
   // Enter в поле правки (ТЗ 22.11, дёрганье при абзаце). Раньше шло через insertText("\n"): Chrome превращал его в абзац-блок
@@ -26025,7 +26035,19 @@
       post.selectNodeContents(editable);
       post.setStart(rg.startContainer, rg.startOffset);
       var after = post.toString().split(EMPTY_ANCHOR_CHAR).join("");
-      if(after !== "" && after !== "\n") return;
+      // строка пустая: перед кареткой — начало текста/перевод строки, после — конец текста/перевод строки
+      if(before !== "" && before.charAt(before.length - 1) !== "\n") return;
+      if(after !== "" && after.charAt(0) !== "\n") return;
+      var cur = rg.startContainer.nodeType === 1 ? rg.startContainer : rg.startContainer.parentNode;
+      var host = cur && cur.closest ? cur.closest(".ed-para") : null;
+      if(host && editable.contains(host)){ // каретка уже в красной строке, которая начинается с этой строки, — второй не нужно
+        var hb = taskEditTextBefore(editable, host);
+        var sr = document.createRange();
+        sr.setStartBefore(host);
+        sr.setEnd(rg.startContainer, rg.startOffset);
+        var hs = sr.toString().split(EMPTY_ANCHOR_CHAR).join("");
+        if((hb === "" || /\n$/.test(hb)) && hs.indexOf("\n") < 0) return;
+      }
       var probe = before + "x";
       if(!taskParaLineSet(probe)[probe.split("\n").length - 1]) return;
       var sp = document.createElement("span");
