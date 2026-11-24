@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.10 (24.11) — сундучок: отправка задачи больше не зависит от того, открыта ли вкладка. (1) Пока идёт отправка и вкладка не на экране, её WebView стоит НЕ за краем, а под главным WebView (translationZ=-1, на месте, но закрыт): так Chromium его рисует и не усыпляет, как при заходе на вкладку; после отправки уезжает за край, как раньше. (2) Сторож: если страница не запустила скрипт отправки (потерялся onPageFinished, страница перезагрузилась) — отправка перезапускается (до 3 раз); заход на вкладку тоже подталкивает застрявшую отправку. (3) При сбое по времени в сообщении указан этап, на котором встало. Откат: ClaudeTab.kt 1.9.
 // Версия: 1.9 (24.11) — отправка задачи в НОВЫЙ диалог вкладки (сундучок у задачи): очередь [enqueueTask] → страница https://claude.ai/new грузится заново (так задача всегда попадает в новый чат, а не в открытый у пользователя), в неё кусками base64 кладётся архив репозитория (assets/claude/send_task.js), затем прикрепляется, вставляется текст и нажимается «Отправить»; ход проверяется опросом статуса страницы, итог — [ClaudeTaskResults]. Откат: ClaudeTab.kt 1.8.
 // Версия: 1.8 (24.11) — несколько вкладок Claude: у экземпляра свой [tabId]; вкладка «main» работает как раньше (общий вход приложения), остальные — каждая в своём профиле WebView (androidx.webkit Profile `claude_<id>`: свои cookie и хранилище, вход не смешивается). Настройки «Авто» — отдельные для каждой вкладки. [purge] — удалить вкладку вместе с её входом. Откат: ClaudeTab.kt 1.7.
 // Версия: 1.7 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: ClaudeTab.kt 1.6.
@@ -51,6 +52,9 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         const val NEW_URL = "https://claude.ai/new"
         private const val TASK_TIMEOUT_MS = 240_000L
         private const val TASK_POLL_MS = 1500L
+        private const val TASK_STALL_MS = 40_000L // скрипт отправки не стартовал за это время — страницу грузим заново
+        private const val TASK_KICK_MS = 10_000L // то же при заходе на вкладку
+        private const val TASK_MAX_RESTARTS = 3
         private const val TASK_CHUNK = 393216 // кратно 3: куски base64 декодируются по отдельности
         const val MAIN_ID = "main"
         /** Умеет ли установленный Android System WebView отдельные профили (отдельный вход на вкладку). */
@@ -112,9 +116,12 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         rW = wPx
         rH = hPx
         layoutShown(v)
+        v.translationZ = 0f
         v.translationX = 0f
         shown = true
         activity.setSiteKeyboardOverlay(true)
+        // Зашли на вкладку, а отправка стоит без движения (скрипт не запустился) — подталкиваем: страница грузится заново.
+        job?.let { if (!it.done && (it.lastSig.isEmpty() || it.lastSig.startsWith("idle")) && System.currentTimeMillis() - it.lastChangeAt > TASK_KICK_MS) restartJob(it, v) }
     }
 
     /** Экранная клавиатура окно не сжимает (вкладки на местах): WebView укорачивается до её верха. */
@@ -161,7 +168,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         activity.setSiteKeyboardOverlay(false)
         val v = view ?: return
         v.clearFocus()
-        v.translationX = OFFSCREEN_X
+        if (taskActive()) renderBehind(v) else parkOffscreen(v)
     }
 
     fun reload() { view?.reload() }
@@ -215,6 +222,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     private class TaskJob(val reqId: String, val text: String, val zip: File) {
         @Volatile var gen = 0
         @Volatile var done = false
+        /** Когда в последний раз что-то двигалось: загрузка страницы, кусок архива, смена этапа в скрипте. */
+        @Volatile var lastChangeAt = System.currentTimeMillis()
+        @Volatile var lastSig = ""
+        @Volatile var stage = ""
+        @Volatile var restarts = 0
     }
     private val taskQueue = ArrayDeque<TaskJob>()
     private var job: TaskJob? = null
@@ -229,12 +241,49 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         val j = taskQueue.pollFirst() ?: return
         job = j
         val v = ensureView()
+        j.lastChangeAt = System.currentTimeMillis()
+        renderBehind(v)
         v.loadUrl(NEW_URL)
         handler.postDelayed(jobTimeout, TASK_TIMEOUT_MS)
         handler.postDelayed(taskPoll, TASK_POLL_MS)
     }
 
-    private val jobTimeout = Runnable { job?.let { finishJob(it, false, "время ожидания вышло") } }
+    private val jobTimeout = Runnable { job?.let { finishJob(it, false, "время ожидания вышло" + stageNote(it)) } }
+
+    private fun stageNote(j: TaskJob): String =
+        if (j.stage.isNotEmpty()) " (этап: ${j.stage})" else " (страница не запустила отправку)"
+
+    /**
+     * Пока идёт отправка, а вкладка не на экране: WebView стоит на месте, но ПОД главным (отрицательная глубина), а не за краем экрана.
+     * Закрытый, но нарисованный WebView Chromium не усыпляет; вне экрана страницу могут не рисовать, и claude.ai не успевает собрать поле ввода.
+     */
+    private fun renderBehind(v: WebView) {
+        if (shown) return
+        try { v.onResume(); v.resumeTimers() } catch (e: Throwable) { }
+        val cur = v.layoutParams as? FrameLayout.LayoutParams
+        if (cur == null || cur.width != ViewGroup.LayoutParams.MATCH_PARENT || cur.height != ViewGroup.LayoutParams.MATCH_PARENT || cur.leftMargin != 0 || cur.topMargin != 0) {
+            v.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
+        v.translationZ = -1f
+        v.translationX = 0f
+    }
+
+    private fun parkOffscreen(v: WebView) {
+        v.translationZ = 0f
+        v.translationX = OFFSCREEN_X
+    }
+
+    private fun taskActive(): Boolean = job?.let { !it.done } == true
+
+    /** Страницу грузим заново: onPageFinished снова запустит передачу архива. */
+    private fun restartJob(j: TaskJob, v: WebView) {
+        if (j.done || j.restarts >= TASK_MAX_RESTARTS) return
+        j.restarts++
+        j.lastChangeAt = System.currentTimeMillis()
+        j.lastSig = ""
+        j.stage = ""
+        v.loadUrl(NEW_URL)
+    }
 
     private val taskPoll = object : Runnable {
         override fun run() {
@@ -242,9 +291,20 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
             val v = view
             if (v == null) { finishJob(j, false, "страница Claude не открыта"); return }
             v.evaluateJavascript("(window.__ltTask?window.__ltTask.status():null)") { raw ->
-                if (job !== j || raw == null || !raw.startsWith("{")) return@evaluateJavascript
-                val o = try { JSONObject(raw) } catch (e: Exception) { return@evaluateJavascript }
-                if (o.optString("reqId") != j.reqId) return@evaluateJavascript
+                if (job !== j) return@evaluateJavascript
+                val now = System.currentTimeMillis()
+                var o: JSONObject? = null
+                if (raw != null && raw.startsWith("{")) {
+                    try { o = JSONObject(raw) } catch (e: Exception) { o = null }
+                }
+                if (o == null || o.optString("reqId") != j.reqId) {
+                    // скрипт отправки ещё не стартовал (или страница потеряла его): ждём, а если долго — грузим заново
+                    if (now - j.lastChangeAt > TASK_STALL_MS) restartJob(j, v)
+                    return@evaluateJavascript
+                }
+                val sig = o.optString("state") + "|" + o.optString("msg")
+                if (sig != j.lastSig) { j.lastSig = sig; j.lastChangeAt = now }
+                if (o.optString("state") == "working") j.stage = o.optString("msg")
                 when (o.optString("state")) {
                     "sent" -> finishJob(j, true, "")
                     "error" -> finishJob(j, false, o.optString("msg").ifEmpty { "не удалось отправить" })
@@ -262,6 +322,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         ClaudeTaskResults.add(j.reqId, ok, msg)
         try { j.zip.delete() } catch (e: Exception) { }
         if (job === j) job = null
+        if (taskQueue.isEmpty() && !shown) view?.let { parkOffscreen(it) }
         nextTask()
     }
 
@@ -307,6 +368,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                     val raw = ByteArray(TASK_CHUNK)
                     while (true) {
                         if (j.done || j.gen != myGen) return@Thread
+                        j.lastChangeAt = System.currentTimeMillis()
                         val n = readFully(ins, raw)
                         if (n <= 0) break
                         val b64 = Base64.encodeToString(raw, 0, n, Base64.NO_WRAP)

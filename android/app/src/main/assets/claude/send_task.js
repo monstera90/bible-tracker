@@ -1,4 +1,5 @@
 /* send_task.js
+   Версия: 1.1 (24.11) — при сбое в сообщении добавляется «снимок» страницы (адрес, видимость, поле ввода, поля выбора файла, размер окна), чтобы было видно, на чём встало; имя файла ищется без учёта регистра; перед началом ждём, пока страница дозагрузится (readyState). Откат: send_task.js 1.0.
    Версия: 1.0 (24.11)
    Скрипт вкладки Claude (ClaudeTab.kt вставляет его в страницу claude.ai/new, когда сундучок у задачи отправляет её в Claude).
    Оболочка кладёт архив в страницу кусками base64 (window.__ltTaskInit / __ltTaskPut), затем зовёт window.__ltTaskStart(cfg):
@@ -43,7 +44,14 @@
     return c.closest("fieldset") || c.closest("form") || (c.parentElement && c.parentElement.parentElement) || document.body;
   }
   function hasAttachment(base){
-    try{ return String(document.body.innerText || "").indexOf(base) >= 0; }catch(e){ return false; }
+    try{ return String(document.body.innerText || "").toLowerCase().indexOf(String(base).toLowerCase()) >= 0; }catch(e){ return false; }
+  }
+  // снимок страницы для сообщения об ошибке
+  function diag(){
+    try{
+      return "адрес " + (location.pathname || "/") + ", страница " + document.visibilityState + ", поле ввода " + (composer() ? "есть" : "нет") +
+        ", полей файла " + document.querySelectorAll('input[type="file"]').length + ", окно " + window.innerWidth + "x" + window.innerHeight;
+    }catch(e){ return "снимок недоступен"; }
   }
   function loginPage(){
     var p = location.pathname || "";
@@ -139,6 +147,7 @@
     st = { reqId: cfg.reqId, state: "working", msg: "Жду страницу" };
     try{
       if(!buf || off !== buf.length) throw new Error("архив не дошёл до страницы");
+      await waitFor(function(){ return document.readyState === "complete"; }, 20000, 300);
       var c = await waitFor(function(){ return loginPage() ? "login" : composer(); }, 45000);
       if(c === "login" || loginPage()) throw new Error("во вкладке нет входа в Claude — войдите и повторите");
       if(!c) throw new Error("не нашёл поле ввода на странице claude.ai");
@@ -167,7 +176,7 @@
       if(!sent) throw new Error("сообщение не отправилось");
       st.state = "sent"; st.msg = "";
     }catch(e){
-      st.state = "error"; st.msg = String(e && e.message || e);
+      st.state = "error"; st.msg = String(e && e.message || e) + " [" + diag() + "]";
     }
   }
   window.__ltTaskStart = function(cfg){ run(cfg); };
