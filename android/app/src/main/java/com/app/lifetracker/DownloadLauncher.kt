@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.5 (24.11) — необязательный параметр `cookies` у [handlePage]/[handle]: вкладка Claude с отдельным профилем WebView отдаёт cookie своего профиля (по умолчанию — общие, как раньше). Откат: DownloadLauncher.kt 1.4.
 // Версия: 1.4 (23.11) — разведка не удалась (размер не получен из-за ошибки) — сразу «В N потоков»: движок при старте разведает файл заново и сам выберет способ; окно только если сервер определённо не отдаёт диапазоны или размер не сообщает. Откат: DownloadLauncher.kt 1.3.
 // Версия: 1.3 (23.11) — окно «Обычное / В N потоков» показывается только если многопоточное скачивание недоступно (сервер без диапазонов, размер неизвестен, разведка не удалась); иначе сразу «В N потоков» ([DownloadLogic.canAutoMulti]). Откат: DownloadLauncher.kt 1.2.
 // Версия: 1.2 (22.11) — этап 2 (Flibusta, 6.2): [startForPage] — скачивание по запросу страницы (мост `downloadStart`): разведка, то же окно «Обычное / В N потоков», задача с `handoffId`. Откат: DownloadLauncher.kt 1.1.
@@ -33,13 +34,14 @@ object DownloadLauncher {
         contentDisposition: String?,
         mimeType: String?,
         referer: String?,
-        originTab: String
+        originTab: String,
+        cookies: CookieManager? = null
     ): Boolean {
         if (PageDownloads.isPageUrl(url)) {
             PageDownloads.start(activity, view, url!!, contentDisposition, mimeType)
             return true
         }
-        return handle(activity, url, userAgent, contentDisposition, mimeType, referer, originTab)
+        return handle(activity, url, userAgent, contentDisposition, mimeType, referer, originTab, cookies)
     }
 
     /**
@@ -52,13 +54,14 @@ object DownloadLauncher {
         contentDisposition: String?,
         mimeType: String?,
         referer: String?,
-        originTab: String
+        originTab: String,
+        cookies: CookieManager? = null
     ): Boolean {
         val u = url?.trim() ?: return false
         if (!u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true)) return false
         val headers = LinkedHashMap<String, String>()
         try {
-            val ck = CookieManager.getInstance().getCookie(u)
+            val ck = (cookies ?: CookieManager.getInstance()).getCookie(u)
             if (!ck.isNullOrBlank()) headers["Cookie"] = ck
         } catch (e: Exception) {
             // без cookie: публичные файлы скачаются, закрытые — нет

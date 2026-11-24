@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.5 (24.11) — ряд вкладок Claude внутри вкладки: колонка слева от бокового ряда (выходит из его вкладок, начиная со второй: нижняя вкладка бокового ряда стоит над нижним рядом кнопок приложения, из неё ничего не выходит). Первая вкладка нового ряда — прежняя «Claude» (вход общий, как раньше), над ней «+»: новая вкладка Claude БЕЗ входа, у каждой вкладки свой вход (профиль WebView, ClaudeTabs.kt/ClaudeTab.kt 1.8). Долгое нажатие на добавленную вкладку (1 с) → крестик, следующее нажатие закрывает её вместе со входом. Список вкладок — localStorage `claudeTabs_v1` ({tabs:[id], cur}), только на этом устройстве. Нужны методы моста claudeSelect/claudeRemove/claudeTabsSupported (иначе ряда нет, вкладка одна, как раньше). claude.ai укорачивается по колонке (она не должна лежать под нативным WebView).
    Версия: 1.4 (24.11) — убрана верхняя полоса («Что отправлять» + статус): текст автоотправки остаётся прежним (сохранённый, по умолчанию «Дальше»), статус автоотправки — во всплывающей подсказке кнопки «Авто». Добавлена кнопка «i» (самая левая в нижнем ряду): экран с короткими пояснениями ко всем кнопкам вкладки.
    Версия: 1.3 (20.11) — кнопки «Авто», «⏱ 5 ч», «Тест», «⟳» перенесены в нижний ряд (#siteFabRow, слева от «полного экрана» и «домика»), а claude.ai растянут на всю область и заходит под них: оболочка прорезывает «окна» под кнопки (мост claudeHoles, как у вкладок-сайтов; без него сайт заканчивается над рядом). Вверху остались только поле «Что отправлять» и статус (виден, пока включено «Авто»).
    Версия: 1.2 (03.11)
@@ -17,6 +18,35 @@
   var timer = null;
   var lastRect = "";
   var lastPoll = 0;
+  var TABS_KEY = "claudeTabs_v1";
+  var MAIN = "main";
+  var ID_OK = /^[a-z0-9]{1,24}$/;
+  var LONG_MS = 1000, ARM_MS = 4000;
+  var extra = [];          // id добавленных вкладок (порядок создания)
+  var curId = MAIN;        // выбранная вкладка ряда
+  var armedId = null, armTimer = null;
+  var multiCache = null;
+
+  function loadTabs(){
+    try{
+      var o = JSON.parse(localStorage.getItem(TABS_KEY) || "{}");
+      extra = (o && Array.isArray(o.tabs) ? o.tabs : []).filter(function(id, i, a){ return typeof id === "string" && ID_OK.test(id) && id !== MAIN && a.indexOf(id) === i; });
+      curId = (o && typeof o.cur === "string" && (o.cur === MAIN || extra.indexOf(o.cur) >= 0)) ? o.cur : MAIN;
+    }catch(e){ extra = []; curId = MAIN; }
+  }
+  function saveTabs(){ try{ localStorage.setItem(TABS_KEY, JSON.stringify({ tabs: extra, cur: curId })); }catch(e){} }
+  loadTabs();
+
+  // несколько вкладок возможны, если оболочка новая и WebView умеет отдельные профили
+  function multiOk(b){
+    if(multiCache === null){
+      multiCache = false;
+      try{
+        if(typeof b.claudeSelect === "function" && typeof b.claudeRemove === "function" && typeof b.claudeTabsSupported === "function") multiCache = !!b.claudeTabsSupported();
+      }catch(e){}
+    }
+    return multiCache;
+  }
 
   function bridge(){
     var b = window.LifeTrackerNative;
@@ -44,7 +74,18 @@
       ".claude-tab-status{flex:0 1 55%;min-width:0;font-size:12px;line-height:1.3;padding:5px 8px;border-radius:8px;" +
       "background:#fffef8;border:1px solid var(--groove-shadow,#b9b0a0);color:var(--wood,#5b4a8a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}" +
       ".claude-tab-status:empty{display:none;}" +
-      "#claudeTabView{width:100%;}";
+      "#claudeTabView{width:100%;box-sizing:border-box;}" +
+      ".claude-sub-tabs{position:absolute;inset-inline-end:0;bottom:0;z-index:3;display:flex;flex-direction:column-reverse;gap:1px;pointer-events:none;}" +
+      ".claude-sub-tab,.claude-sub-gap{width:35px;height:var(--tab-len,60px);flex:0 0 var(--tab-len,60px);box-sizing:border-box;}" +
+      ".claude-sub-gap{visibility:hidden;}" +
+      ".claude-sub-tab{pointer-events:auto;position:relative;display:flex;align-items:center;justify-content:center;padding:0;margin:0;border:none;outline:none;" +
+        "-webkit-appearance:none;appearance:none;-webkit-tap-highlight-color:transparent;cursor:pointer;" +
+        "background:var(--tab-bg,var(--parchment));color:var(--wood);border-radius:0;border-start-start-radius:14px;border-end-start-radius:14px;" +
+        "box-shadow:calc(-2px * var(--hand-sign,1)) 2px 5px rgba(0,0,0,.3);}" +
+      ".claude-sub-tab svg{width:26px;height:26px;}" +
+      ".claude-sub-tab.active{background:var(--wood);color:var(--parchment);}" +
+      ".claude-sub-tab .claude-sub-num{position:absolute;bottom:3px;inset-inline-start:5px;font-size:10px;line-height:1;font-weight:700;}" +
+      ".claude-sub-tab.armed{background:#b23b3b;color:#fff;}";
     document.head.appendChild(st);
   }
 
@@ -100,6 +141,129 @@
     return out.join(";");
   }
 
+  // ---------- ряд вкладок Claude (слева от бокового ряда) ----------
+  var ICON_CLAUDE = svg('<path d="M4 5.5h16a1 1 0 0 1 1 1V16a1 1 0 0 1-1 1h-8l-4.5 3.5V17H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1z"/><path d="M12 8v5M9.5 9.5l5 2M14.5 9.5l-5 2"/>');
+  var ICON_PLUS = svg('<path d="M12 5v14M5 12h14"/>');
+  var ICON_CROSS = svg('<path d="M6 6l12 12M18 6L6 18"/>');
+
+  function subRow(){ return document.getElementById("claudeSubTabs"); }
+  function unmountRow(){
+    var r = subRow();
+    if(r && r.parentNode) r.parentNode.removeChild(r);
+    armedId = null;
+    if(armTimer){ clearTimeout(armTimer); armTimer = null; }
+  }
+  // колонка стоит в рамке окна (там же, где боковой ряд), прижата к низу; первая ячейка — пустая: напротив нижней вкладки бокового ряда ничего нет
+  function mountRow(){
+    var frame = document.querySelector(".settings-modal-frame");
+    if(!frame) return;
+    var r = subRow();
+    if(!r){
+      r = document.createElement("div");
+      r.id = "claudeSubTabs";
+      r.className = "claude-sub-tabs";
+      frame.appendChild(r);
+    }
+    paintRow();
+  }
+  function newId(){
+    for(var n = 0; n < 20; n++){
+      var id = Math.random().toString(36).slice(2, 8);
+      if(ID_OK.test(id) && id !== MAIN && extra.indexOf(id) < 0) return id;
+    }
+    return "t" + Date.now().toString(36);
+  }
+  function paintRow(){
+    var r = subRow();
+    if(!r) return;
+    r.innerHTML = "";
+    var gap = document.createElement("div");
+    gap.className = "claude-sub-gap";
+    r.appendChild(gap);
+    var ids = [MAIN].concat(extra);
+    ids.forEach(function(id, i){
+      var bt = document.createElement("button");
+      bt.type = "button";
+      bt.className = "claude-sub-tab" + (id === curId ? " active" : "") + (id === armedId ? " armed" : "");
+      bt.setAttribute("data-claude-tab", id);
+      var t = id === armedId ? "Нажмите ещё раз, чтобы закрыть вкладку вместе с входом" : "Claude " + (i + 1);
+      bt.title = t; bt.setAttribute("aria-label", t);
+      bt.innerHTML = (id === armedId ? ICON_CROSS : ICON_CLAUDE + '<span class="claude-sub-num">' + (i + 1) + '</span>');
+      bindTab(bt, id);
+      r.appendChild(bt);
+    });
+    var add = document.createElement("button");
+    add.type = "button";
+    add.className = "claude-sub-tab";
+    add.id = "claudeSubAddBtn";
+    add.title = "Новая вкладка Claude (без входа)"; add.setAttribute("aria-label", add.title);
+    add.innerHTML = ICON_PLUS;
+    add.addEventListener("click", addTab);
+    r.appendChild(add);
+    lastRect = ""; // колонка могла сдвинуться — пересчитать область claude.ai
+  }
+  function bindTab(bt, id){
+    var timer2 = null, longFired = false;
+    function start(){
+      longFired = false;
+      if(timer2){ clearTimeout(timer2); timer2 = null; }
+      if(id === MAIN) return; // первую вкладку закрыть нельзя
+      timer2 = setTimeout(function(){ timer2 = null; longFired = true; arm(id); }, LONG_MS);
+    }
+    function end(){ if(timer2){ clearTimeout(timer2); timer2 = null; } }
+    bt.addEventListener("touchstart", start, { passive: true });
+    bt.addEventListener("touchend", end);
+    bt.addEventListener("touchcancel", end);
+    bt.addEventListener("touchmove", end, { passive: true });
+    bt.addEventListener("mousedown", start);
+    bt.addEventListener("mouseup", end);
+    bt.addEventListener("mouseleave", end);
+    bt.addEventListener("contextmenu", function(e){ e.preventDefault(); });
+    bt.addEventListener("click", function(){
+      if(longFired){ longFired = false; return; }
+      if(armedId === id){ removeTab(id); return; }
+      if(armedId){ armedId = null; paintRow(); }
+      selectTab(id);
+    });
+  }
+  function arm(id){
+    armedId = id;
+    paintRow();
+    if(armTimer) clearTimeout(armTimer);
+    armTimer = setTimeout(function(){ armTimer = null; armedId = null; paintRow(); }, ARM_MS);
+  }
+  function selectTab(id){
+    if(id === curId) return;
+    hideNative();
+    curId = id;
+    saveTabs();
+    render();
+  }
+  function addTab(){
+    var id = newId();
+    extra.push(id);
+    hideNative();
+    curId = id;
+    saveTabs();
+    render();
+  }
+  function removeTab(id){
+    var b = bridge();
+    armedId = null;
+    if(armTimer){ clearTimeout(armTimer); armTimer = null; }
+    extra = extra.filter(function(x){ return x !== id; });
+    if(b){ try{ b.claudeRemove(id); }catch(e){} }
+    if(curId === id){
+      hideNative();
+      curId = MAIN;
+      saveTabs();
+      render();
+    }else{
+      saveTabs();
+      paintRow();
+    }
+  }
+
   function render(){
     var c = document.getElementById("settingsTabContent");
     if(!c) return;
@@ -110,6 +274,11 @@
       return;
     }
     ensureStyle();
+    var multi = multiOk(b);
+    if(multi){
+      if(curId !== MAIN && extra.indexOf(curId) < 0) curId = MAIN;
+      try{ b.claudeSelect(curId); }catch(e){}
+    }
     var st = readState();
     var text = st.text || "Дальше";
     c.innerHTML = '<div id="claudeTabView"></div>';
@@ -142,6 +311,7 @@
     testBtn.addEventListener("click", function(){ try{ b.claudeSendNow(); }catch(e){} });
     reloadBtn.addEventListener("click", function(){ try{ b.claudeReload(); }catch(e){} });
 
+    if(multi) mountRow(); else unmountRow();
     updateStatus();
     active = true;
     lastRect = "";
@@ -160,6 +330,20 @@
     var pad = parseFloat(getComputedStyle(c).paddingBottom) || 0;
     var top = v.getBoundingClientRect().top;
     var bottom = cr.bottom - pad;
+    // ряд вкладок стоит справа (или слева у левши) на краю содержимого: claude.ai не должен заходить под него — нативный WebView лежит поверх страницы
+    var cs = getComputedStyle(c);
+    var innerL = cr.left + (parseFloat(cs.paddingLeft) || 0), innerR = cr.right - (parseFloat(cs.paddingRight) || 0);
+    var baseL = innerL;
+    var sr = subRow();
+    if(sr){
+      var kr = sr.getBoundingClientRect();
+      if(kr.width > 0){
+        if(kr.left > (cr.left + cr.right) / 2) innerR = Math.min(innerR, kr.left - 2);
+        else innerL = Math.max(innerL, kr.right + 2);
+      }
+    }
+    v.style.marginLeft = Math.round(innerL - baseL) + "px";
+    v.style.width = Math.max(120, Math.floor(innerR - innerL)) + "px";
     var row = document.getElementById("siteFabRow");
     var holes = "";
     if(row){
@@ -203,7 +387,7 @@
   function renderInfo(){
     var c = document.getElementById("settingsTabContent");
     if(!c) return;
-    hide();
+    hideNative();
     function item(icon, txt){
       return '<div class="task-info-item"><div class="task-info-icon">' + icon + '</div><div class="task-info-text">' + txt + '</div></div>';
     }
@@ -217,6 +401,7 @@
         item(ICON_RELOAD, "Перезагружает страницу Claude.") +
         item(fs, "Полный экран: скрывает строку состояния телефона.") +
         item(ICON_HOME, "Домик: возвращает на главную страницу Claude.") +
+        item(ICON_PLUS, "Ряд слева: «+» открывает ещё одну вкладку Claude без входа. Вход в каждой вкладке свой и сохраняется. Долгое нажатие на вкладку и ещё одно нажатие — закрыть её (первую закрыть нельзя).") +
       '</div>' +
       '<div class="mdeditor-fab-row">' +
         '<button type="button" class="mdeditor-fab-btn" id="claudeInfoHomeBtn" title="Назад к Claude">' + ICON_HOME + '</button>' +
@@ -238,13 +423,19 @@
     window.removeEventListener("resize", sizeAndPush);
   }
 
-  function hide(){
+  // спрятать нативный claude.ai (ряд вкладок остаётся: так нужно экрану «i» и переключению вкладок)
+  function hideNative(){
     var was = active;
     active = false;
     lastRect = "";
     stopTimer();
     var b = bridge();
     if(was && b){ try{ b.claudeHide(); }catch(e){} }
+  }
+  // уход с вкладки Claude или закрытие окна: прячется и ряд вкладок
+  function hide(){
+    hideNative();
+    unmountRow();
   }
   function onSwitch(tab){ if(tab !== TAB) hide(); }
 

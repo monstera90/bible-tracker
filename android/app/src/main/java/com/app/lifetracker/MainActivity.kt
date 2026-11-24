@@ -13,6 +13,7 @@ package com.app.lifetracker
 // Версия: 3.1 (22.10) — onPause сразу перепоставляет уведомления идущих таймеров (`CardTimers.tickIsland`): пока приложение на экране, тик их не трогает, и остров в шторке получает свежее время без ожидания следующего тика. Откат: MainActivity.kt 3.0.
 // Версия: 3.0 (21.10) — плашка таймера в приложении: `inAppIsland` (InAppIsland.kt), вырез камеры берётся из WindowInsets, старт/стоп в onResume/onPause. Откат: MainActivity.kt 2.1.
 // Версия: 2.1 (21.10) — onResume гасит вибрацию конца таймера карточки (CardTimers.stopVibration).
+// Версия: 2.1 (24.11) — `claudeTab` теперь [ClaudeTabs] (диспетчер нескольких вкладок Claude); прежние вызовы (isVisible/canGoBack/goBack/startIfEnabled/setKeyboardInset/pause/destroy) работают без изменений. Откат: MainActivity.kt 2.0.
 // Версия: 2.0 (21.10) — вкладка Claude: `webHost` (FrameLayout вокруг главного WebView) и `claudeTab` (ClaudeTab.kt), `handleFileChooser`/`openExternalLink` вынесены для второго WebView.
 // Версия: 1.3 (17.11) — вход ACTION_OPEN_BOOK (виджет → книга на основной закладке: window.__ltOpenBook / ?book=<id>).
 // Версия: 1.2 (16.11) — вход ACTION_OPEN_WIDGET_TASK (виджет → форма задачи: window.__ltOpenTaskForm / ?taskform=<id>); forwardHotkey — горячие клавиши из WebView сайтов уходят странице (HotkeysMod.press).
@@ -175,7 +176,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var inAppIsland: InAppIsland
 
     /** Вкладка Claude (set2s_10): второй WebView поверх области содержимого; управляется мостом (claude*). */
-    lateinit var claudeTab: ClaudeTab
+    lateinit var claudeTab: ClaudeTabs
         private set
 
     /** Вкладки-сайты ряда «Интернет» (кнопка «+»): по WebView на вкладку; управляется мостом (utab*). */
@@ -1197,7 +1198,7 @@ class MainActivity : ComponentActivity() {
         InnerScrollCapture.install(webView) // длинный скриншот: прокручивается внутренний блок страницы (Android 12+)
         webHost = FrameLayout(this).apply { addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)) }
         siteSelectionMenu = SiteSelectionMenu(this, webHost)
-        claudeTab = ClaudeTab(this, webHost)
+        claudeTab = ClaudeTabs(this, webHost)
         userTabs = UserTabs(this, webHost)
         inAppIsland = InAppIsland.get(applicationContext)
 

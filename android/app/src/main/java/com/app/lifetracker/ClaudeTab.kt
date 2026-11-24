@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.8 (24.11) — несколько вкладок Claude: у экземпляра свой [tabId]; вкладка «main» работает как раньше (общий вход приложения), остальные — каждая в своём профиле WebView (androidx.webkit Profile `claude_<id>`: свои cookie и хранилище, вход не смешивается). Настройки «Авто» — отдельные для каждой вкладки. [purge] — удалить вкладку вместе с её входом. Откат: ClaudeTab.kt 1.7.
 // Версия: 1.7 (22.11) — `setDownloadListener`: `data:` и `blob:` сохраняет приложение (DownloadLauncher.handlePage, ТЗ TZ_downloads.md, этап 6). Откат: ClaudeTab.kt 1.6.
 // Версия: 1.6 (21.11) — `setDownloadListener`: файлы claude.ai скачивает приложение (DownloadLauncher, ТЗ TZ_downloads.md, этап 1). Откат: ClaudeTab.kt 1.5.
 // Версия: 1.5 (20.11) — кнопки вкладки перенесены в нижний ряд страницы, а claude.ai растянут на всю область и заходит под них: WebView теперь `SiteWebView` с «окнами» ([setHoles], мост `claudeHoles`; Android 10+, как у вкладок-сайтов). Откат: ClaudeTab.kt 1.4.
@@ -19,6 +20,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import android.widget.FrameLayout
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -31,10 +35,15 @@ import kotlin.math.roundToInt
  * статус раз в несколько секунд читается из страницы и отдаётся вкладке (claudeState).
  * Скрытие — сдвиг за край (а не INVISIBLE): скрытый WebView Chromium считает невидимым и душит таймеры страницы.
  */
-class ClaudeTab(private val activity: MainActivity, private val host: FrameLayout) {
+class ClaudeTab(private val activity: MainActivity, private val host: FrameLayout, val tabId: String = MAIN_ID) {
 
     companion object {
         const val HOME_URL = "https://claude.ai/"
+        const val MAIN_ID = "main"
+        /** Умеет ли установленный Android System WebView отдельные профили (отдельный вход на вкладку). */
+        fun profilesSupported(): Boolean = try {
+            WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+        } catch (e: Throwable) { false }
         const val DEFAULT_TEXT = "Дальше"
         private const val PREFS = "claude_tab"
         private const val KEY_ENABLED = "auto_enabled"
@@ -44,6 +53,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         private val ALLOWED_HOSTS = listOf("claude.ai", "anthropic.com", "claude.com")
     }
 
+    private val profileName: String? = if (tabId == MAIN_ID) null else "claude_$tabId"
+    private fun k(base: String): String = if (tabId == MAIN_ID) base else base + "_" + tabId
     private val handler = Handler(Looper.getMainLooper())
     private val prefs = activity.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private var view: WebView? = null
@@ -58,8 +69,16 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
     val isVisible: Boolean get() = shown && view != null
 
-    fun autoEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
-    fun autoText(): String = prefs.getString(KEY_TEXT, DEFAULT_TEXT)?.ifBlank { DEFAULT_TEXT } ?: DEFAULT_TEXT
+    fun autoEnabled(): Boolean = prefs.getBoolean(k(KEY_ENABLED), false)
+    fun autoText(): String = prefs.getString(k(KEY_TEXT), DEFAULT_TEXT)?.ifBlank { DEFAULT_TEXT } ?: DEFAULT_TEXT
+
+    /** CookieManager профиля этой вкладки (у «main» — общий, как раньше). */
+    private fun cookieMgr(): CookieManager {
+        val pn = profileName ?: return CookieManager.getInstance()
+        return try {
+            if (profilesSupported()) ProfileStore.getInstance().getOrCreateProfile(pn).cookieManager else CookieManager.getInstance()
+        } catch (e: Throwable) { CookieManager.getInstance() }
+    }
 
     /** Вызывается при запуске приложения: если автоотправка включена, страница живёт в фоне и без захода на вкладку. */
     fun startIfEnabled() {
@@ -135,11 +154,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     fun reload() { view?.reload() }
 
     /** «Домик»: первый экран вкладки. */
-    fun goHome() { view?.loadUrl(HOME_URL) }
+    fun goHome() { if (profileName == null || profilesSupported()) view?.loadUrl(HOME_URL) }
 
     fun setAuto(enabled: Boolean, text: String?) {
         val clean = (text ?: "").replace(Regex("\\s+"), " ").trim().take(200).ifEmpty { DEFAULT_TEXT }
-        prefs.edit().putBoolean(KEY_ENABLED, enabled).putString(KEY_TEXT, clean).apply()
+        prefs.edit().putBoolean(k(KEY_ENABLED), enabled).putString(k(KEY_TEXT), clean).apply()
         view?.evaluateJavascript("window.__ltAutoCfg=" + cfgJson(), null)
         if (enabled) ensureView()
     }
@@ -160,7 +179,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         .put("status", try { JSONObject(lastStatus) } catch (e: Exception) { JSONObject() })
         .toString()
 
-    fun pause() { CookieManager.getInstance().flush() }
+    fun pause() { try { cookieMgr().flush() } catch (e: Throwable) { } }
 
     fun destroy() {
         handler.removeCallbacksAndMessages(null)
@@ -170,12 +189,31 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         v.destroy()
     }
 
+    /** Вкладку закрыли насовсем: WebView уничтожается, настройки «Авто» и профиль со входом удаляются. У «main» не вызывается. */
+    fun purge() {
+        destroy()
+        prefs.edit().remove(k(KEY_ENABLED)).remove(k(KEY_TEXT)).apply()
+        val pn = profileName ?: return
+        try { if (profilesSupported()) ProfileStore.getInstance().deleteProfile(pn) } catch (e: Throwable) { }
+    }
+
     private fun cfgJson(): String = JSONObject().put("enabled", autoEnabled()).put("text", autoText()).toString()
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun ensureView(): WebView {
         view?.let { return it }
         val v = SiteWebView(activity)
+        // Профиль задаётся до любых других действий с WebView. Не вышло — вкладка не грузит claude.ai (общий вход подставлять нельзя).
+        var profileOk = true
+        if (profileName != null) {
+            profileOk = try {
+                if (!profilesSupported()) false else {
+                    ProfileStore.getInstance().getOrCreateProfile(profileName)
+                    WebViewCompat.setProfile(v, profileName)
+                    true
+                }
+            } catch (e: Throwable) { false }
+        }
         v.setHoles(holes, 8f * activity.resources.displayMetrics.density)
         v.selectionListener = activity.siteSelectionMenu
         v.hotkeyForwarder = { combo -> activity.forwardHotkey(combo) }
@@ -191,13 +229,13 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         s.javaScriptCanOpenWindowsAutomatically = false
         // Метка «; wv» в user-agent заставляет часть сайтов показывать упрощённую страницу или отказывать во входе.
         s.userAgentString = s.userAgentString.replace("; wv", "")
-        val cookies = CookieManager.getInstance()
+        val cookies = if (profileOk) cookieMgr() else CookieManager.getInstance()
         cookies.setAcceptCookie(true)
         cookies.setAcceptThirdPartyCookies(v, true)
 
         // Файл с claude.ai скачивает само приложение: http/https — движок, ход виден в плавающем острове; blob: и data: — PageDownloads (этап 6).
         v.setDownloadListener { url, ua, cd, mime, _ ->
-            try { DownloadLauncher.handlePage(activity, v, url, ua, cd, mime, v.url, "set2s_10") } catch (e: Exception) { }
+            try { DownloadLauncher.handlePage(activity, v, url, ua, cd, mime, v.url, "set2s_10", cookieMgr()) } catch (e: Exception) { }
         }
 
         v.webViewClient = object : WebViewClient() {
@@ -238,7 +276,10 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         v.translationX = OFFSCREEN_X
         host.addView(v, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         view = v
-        v.loadUrl(HOME_URL)
+        if (profileOk) v.loadUrl(HOME_URL)
+        else v.loadDataWithBaseURL(null,
+            "<html><body style='font-family:sans-serif;padding:24px;color:#444'>Для этой вкладки нужен отдельный вход, но установленный Android System WebView не поддерживает отдельные профили. Обновите WebView в Google Play.</body></html>",
+            "text/html", "utf-8", null)
         handler.postDelayed(statusPoll, STATUS_POLL_MS)
         return v
     }

@@ -4,6 +4,7 @@ package com.app.lifetracker
 // Версия: 30.5 (21.11) — мост версии 42: `downloadThreadsGet` / `downloadThreadsSet` — число потоков скачивания по умолчанию (ТЗ TZ_downloads.md, этап 1). Откат: NativeBridge.kt 30.4.
 // Версия: 30.4 (21.11) — мост версии 41: `cardAlarmTap(id)` (решение по нажатию на карточку-будильник: 0 завести, 1 заглушить, 2 выключить, 3 ничего — одно для виджета и приложения) и `silenceCardAlarm(id)`. Откат: NativeBridge.kt 30.3.
 // Версия: 30.3 (21.11) — мост версии 40: `widgetNoteTake` / `widgetNoteAck` (заметки, снятые с виджета двойным нажатием на карточку «Заметки»; QrWidgets.takeNoteRemove/ackNoteRemove). Откат: NativeBridge.kt 30.2.
+// Версия: 30.3 (24.11) — `claudeTabsSupported()` / `claudeSelect(id)` / `claudeRemove(id)`: несколько вкладок Claude с отдельным входом (ClaudeTabs). Версию моста не меняет — страница проверяет наличие методов.
 // Версия: 30.2 (20.11) — `claudeHoles(spec)`: окна под кнопки страницы в WebView вкладки Claude (claude.ai растянут под нижний ряд кнопок; Android 10+). Версию моста не меняет — страница проверяет наличие метода.
 // Версия: 30.1 (19.11) — `widgetDiagLog()`: журнал диагностики виджетов для кнопки панели отладки (версию моста не меняет).
 // Версия: 30.0 (15.11) — мост версии 38: `apkGetState` / `apkCheckNow` / `apkInstall` (обновление самого APK из GitHub Releases, ApkUpdater; вкладка «Проверка обновлений»).
@@ -934,6 +935,27 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeDisarm() {
         if (!activity.pageTrusted) return
         activity.runOnUiThread { activity.claudeTab.disarm() }
+    }
+
+    /** Можно ли открывать вкладки Claude с отдельным входом (нужны профили WebView). Нет метода или false — ряд вкладок не показывается. */
+    @JavascriptInterface
+    fun claudeTabsSupported(): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { activity.claudeTab.supported() } catch (e: Exception) { false }
+    }
+
+    /** Текущая вкладка Claude: id вкладки ("main" — первая; остальные a-z0-9). Следующие вызовы claude* относятся к ней. */
+    @JavascriptInterface
+    fun claudeSelect(id: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { activity.claudeTab.select(id) } catch (e: Exception) { false }
+    }
+
+    /** Закрыть вкладку Claude насовсем (вместе со входом). Первую ("main") закрыть нельзя. */
+    @JavascriptInterface
+    fun claudeRemove(id: String?) {
+        if (!activity.pageTrusted) return
+        activity.runOnUiThread { activity.claudeTab.remove(id) }
     }
 
     /** Проверка: отправить текст в чат прямо сейчас. */
