@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.4 (24.11) — убрана верхняя полоса («Что отправлять» + статус): текст автоотправки остаётся прежним (сохранённый, по умолчанию «Дальше»), статус автоотправки — во всплывающей подсказке кнопки «Авто». Добавлена кнопка «i» (самая левая в нижнем ряду): экран с короткими пояснениями ко всем кнопкам вкладки.
    Версия: 1.3 (20.11) — кнопки «Авто», «⏱ 5 ч», «Тест», «⟳» перенесены в нижний ряд (#siteFabRow, слева от «полного экрана» и «домика»), а claude.ai растянут на всю область и заходит под них: оболочка прорезывает «окна» под кнопки (мост claudeHoles, как у вкладок-сайтов; без него сайт заканчивается над рядом). Вверху остались только поле «Что отправлять» и статус (виден, пока включено «Авто»).
    Версия: 1.2 (03.11)
    Вкладка «Claude» (set2s_10, верхняя в вертикальном стеке второго набора, над «Карточками предметов»).
@@ -64,6 +65,9 @@
   var ICON_SEND = svg('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/>');
   var ICON_RELOAD = svg('<path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>');
 
+  var ICON_INFO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg>';
+  var ICON_HOME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>';
+
   // кнопка нижнего ряда (#siteFabRow, my.js mountSiteFabRow): встаёт левее «полного экрана»
   function addRowBtn(id, title, icon){
     var row = document.getElementById("siteFabRow");
@@ -108,32 +112,29 @@
     ensureStyle();
     var st = readState();
     var text = st.text || "Дальше";
-    c.innerHTML =
-      '<div class="claude-tab-bar">' +
-        '<input id="claudeAutoText" type="text" maxlength="200" value="' + esc(text) + '" placeholder="Что отправлять">' +
-        '<div class="claude-tab-status" id="claudeTabStatus"></div>' +
-      '</div>' +
-      '<div id="claudeTabView"></div>';
+    c.innerHTML = '<div id="claudeTabView"></div>';
 
     mountFab(c); // ряд кнопок создаётся здесь; свои кнопки встают в него левее «полного экрана» и «домика»
+    var infoBtn = addRowBtn("claudeInfoBtn", "Информация", ICON_INFO);
     var autoBtn = addRowBtn("claudeAutoBtn", "", ICON_AUTO);
     var armBtn = addRowBtn("claudeArmBtn", "Отправить через 5 часов, даже если плашка лимита не распознана", ICON_TIMER);
     var testBtn = addRowBtn("claudeTestBtn", "Отправить текст в чат сейчас", ICON_SEND);
     var reloadBtn = addRowBtn("claudeReloadBtn", "Обновить страницу", ICON_RELOAD);
-    var input = document.getElementById("claudeAutoText");
     function paintAuto(on){
       autoBtn.classList.toggle("pressed", !!on);
       var t = "Авто: " + (on ? "вкл" : "выкл") + " — отправлять текст после снятия лимита";
+      var stt = statusText();
+      if(on && stt) t += ". " + stt;
       autoBtn.title = t; autoBtn.setAttribute("aria-label", t);
     }
     paintAuto(!!st.auto);
     function apply(enabled){
-      try{ b.claudeSetAuto(!!enabled, input.value); }catch(e){}
+      try{ b.claudeSetAuto(!!enabled, text); }catch(e){}
       paintAuto(enabled);
       updateStatus();
     }
     autoBtn.addEventListener("click", function(){ apply(!autoBtn.classList.contains("pressed")); });
-    input.addEventListener("change", function(){ apply(autoBtn.classList.contains("pressed")); });
+    infoBtn.addEventListener("click", function(){ renderInfo(); });
     armBtn.addEventListener("click", function(){
       if(!autoBtn.classList.contains("pressed")) apply(true);
       try{ b.claudeArm(300); }catch(e){}
@@ -178,16 +179,49 @@
     if(holeSupport){ try{ b.claudeHoles(holes); }catch(e){} }
   }
 
-  function updateStatus(){
-    var el = document.getElementById("claudeTabStatus");
-    if(!el) return;
+  function statusText(){
     var st = readState(), s = st.status || {}, msg;
     if(!st.created) msg = "Страница загружается…";
     else if(!st.auto) msg = "Автоотправка выключена";
     else if(s.hit && s.resetAt) msg = "Лимит: жду до " + hhmm(s.resetAt) + (s.info ? " · " + s.info : "");
     else if(s.info) msg = s.info;
     else msg = "Автоотправка включена, лимит не обнаружен";
-    el.textContent = st.auto ? msg : ""; // при выключенном «Авто» строка не нужна — она закрывала бы страницу
+    return st.auto ? msg : "";
+  }
+  // полосы больше нет — статус виден в подсказке кнопки «Авто» (title)
+  function updateStatus(){
+    var autoBtn = document.getElementById("claudeAutoBtn");
+    if(!autoBtn) return;
+    var on = autoBtn.classList.contains("pressed");
+    var t = "Авто: " + (on ? "вкл" : "выкл") + " — отправлять текст после снятия лимита";
+    var stt = statusText();
+    if(on && stt) t += ". " + stt;
+    autoBtn.title = t; autoBtn.setAttribute("aria-label", t);
+  }
+
+  // экран «i»: короткие пояснения к кнопкам; нативный claude.ai на это время прячется, «домик» возвращает на вкладку
+  function renderInfo(){
+    var c = document.getElementById("settingsTabContent");
+    if(!c) return;
+    hide();
+    function item(icon, txt){
+      return '<div class="task-info-item"><div class="task-info-icon">' + icon + '</div><div class="task-info-text">' + txt + '</div></div>';
+    }
+    var fs = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+    c.innerHTML =
+      '<h3 class="common-tab-title">Claude — кнопки</h3>' +
+      '<div class="task-info-body">' +
+        item(ICON_AUTO, "Авто: после снятия лимита сам отправляет в чат «Дальше». Горит — включено.") +
+        item(ICON_TIMER, "Отправит текст через 5 часов, даже если Claude не показал плашку лимита.") +
+        item(ICON_SEND, "Отправляет текст в чат прямо сейчас — проверить, что всё работает.") +
+        item(ICON_RELOAD, "Перезагружает страницу Claude.") +
+        item(fs, "Полный экран: скрывает строку состояния телефона.") +
+        item(ICON_HOME, "Домик: возвращает на главную страницу Claude.") +
+      '</div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="claudeInfoHomeBtn" title="Назад к Claude">' + ICON_HOME + '</button>' +
+      '</div>';
+    document.getElementById("claudeInfoHomeBtn").addEventListener("click", function(){ render(); });
   }
 
   function startTimer(){
