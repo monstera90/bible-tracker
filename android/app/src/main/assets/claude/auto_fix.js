@@ -1,4 +1,6 @@
 /* auto_fix.js
+   Версия: 1.3 (25.11)
+   1.3 (25.11): значок/кнопка скачивания ищется не только внутри найденного блока карточки, но и в соседних элементах — поднимаемся по родителям, пока в них только одна карточка fix.zip (раньше блок был только «название + ZIP», а значок справа лежал снаружи и не находился, поэтому нажималась сама карточка и ничего не происходило). В тексте ошибки — что за блок найден.
    Версия: 1.2 (24.11)
    1.2 (24.11): метка window.__ltFixExpect (скачивание zip сразу после нажатия считается fix.zip, даже без имени); в тексте ошибки — что нажато и что появилось на экране.
    Версия: 1.1 (24.11)
@@ -139,18 +141,37 @@
     }, 700);
   }
 
-  function start(card, count){
+  // Значок скачивания лежит рядом с названием, а не обязательно внутри блока «Fix / ZIP»: поднимаемся по родителям,
+  // пока в них ровно одна карточка fix.zip и блок не слишком большой; на каждом уровне — сначала по подписи, потом кнопка/значок.
+  function findCtrl(card, list){
+    var e = card, level = 0;
+    for(var up = 0; up < 6 && e && e !== document.body; up++){
+      var inside = 0;
+      for(var k = 0; k < list.length; k++){ if(e === list[k] || e.contains(list[k])) inside++; }
+      if(inside > 1) break;
+      if(up > 0 && e.offsetHeight > 220) break;
+      var found = controlsIn(e);
+      if(found.length) return found[found.length - 1];
+      var btns = e.querySelectorAll('button,[role="button"],a');
+      var withIcon = [];
+      for(var b = 0; b < btns.length; b++){
+        if(visible(btns[b]) && btns[b].querySelector("svg") && txt(btns[b]).length <= 30) withIcon.push(btns[b]);
+      }
+      if(withIcon.length) return withIcon[withIcon.length - 1];
+      var icons = e.querySelectorAll("svg");
+      if(icons.length) return clickable(icons[icons.length - 1]);
+      e = e.parentElement; level++;
+    }
+    return null;
+  }
+
+  function start(card, count, list){
     busy = true;
     var t0 = Date.now();
     window.__ltFixExpect = t0; // приложению: ближайшее скачивание zip — это ожидаемый fix.zip, даже если имя файла не передалось
     var snapshot = Array.prototype.slice.call(allControls());
-    // 1) значок/кнопка скачивания прямо на карточке: по подписи, иначе последний значок справа
-    var ctrl = null, found = controlsIn(card);
-    if(found.length) ctrl = found[found.length - 1];
-    if(!ctrl){
-      var icons = card.querySelectorAll("svg");
-      if(icons.length) ctrl = clickable(icons[icons.length - 1]);
-    }
+    // 1) значок/кнопка скачивания на карточке или рядом с ней
+    var ctrl = findCtrl(card, list || [card]);
     if(ctrl){
       lastClicked = describe(ctrl);
       fire(ctrl);
@@ -161,6 +182,7 @@
       return;
     }
     // 2) нажать на саму карточку и подождать, что появится
+    lastClicked = "карточку (" + card.tagName.toLowerCase() + ", значка рядом нет)";
     fire(clickable(card));
     waitDownload(t0, count, snapshot);
   }
@@ -177,7 +199,7 @@
       if(!sawGen){ if(n > baseline) baseline = n; return; } // карточки подгрузились сами (история), а не появились в ответе
       stable++;
       if(n > baseline){
-        if(stable >= 2) start(list[n - 1], n);   // новая карточка в законченном ответе
+        if(stable >= 2) start(list[n - 1], n, list);   // новая карточка в законченном ответе
       } else if(stable >= 4){
         sawGen = false; stable = 0;               // ответ закончился без файла
       }
