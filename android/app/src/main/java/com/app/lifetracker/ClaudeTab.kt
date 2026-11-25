@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.5 (25.11) — к задаче из сундучка можно приложить картинки: они уходят в чат вместе с архивом (TaskJob.images, startUpload передаёт каждый файл кусками; предупреждение скрипта при успехе доходит до страницы). Откат: ClaudeTab.kt 2.4.
 // Версия: 2.4 (25.11) — перехват fix.zip знает вкладку (tabId): по ней плашка агента в острове находит свой запуск. Откат: ClaudeTab.kt 2.3.
 // Версия: 2.3 (24.11) — перехват fix.zip учитывает метку автоскачивания (__ltFixExpect). Откат: ClaudeTab.kt 2.2.
 // Версия: 2.2 (24.11) — автоскачивание fix.zip: injectAutoFix (assets/claude/auto_fix.js), настройка и ошибки скрипта через statusPoll. Откат: ClaudeTab.kt 2.1.
@@ -24,6 +25,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import android.widget.FrameLayout
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -216,7 +218,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     }
 
     // ---------- отправка задачи в новый диалог ----------
-    private class TaskJob(val reqId: String, val text: String, val zip: File) {
+    private class TaskJob(val reqId: String, val text: String, val zip: File, val images: List<ClaudeTaskImage> = emptyList()) {
         @Volatile var gen = 0
         @Volatile var done = false
         /** Когда в последний раз что-то двигалось: загрузка страницы, кусок архива, смена этапа в скрипте. */
@@ -224,13 +226,17 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         @Volatile var lastSig = ""
         @Volatile var stage = ""
         @Volatile var restarts = 0
+        fun deleteFiles() {
+            try { zip.delete() } catch (e: Exception) { }
+            images.forEach { try { it.file.delete() } catch (e: Exception) { } }
+        }
     }
     private val taskQueue = ArrayDeque<TaskJob>()
     private var job: TaskJob? = null
 
     /** Поток интерфейса. Задачи одной вкладки идут по очереди: каждая — в свой новый чат. */
-    fun enqueueTask(reqId: String, text: String, zip: File) {
-        taskQueue.addLast(TaskJob(reqId, text, zip))
+    fun enqueueTask(reqId: String, text: String, zip: File, images: List<ClaudeTaskImage> = emptyList()) {
+        taskQueue.addLast(TaskJob(reqId, text, zip, images))
         if (job == null) nextTask()
     }
 
@@ -303,7 +309,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 if (sig != j.lastSig) { j.lastSig = sig; j.lastChangeAt = now }
                 if (o.optString("state") == "working") j.stage = o.optString("msg")
                 when (o.optString("state")) {
-                    "sent" -> finishJob(j, true, "")
+                    "sent" -> finishJob(j, true, o.optString("msg")) // непустое msg — предупреждение (например, картинка не подтвердилась)
                     "error" -> finishJob(j, false, o.optString("msg").ifEmpty { "не удалось отправить" })
                 }
             }
@@ -317,7 +323,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         handler.removeCallbacks(jobTimeout)
         handler.removeCallbacks(taskPoll)
         ClaudeTaskResults.add(j.reqId, ok, msg)
-        try { j.zip.delete() } catch (e: Exception) { }
+        j.deleteFiles()
         if (job === j) job = null
         if (taskQueue.isEmpty() && !shown) view?.let { parkOffscreen(it) }
         nextTask()
@@ -333,7 +339,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         if (j.done) return
         j.done = true
         ClaudeTaskResults.add(j.reqId, false, msg)
-        try { j.zip.delete() } catch (e: Exception) { }
+        j.deleteFiles()
     }
 
     private fun onTaskPageFinished(v: WebView?, url: String?) {
@@ -358,29 +364,42 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
             finishJob(j, false, "в приложении нет скрипта отправки")
             return
         }
-        v.evaluateJavascript(script + "\nwindow.__ltTaskInit(" + j.zip.length() + ");", null)
+        // файл №0 — архив, №1… — картинки задачи (send_task.js 1.2)
+        val files = listOf(j.zip) + j.images.map { it.file }
+        v.evaluateJavascript(script + "\nwindow.__ltTaskInit(" + j.zip.length() + ", 0);", null)
         Thread {
             try {
-                j.zip.inputStream().use { ins ->
-                    val raw = ByteArray(TASK_CHUNK)
-                    while (true) {
-                        if (j.done || j.gen != myGen) return@Thread
-                        j.lastChangeAt = System.currentTimeMillis()
-                        val n = readFully(ins, raw)
-                        if (n <= 0) break
-                        val b64 = Base64.encodeToString(raw, 0, n, Base64.NO_WRAP)
-                        val latch = CountDownLatch(1)
+                for ((idx, f) in files.withIndex()) {
+                    if (idx > 0) {
+                        val size = f.length()
                         activity.runOnUiThread {
                             val cur = view
-                            if (cur == null || j.done || j.gen != myGen) latch.countDown()
-                            else cur.evaluateJavascript("window.__ltTaskPut&&window.__ltTaskPut('" + b64 + "')") { latch.countDown() }
+                            if (cur != null && !j.done && j.gen == myGen) cur.evaluateJavascript("window.__ltTaskInit(" + size + ", " + idx + ")", null)
                         }
-                        if (!latch.await(30, TimeUnit.SECONDS)) throw IOException("страница не отвечает")
-                        if (n < raw.size) break
+                    }
+                    f.inputStream().use { ins ->
+                        val raw = ByteArray(TASK_CHUNK)
+                        while (true) {
+                            if (j.done || j.gen != myGen) return@Thread
+                            j.lastChangeAt = System.currentTimeMillis()
+                            val n = readFully(ins, raw)
+                            if (n <= 0) break
+                            val b64 = Base64.encodeToString(raw, 0, n, Base64.NO_WRAP)
+                            val latch = CountDownLatch(1)
+                            activity.runOnUiThread {
+                                val cur = view
+                                if (cur == null || j.done || j.gen != myGen) latch.countDown()
+                                else cur.evaluateJavascript("window.__ltTaskPut&&window.__ltTaskPut('" + b64 + "', " + idx + ")") { latch.countDown() }
+                            }
+                            if (!latch.await(30, TimeUnit.SECONDS)) throw IOException("страница не отвечает")
+                            if (n < raw.size) break
+                        }
                     }
                 }
                 if (j.done || j.gen != myGen) return@Thread
-                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).toString()
+                val imgs = JSONArray()
+                j.images.forEach { imgs.put(JSONObject().put("name", it.name).put("type", it.mime)) }
+                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).put("images", imgs).toString()
                 activity.runOnUiThread {
                     if (!j.done && j.gen == myGen) view?.evaluateJavascript("window.__ltTaskStart(" + cfg + ")", null)
                 }

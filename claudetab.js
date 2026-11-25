@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.7 (25.11) — отправка задачи с картинками: `sendTask(tabId, taskId, text, images)`, где images — [{name, mime, b64}] (мост `claudeSendTaskImages`); `canSendImages()` — есть ли такой метод в оболочке. Без картинок всё как раньше. Откат: claudetab.js 1.6.
    Версия: 1.6 (24.11) — отправка задачи в новый диалог выбранной вкладки Claude (сундучок у задачи, my.js): `ClaudeTabMod.sendTask(tabId, taskId, text)` → мост `claudeSendTask` (оболочка в фоне скачивает архив репозитория, открывает claude.ai/new в этой вкладке, прикрепляет архив и отправляет текст задачи); итог приходит опросом `claudeTaskResults` → `ClaudeTabMod.onTaskResult(taskId, ok, msg)`. Также наружу: `tabIds()` (номера вкладок для выбора), `canSendTask()`, `ensureStyle()`, `tabIconHtml(n)`. Нужен мост с методами claudeSendTask/claudeTaskResults (иначе выбор показывает пояснение).
    Версия: 1.5 (24.11) — ряд вкладок Claude внутри вкладки: колонка слева от бокового ряда (выходит из его вкладок, начиная со второй: нижняя вкладка бокового ряда стоит над нижним рядом кнопок приложения, из неё ничего не выходит). Первая вкладка нового ряда — прежняя «Claude» (вход общий, как раньше), над ней «+»: новая вкладка Claude БЕЗ входа, у каждой вкладки свой вход (профиль WebView, ClaudeTabs.kt/ClaudeTab.kt 1.8). Долгое нажатие на добавленную вкладку (1 с) → крестик, следующее нажатие закрывает её вместе со входом. Список вкладок — localStorage `claudeTabs_v1` ({tabs:[id], cur}), только на этом устройстве. Нужны методы моста claudeSelect/claudeRemove/claudeTabsSupported (иначе ряда нет, вкладка одна, как раньше). claude.ai укорачивается по колонке (она не должна лежать под нативным WebView).
    Версия: 1.4 (24.11) — убрана верхняя полоса («Что отправлять» + статус): текст автоотправки остаётся прежним (сохранённый, по умолчанию «Дальше»), статус автоотправки — во всплывающей подсказке кнопки «Авто». Добавлена кнопка «i» (самая левая в нижнем ряду): экран с короткими пояснениями ко всем кнопкам вкладки.
@@ -458,6 +459,10 @@
     var b = window.LifeTrackerNative;
     return !!(b && typeof b.claudeSendTask === "function" && typeof b.claudeTaskResults === "function");
   }
+  function canSendImages(){
+    var b = window.LifeTrackerNative;
+    return !!(canSendTask() && typeof b.claudeSendTaskImages === "function");
+  }
   function tabIconHtml(n){ return ICON_CLAUDE + '<span class="claude-sub-num">' + n + '</span>'; }
 
   var taskPollTimer = null, taskPendingCount = 0;
@@ -476,11 +481,19 @@
   }
   function taskPollStart(){ if(!taskPollTimer) taskPollTimer = setInterval(taskPoll, 2000); }
   // true — оболочка приняла задачу (дальше всё в фоне; итог — onTaskResult)
-  function sendTask(tabId, taskId, text){
+  // images — необязательный массив [{name, mime, b64}]: картинки задачи, которые уйдут в чат вместе с архивом
+  function sendTask(tabId, taskId, text, images){
     var b = window.LifeTrackerNative;
     if(!canSendTask() || typeof taskId !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(taskId)) return false;
     var ok = false;
-    try{ ok = !!b.claudeSendTask(String(tabId || MAIN), taskId, String(text || "")); }catch(e){ ok = false; }
+    try{
+      if(images && images.length){
+        if(!canSendImages()) return false;
+        ok = !!b.claudeSendTaskImages(String(tabId || MAIN), taskId, String(text || ""), JSON.stringify(images));
+      }else{
+        ok = !!b.claudeSendTask(String(tabId || MAIN), taskId, String(text || ""));
+      }
+    }catch(e){ ok = false; }
     if(ok){ taskPendingCount++; taskPollStart(); }
     return ok;
   }
@@ -488,6 +501,6 @@
   setTimeout(function(){ if(canSendTask()){ taskPendingCount = 1; taskPoll(); } }, 3000);
 
   var api = { render: render, onSwitch: onSwitch, hide: hide,
-    tabIds: tabIds, canSendTask: canSendTask, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
+    tabIds: tabIds, canSendTask: canSendTask, canSendImages: canSendImages, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
   window.ClaudeTabMod = api;
 })();

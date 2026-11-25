@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.11 (25.11) — `claudeSendTaskImages(tabId, reqId, text, imagesJson)`: то же, что `claudeSendTask`, но с картинками задачи (JSON [{name, mime, b64}]) — они прикрепляются в чате рядом с архивом. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.10.
 // Версия: 30.10 (24.11) — `autoCommitGet` / `autoCommitSave` / `autoCommitSetToken`: настройки автокоммита fix.zip (AutoCommit); токен в страницу не отдаётся. Версию моста не меняет. Откат: NativeBridge.kt 30.9.
 // Версия: 30.9 (24.11) — `utabAdHide(id, on)` / `utabAdHideGet(id)`: скрытие пустых рекламных блоков на вкладке-сайте (UserTabs 8.9, AdHider). Версию моста не меняет: страница проверяет наличие метода.
 // Версия: 30.8 (24.11) — `claudeSendTask(tabId, reqId, text)` / `claudeTaskResults()`: сундучок у задачи отправляет её в новый диалог выбранной вкладки Claude вместе с архивом репозитория (ClaudeTabs.sendTask, ClaudeTask.kt). Версию моста не меняет — страница проверяет наличие методов. Откат: NativeBridge.kt 30.7.
@@ -969,6 +970,16 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeSendTask(tabId: String?, reqId: String?, text: String?): Boolean {
         if (!activity.pageTrusted) return false
         return try { activity.claudeTab.sendTask(tabId, reqId, text) } catch (e: Exception) { false }
+    }
+
+    /**
+     * То же, что [claudeSendTask], плюс картинки задачи: [imagesJson] — JSON-массив [{name, mime, b64}] (до 10 штук, до 24 МБ вместе);
+     * они прикрепляются в чате вместе с архивом репозитория.
+     */
+    @JavascriptInterface
+    fun claudeSendTaskImages(tabId: String?, reqId: String?, text: String?, imagesJson: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { activity.claudeTab.sendTask(tabId, reqId, text, imagesJson) } catch (e: Exception) { false }
     }
 
     /** Итоги фоновых отправок: JSON-массив [{id, ok, msg}], очередь очищается. */

@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.4 (25.11) — сундучок: картинки задачи («![[имя]]» в тексте) теперь уходят агенту вместе с текстом и архивом репозитория (`collectTaskImagesForClaude` читает файлы из images/ через MdEditor.getImageBlobUrl → `ClaudeTabMod.sendTask(tab, id, text, images)`). В тексте «![[имя]]» заменяется пометкой «[приложено изображение: имя]»; картинка, которой нет на этом устройстве, или не влезшая в лимит (10 шт., 16 МБ), не прикладывается, о чём говорит сообщение. Отметка «в работе» ставится сразу, при сбое сундучок возвращается как раньше. Откат: my.js 154.3.
    Версия: 154.3 (25.11)
    Версия: 154.2 (24.11) — задачи: при закрытии виртуальной клавиатуры задача больше не сдвигается — в `initTaskKeyboardLift` добавлено удержание строки (`startPin`/`stopPin`): при уходе фокуса из поля задачи или когда клавиатуру убрали при сохранённом фокусе запоминается положение верха строки в окне списка и каждый кадр ~1,4 с возвращается на то же место (сворачивание строки, снятие подложки и режима «поверх» больше не двигают список); снимается, если человек листает сам, пришла клавиатура снова, строка исчезла или `AppKeyboard.cancelScrollGuards` (кнопка «+»). Откат: my.js 154.1.
    Версия: 154.1 (24.11) — задачи, правка текста: «прыгающий пробел» — красная строка абзаца (1ch, `.ed-para`) появлялась/пропадала через 120 мс после Enter в середине текста или Backspace на стыке абзацев, и текст дёргался вбок. Теперь сверка абзацев (`bindTaskEditParas`) идёт сразу в событии ввода, а в момент набора слова клавиатурой — сразу после него; каретка на пустой строке, с которой начнётся абзац (касание, стрелки, после Enter), получает красную строку ещё до первой буквы (`taskEditPrepareParaAtCaret`, слушатель selectionchange); `.ed-para` на пустой строке больше не считается ошибкой (`taskEditParasOk`). Текст, каретка и выделение не меняются. Откат: my.js 154.0.
@@ -23813,16 +23814,69 @@
     ov.appendChild(box);
     document.body.appendChild(ov);
   }
-  // отправка: true — оболочка приняла задачу, сундучок переведён в «в работе» с номером вкладки
+  // картинки задачи для отправки в Claude: «![[имя]]» в тексте → файлы из images/ (base64). Promise<{images, missing, skipped}>:
+  // missing — файла нет на этом устройстве, skipped — не влезло в лимит (10 штук, 16 МБ вместе)
+  var CLAUDE_IMG_MAX_COUNT = 10, CLAUDE_IMG_MAX_TOTAL = 16 * 1024 * 1024;
+  function claudeTaskImageNames(rawText){
+    var names = [], seen = {}, re = /!\[\[([^\[\]\n]+)\]\]/g, m;
+    while((m = re.exec(String(rawText || "")))){
+      var n = m[1].trim(), k = n.toLowerCase();
+      if(n && !seen[k]){ seen[k] = 1; names.push(n); }
+    }
+    return names;
+  }
+  function claudeImageMime(name, blobType){
+    if(blobType && /^image\//.test(blobType)) return blobType;
+    var ext = (/\.([A-Za-z0-9]+)$/.exec(name) || [])[1];
+    ext = ext ? ext.toLowerCase() : "";
+    return ({ jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif", svg: "image/svg+xml" })[ext] || "image/png";
+  }
+  function claudeBlobToB64(blob){
+    return new Promise(function(resolve, reject){
+      var r = new FileReader();
+      r.onload = function(){ var u = String(r.result || ""), i = u.indexOf(","); resolve(i >= 0 ? u.slice(i + 1) : ""); };
+      r.onerror = function(){ reject(r.error || new Error("чтение картинки")); };
+      r.readAsDataURL(blob);
+    });
+  }
+  function collectTaskImagesForClaude(names){
+    var images = [], missing = [], skipped = [], total = 0;
+    var chain = Promise.resolve();
+    names.forEach(function(name){
+      chain = chain.then(function(){
+        if(typeof MdEditor === "undefined" || !MdEditor.getImageBlobUrl){ missing.push(name); return; }
+        return MdEditor.getImageBlobUrl(name).then(function(url){
+          if(!url){ missing.push(name); return; }
+          return fetch(url).then(function(r){ return r.blob(); }).then(function(blob){
+            if(images.length >= CLAUDE_IMG_MAX_COUNT || total + blob.size > CLAUDE_IMG_MAX_TOTAL){ skipped.push(name); return; }
+            return claudeBlobToB64(blob).then(function(b64){
+              if(!b64){ missing.push(name); return; }
+              total += blob.size;
+              images.push({ name: name, mime: claudeImageMime(name, blob.type), b64: b64 });
+            });
+          });
+        }).catch(function(){ missing.push(name); });
+      });
+    });
+    return chain.then(function(){ return { images: images, missing: missing, skipped: skipped }; });
+  }
+  // отправка: true — оболочка приняла задачу (или, если у задачи есть картинки, принято к отправке: они собираются в фоне),
+  // сундучок переведён в «в работе» с номером вкладки
   function sendTaskToClaude(id, tabId){
     if(isGroupTaskId(id) && isGroupTasksReadOnly()) return false;
     var task = getTaskById(id), mod = window.ClaudeTabMod;
     if(!task) return false;
-    var text = String(task.c.text || "").trim();
-    if(!text){ showShortToast("У задачи нет текста — отправлять нечего", 2600); return false; }
-    if(!mod || typeof mod.sendTask !== "function" || !mod.sendTask(tabId, id, text)){
-      showShortToast("Не удалось начать отправку в Claude", 2800);
-      return false;
+    var rawText = String(task.c.text || "").trim();
+    var imgNames = claudeTaskImageNames(rawText);
+    var textOnly = rawText.replace(/!\[\[([^\[\]\n]+)\]\]/g, "").trim();
+    if(!textOnly && !imgNames.length){ showShortToast("У задачи нет текста — отправлять нечего", 2600); return false; }
+    var withImages = imgNames.length > 0 && !!mod && typeof mod.canSendImages === "function" && mod.canSendImages();
+    if(!withImages){
+      if(!mod || typeof mod.sendTask !== "function" || !textOnly || !mod.sendTask(tabId, id, rawText)){
+        showShortToast("Не удалось начать отправку в Claude", 2800);
+        return false;
+      }
+      if(imgNames.length) showShortToast("Картинки задачи не отправятся: обновите приложение", 5000);
     }
     var old = claudeTaskMapLoad()[id];
     var prev = old && old.prev !== undefined ? old.prev : (task.c.inWork || false); // при повторной отправке помним состояние ДО первой
@@ -23831,6 +23885,22 @@
     saveTaskData(id, task.c);
     var n = mod.tabIds().indexOf(tabId) + 1;
     showShortToast("Отправляю в Claude" + (n ? " " + n : "") + "…", 2200);
+    if(withImages){
+      // картинки читаются из images/ в фоне; сбой на любом шаге возвращает сундучок через onClaudeTaskResult
+      collectTaskImagesForClaude(imgNames).then(function(res){
+        var attached = {};
+        res.images.forEach(function(im){ attached[im.name.toLowerCase()] = 1; });
+        var text = rawText.replace(/!\[\[([^\[\]\n]+)\]\]/g, function(m, nm){
+          nm = nm.trim();
+          return attached[nm.toLowerCase()] ? "[приложено изображение: " + nm + "]" : "[изображение " + nm + " не приложено]";
+        }).trim();
+        var bad = res.missing.concat(res.skipped);
+        if(bad.length) showShortToast("Не приложены картинки: " + bad.join(", ") + (res.skipped.length ? " (лимит 10 шт., 16 МБ)" : " (нет на этом устройстве)"), 6000);
+        if(!mod.sendTask(tabId, id, text, res.images)) onClaudeTaskResult(id, false, "не удалось начать отправку");
+      }).catch(function(e){
+        onClaudeTaskResult(id, false, "не удалось собрать картинки: " + (e && e.message ? e.message : e));
+      });
+    }
     return true;
   }
   // итог фоновой отправки (claudetab.js опрашивает оболочку): успех — короткое сообщение; сбой — возвращаем сундучок в прежнее состояние
@@ -23838,7 +23908,7 @@
     var rec = claudeTaskMapLoad()[taskId], mod = window.ClaudeTabMod;
     var n = (rec && mod && typeof mod.tabIds === "function") ? mod.tabIds().indexOf(rec.tab) + 1 : 0;
     var label = "Claude" + (n ? " " + n : "");
-    if(ok){ showShortToast("Задача отправлена в " + label, 2600); return; }
+    if(ok){ showShortToast("Задача отправлена в " + label + (msg ? " — " + msg : ""), msg ? 6000 : 2600); return; }
     showShortToast("Не отправлено в " + label + (msg ? ": " + msg : ""), 6000);
     if(!rec) return;
     var task = getTaskById(taskId);

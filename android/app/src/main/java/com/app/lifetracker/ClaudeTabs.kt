@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (25.11) — [sendTask] принимает картинки задачи ([imagesJson]): они сохраняются в кэш ([ClaudeTaskImages]) и уходят в чат вместе с архивом. Откат: ClaudeTabs.kt 1.2.
 // Версия: 1.2 (25.11) — `numberOf` (номер вкладки = номер агента) и запуск плашки агента в острове при отправке задачи (AgentRuns.start). Откат: ClaudeTabs.kt 1.1.
 // Версия: 1.1 (24.11) — [sendTask]: задача из сундучка уходит в НОВЫЙ диалог указанной вкладки, не меняя текущую вкладку (скачивание архива в фоне — ClaudeTask.kt, отправка — ClaudeTab.enqueueTask). Откат: ClaudeTabs.kt 1.0.
 // Версия: 1.0 (24.11) — несколько вкладок Claude: диспетчер экземпляров [ClaudeTab]. Вкладка «main» — прежняя (общий вход приложения), остальные создаются кнопкой «+» ряда внутри вкладки Claude (claudetab.js), каждая со своим входом (профиль WebView). Методы повторяют [ClaudeTab]: вызовы моста claude* и MainActivity идут к ТЕКУЩЕЙ вкладке ([select]).
@@ -77,7 +78,7 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
      * Сундучок у задачи: в фоне скачать свежий архив репозитория и отправить его вместе с текстом [text] в новый диалог вкладки [id]
      * (текущая вкладка не меняется). true — задача принята; итог (успех/причина сбоя) страница забирает через [ClaudeTaskResults] по [reqId].
      */
-    fun sendTask(id: String?, reqId: String?, text: String?): Boolean {
+    fun sendTask(id: String?, reqId: String?, text: String?, imagesJson: String? = null): Boolean {
         val rid = reqId ?: return false
         if (!REQ_RE.matches(rid)) return false
         val body = (text ?: "").trim().take(MAX_TASK_CHARS)
@@ -91,10 +92,22 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
         InAppIsland.ensureBackground(activity)
         Thread {
             try {
-                val zip = ClaudeTaskZip.download(activity.cacheDir, rid)
-                activity.runOnUiThread { tab.enqueueTask(rid, body, zip) }
+                val images = try {
+                    ClaudeTaskImages.save(activity.cacheDir, rid, imagesJson)
+                } catch (e: Exception) {
+                    ClaudeTaskResults.add(rid, false, "не удалось принять картинки задачи: " + (e.message ?: "ошибка"))
+                    return@Thread
+                }
+                val zip = try {
+                    ClaudeTaskZip.download(activity.cacheDir, rid)
+                } catch (e: Exception) {
+                    images.forEach { try { it.file.delete() } catch (x: Exception) { } }
+                    ClaudeTaskResults.add(rid, false, "не удалось скачать репозиторий: " + (e.message ?: "нет сети"))
+                    return@Thread
+                }
+                activity.runOnUiThread { tab.enqueueTask(rid, body, zip, images) }
             } catch (e: Exception) {
-                ClaudeTaskResults.add(rid, false, "не удалось скачать репозиторий: " + (e.message ?: "нет сети"))
+                ClaudeTaskResults.add(rid, false, "не удалось отправить: " + (e.message ?: "ошибка"))
             }
         }.start()
         return true

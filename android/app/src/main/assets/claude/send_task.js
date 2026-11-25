@@ -1,4 +1,5 @@
 /* send_task.js
+   Версия: 1.2 (25.11) — вместе с архивом в сообщение прикрепляются картинки задачи (cfg.images: [{name, type}], их байты приходят как файлы №1, №2 … — __ltTaskInit(size, idx) / __ltTaskPut(b64, idx); архив — файл №0). Все файлы кладутся в поле выбора файла одной пачкой; если картинку на странице не нашли, отправка идёт дальше, а в итоге (state "sent", msg) стоит предупреждение. Откат: send_task.js 1.1.
    Версия: 1.1 (24.11) — при сбое в сообщении добавляется «снимок» страницы (адрес, видимость, поле ввода, поля выбора файла, размер окна), чтобы было видно, на чём встало; имя файла ищется без учёта регистра; перед началом ждём, пока страница дозагрузится (readyState). Откат: send_task.js 1.0.
    Версия: 1.0 (24.11)
    Скрипт вкладки Claude (ClaudeTab.kt вставляет его в страницу claude.ai/new, когда сундучок у задачи отправляет её в Claude).
@@ -9,14 +10,18 @@
 (function(){
   "use strict";
   if(window.__ltTaskPut) return;
-  var buf = null, off = 0;
+  var bufs = {}, offs = {};
   var st = { reqId: "", state: "idle", msg: "" };
 
-  window.__ltTaskInit = function(size){ buf = new Uint8Array(size); off = 0; };
-  window.__ltTaskPut = function(b64){
-    var bin = atob(b64);
+  // файл №idx: 0 — архив репозитория, 1… — картинки задачи
+  window.__ltTaskInit = function(size, idx){ idx = idx | 0; bufs[idx] = new Uint8Array(size); offs[idx] = 0; };
+  window.__ltTaskPut = function(b64, idx){
+    idx = idx | 0;
+    var buf = bufs[idx], off = offs[idx], bin = atob(b64);
     for(var i = 0; i < bin.length; i++) buf[off++] = bin.charCodeAt(i);
+    offs[idx] = off;
   };
+  function fileReady(idx){ return !!bufs[idx] && offs[idx] === bufs[idx].length; }
   window.__ltTask = { status: function(){ return { reqId: st.reqId, state: st.state, msg: st.msg }; } };
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
@@ -46,6 +51,19 @@
   function hasAttachment(base){
     try{ return String(document.body.innerText || "").toLowerCase().indexOf(String(base).toLowerCase()) >= 0; }catch(e){ return false; }
   }
+  // картинка видна в поле ввода: имя в тексте страницы или в подписях (alt / aria-label / title) миниатюры
+  function hasImageNamed(name){
+    var low = String(name).toLowerCase();
+    if(hasAttachment(name)) return true;
+    try{
+      var els = composerRoot().querySelectorAll("[alt],[aria-label],[title]");
+      for(var i = 0; i < els.length; i++){
+        var t = ((els[i].getAttribute("alt") || "") + " " + (els[i].getAttribute("aria-label") || "") + " " + (els[i].getAttribute("title") || "")).toLowerCase();
+        if(t.indexOf(low) >= 0) return true;
+      }
+    }catch(e){}
+    return false;
+  }
   // снимок страницы для сообщения об ошибке
   function diag(){
     try{
@@ -68,9 +86,9 @@
     }
     return list.length ? list[0] : null;
   }
-  async function attach(file, base){
+  async function attach(files, base){
     var dt = new DataTransfer();
-    dt.items.add(file);
+    files.forEach(function(f){ dt.items.add(f); });
     // 1) скрытое поле выбора файла
     var inp = fileInput();
     if(inp){
@@ -146,15 +164,29 @@
   async function run(cfg){
     st = { reqId: cfg.reqId, state: "working", msg: "Жду страницу" };
     try{
-      if(!buf || off !== buf.length) throw new Error("архив не дошёл до страницы");
+      if(!fileReady(0)) throw new Error("архив не дошёл до страницы");
+      var imgs = Array.isArray(cfg.images) ? cfg.images : [];
+      for(var ii = 0; ii < imgs.length; ii++){
+        if(!fileReady(ii + 1)) throw new Error("картинка «" + imgs[ii].name + "» не дошла до страницы");
+      }
       await waitFor(function(){ return document.readyState === "complete"; }, 20000, 300);
       var c = await waitFor(function(){ return loginPage() ? "login" : composer(); }, 45000);
       if(c === "login" || loginPage()) throw new Error("во вкладке нет входа в Claude — войдите и повторите");
       if(!c) throw new Error("не нашёл поле ввода на странице claude.ai");
       var base = String(cfg.name || "archive.zip").replace(/\.zip$/i, "");
-      st.msg = "Прикрепляю архив";
-      var file = new File([buf], cfg.name || "archive.zip", { type: "application/zip", lastModified: Date.now() });
-      if(!await attach(file, base)) throw new Error("не удалось прикрепить архив");
+      st.msg = imgs.length ? "Прикрепляю архив и картинки" : "Прикрепляю архив";
+      var files = [new File([bufs[0]], cfg.name || "archive.zip", { type: "application/zip", lastModified: Date.now() })];
+      imgs.forEach(function(im, k){
+        files.push(new File([bufs[k + 1]], im.name, { type: im.type || "image/png", lastModified: Date.now() }));
+      });
+      if(!await attach(files, base)) throw new Error("не удалось прикрепить архив");
+      var warn = "";
+      if(imgs.length){
+        // картинки пришли той же пачкой, что и архив: ждём их миниатюры; не дождались — шлём дальше, но говорим об этом
+        await waitFor(function(){ return imgs.every(function(im){ return hasImageNamed(im.name); }); }, 8000, 400);
+        var lost = imgs.filter(function(im){ return !hasImageNamed(im.name); }).map(function(im){ return im.name; });
+        if(lost.length) warn = "не удалось подтвердить прикрепление картинок: " + lost.join(", ");
+      }
       st.msg = "Жду загрузки архива";
       if(!await waitUploaded(120000)) throw new Error("архив не загрузился за 2 минуты");
       st.msg = "Вставляю текст задачи";
@@ -174,7 +206,7 @@
         return (location.pathname || "").indexOf("/chat/") === 0 || (!composerText() && !hasAttachment(base));
       }, 30000, 500);
       if(!sent) throw new Error("сообщение не отправилось");
-      st.state = "sent"; st.msg = "";
+      st.state = "sent"; st.msg = warn;
     }catch(e){
       st.state = "error"; st.msg = String(e && e.message || e) + " [" + diag() + "]";
     }

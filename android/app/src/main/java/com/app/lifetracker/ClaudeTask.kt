@@ -1,7 +1,9 @@
 package com.app.lifetracker
+// Версия: 1.2 (25.11) — [ClaudeTaskImages]: картинки задачи (JSON от страницы: имя, тип, base64) складываются в кэш и уходят в чат вместе с архивом. Откат: ClaudeTask.kt 1.1.
 // Версия: 1.1 (25.11) — итог отправки задачи передаётся плашке агента в острове (AgentRuns.taskResult). Откат: ClaudeTask.kt 1.0.
 // Версия: 1.0 (24.11) — отправка задачи в Claude (сундучок у задачи, my.js/claudetab.js): скачивание свежего архива репозитория в фоне ([ClaudeTaskZip]) и очередь итогов для страницы ([ClaudeTaskResults]). Саму отправку в новый диалог ведёт [ClaudeTab] (assets/claude/send_task.js).
 
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -68,6 +70,63 @@ object ClaudeTaskZip {
         } finally {
             conn?.disconnect()
         }
+    }
+}
+
+/** Картинка задачи, которая прикрепляется в чате рядом с архивом. */
+class ClaudeTaskImage(val name: String, val mime: String, val file: File)
+
+/** Картинки задачи: страница присылает JSON-массив [{name, mime, b64}], здесь они сохраняются файлами в кэше приложения. */
+object ClaudeTaskImages {
+    private const val MAX_COUNT = 10
+    private const val MAX_ONE_BYTES = 12L * 1024 * 1024
+    private const val MAX_TOTAL_BYTES = 24L * 1024 * 1024
+
+    /** Имя файла для чата: без путей и управляющих знаков, с расширением (по типу, если своего нет). */
+    private fun cleanName(raw: String, mime: String, idx: Int): String {
+        var n = raw.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().take(120)
+        if (n.isEmpty()) n = "image" + (idx + 1)
+        if (!Regex("\\.[A-Za-z0-9]{2,5}$").containsMatchIn(n)) {
+            n += when (mime) {
+                "image/jpeg" -> ".jpg"
+                "image/webp" -> ".webp"
+                "image/gif" -> ".gif"
+                "image/svg+xml" -> ".svg"
+                else -> ".png"
+            }
+        }
+        return n
+    }
+
+    /** Пустой/некорректный список — пустой результат; ошибка записи или превышение размера — IOException. Блокирует поток. */
+    @Throws(IOException::class)
+    fun save(cache: File, reqId: String, json: String?): List<ClaudeTaskImage> {
+        if (json.isNullOrBlank()) return emptyList()
+        val arr = try { JSONArray(json) } catch (e: Exception) { throw IOException("список картинок повреждён") }
+        val d = File(cache, "claude_task").also { it.mkdirs() }
+        val out = ArrayList<ClaudeTaskImage>()
+        var total = 0L
+        try {
+            for (i in 0 until minOf(arr.length(), MAX_COUNT)) {
+                val o = arr.optJSONObject(i) ?: continue
+                val b64 = o.optString("b64", "")
+                if (b64.isEmpty()) continue
+                val bytes = try { Base64.decode(b64, Base64.DEFAULT) } catch (e: IllegalArgumentException) { throw IOException("картинка повреждена") }
+                if (bytes.isEmpty()) continue
+                if (bytes.size > MAX_ONE_BYTES) throw IOException("картинка слишком большая")
+                total += bytes.size
+                if (total > MAX_TOTAL_BYTES) throw IOException("картинки слишком большие")
+                var mime = o.optString("mime", "").lowercase()
+                if (!mime.startsWith("image/")) mime = "image/png"
+                val f = File(d, reqId + "_i" + i + ".bin")
+                FileOutputStream(f).use { it.write(bytes) }
+                out.add(ClaudeTaskImage(cleanName(o.optString("name", ""), mime, i), mime, f))
+            }
+        } catch (e: IOException) {
+            out.forEach { it.file.delete() }
+            throw e
+        }
+        return out
     }
 }
 
