@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.8 (25.11)
 // Версия: 18.7 (22.11) — `WebUpdater.appContext` задаётся при создании (общий движок скачивания, ТЗ TZ_downloads.md, этап 5). Откат: MainActivity.kt 18.6.
 // Версия: 18.6 (22.11) — вкладка «Сохранение загрузок»: системное окно выбора папки для типа файла (`downloadFolderLauncher`, `pickDownloadFolder`; ТЗ TZ_downloads.md, этап 4). Откат: MainActivity.kt 18.5.
 // Версия: 18.5 (21.11) — главный WebView: `setDownloadListener` → `DownloadLauncher` (скачивание http/https самим приложением, ТЗ TZ_downloads.md, этап 1). Откат: MainActivity.kt 18.4.
@@ -555,7 +556,7 @@ class MainActivity : ComponentActivity() {
         return Pair(id, Math.max(0L, intent.getLongExtra(EXTRA_EVENT_AT, 0L)))
     }
 
-    /** (id, режим) из intent ACTION_OPEN_CARD или null; id проверяется, режим — только "note", "create" или "habitmap" (карта дней привычки). */
+    /** (id, режим) из intent ACTION_OPEN_CARD или null; id проверяется, режим — только "note", "create", "habitmap" (карта дней привычки) или "alarmedit" (форма правки будильника). */
     private fun cardLaunchOf(intent: Intent?): Pair<String, String>? {
         if (intent?.action != ACTION_OPEN_CARD) return null
         val id = intent.getStringExtra(EXTRA_CARD_ID) ?: return null
@@ -563,6 +564,7 @@ class MainActivity : ComponentActivity() {
         val mode = when (intent.getStringExtra(EXTRA_CARD_MODE)) {
             "create" -> "create"
             "habitmap" -> "habitmap"
+            "alarmedit" -> "alarmedit"
             else -> "note"
         }
         return Pair(id, mode)

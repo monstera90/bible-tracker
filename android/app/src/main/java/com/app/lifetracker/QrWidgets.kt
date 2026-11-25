@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 17.0 (25.11)
 // Версия: 16.8 (23.11) — порядок карточек изменился при прежнем числе (верх тот же, поменялись соседи), а адаптер не пересоздан: закэшированные системой виды соседних позиций остались от прежнего порядка — в начале стопки одна карточка стояла дважды («Мой дневник», «Мой дневник», «Напоминалка»…), после круга всё было верно. Теперь смена порядка при том же числе тоже пересоздаёт адаптер ([update]); пока стопка заморожена, порядок для сравнения — замороженный, ложных пересозданий нет. Откат: QrWidgets.kt 16.7.
 // Версия: 16.7 (21.11) — число карточек в стопке изменилось (ушла/пришла карточка «Заряд телефона…», карточки заряда и т. п.), а адаптер не пересоздан (движение отложено или верх не менялся): позиция стопки p → карточка (−p) % n сдвигалась, закэшированные системой виды соседних позиций показывали прежние карточки — одна и та же карточка стояла дважды. Теперь смена числа карточек всегда пересоздаёт адаптер ([update]). Откат: QrWidgets.kt 16.6.
 // Версия: 16.6 (19.11) — галочка «Показывать карточку о том, что заряд телефона достиг 80%» (`chargeDone`, цвет `chargeColor`): служебная карточка [QrCharge.KEY] («Заряд телефона … % — можно отключать от зарядки») стоит наверху, пока телефон на зарядке и заряд не ниже [QrPriority.CHARGE_DONE_PERCENT]: под идущим таймером и карточками низкого заряда, над «Как тренировка?»; перерисовку ведёт [onChargeChanged] (приёмник [QrCharge.register] и пятиминутный будильник заряда). Откат: QrWidgets.kt 16.5.
@@ -1213,12 +1214,21 @@ private const val K_LASTOPEN = "lastopen"   // id виджета констру�
         }
     }
 
+    /** Нажатие на карточку-будильник в виджете (extra `alarm`): true — карточка с настройками будильника найдена и он сейчас НЕ заведён (окно ждёт второго нажатия: два подряд открывают форму правки). */
+    fun alarmUnset(ctx: Context, cardKey: String): Boolean {
+        if (!KEY_RE.matches(cardKey)) return false
+        val app = ctx.applicationContext
+        val card = configs(app).asSequence().flatMap { it.cards.asSequence() }
+            .firstOrNull { it.key == cardKey && it.alarmId.isNotEmpty() && it.alarmSpec != null } ?: return false
+        return !CardAlarms.isSet(app, card.alarmId)
+    }
+
     /**
      * Нажатие на карточку-будильник в виджете (ScanActivity, extra `alarm`): без окна и страницы заводит будильник CardAlarms; заведённый — одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем ([CardAlarms.tapDecision]).
      * Лицо с надписью «Заведён» меняется само (`CardAlarms` → [onAlarmsChanged]). Запись для журнала событий встаёт в очередь (`widgetAlarmTake`/`widgetAlarmAck`, мост ≥35).
      * false — карточки нет или настроек будильника у неё нет (старая отправка от страницы): окно откроет прежний путь через страницу.
      */
-    fun toggleAlarm(ctx: Context, cardKey: String): Boolean {
+    fun toggleAlarm(ctx: Context, cardKey: String, armOnly: Boolean = false): Boolean {
         if (!KEY_RE.matches(cardKey)) return false
         val app = ctx.applicationContext
         val card = configs(app).asSequence().flatMap { it.cards.asSequence() }
@@ -1226,8 +1236,10 @@ private const val K_LASTOPEN = "lastopen"   // id виджета констру�
         val spec = card.alarmSpec ?: return false
         holdAlarmRow(app, cardKey)
         val now = System.currentTimeMillis()
-        // одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем; завести можно и одним, и двумя (то же решение, что в приложении)
-        val decision = CardAlarms.tapDecision(app, card.alarmId)
+        // armOnly: окно ScanActivity уже дождалось, что второго нажатия на не заведённый будильник нет, — просто завести (если его за это время не завели иначе — ничего)
+        if (armOnly && CardAlarms.isSet(app, card.alarmId)) return true
+        // одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем
+        val decision = if (armOnly) CardAlarms.TAP_ARM else CardAlarms.tapDecision(app, card.alarmId)
         if (decision == CardAlarms.TAP_IGNORE) {
             // второе нажатие сразу после «завести» — ничего
         } else if (decision == CardAlarms.TAP_SILENCE) {

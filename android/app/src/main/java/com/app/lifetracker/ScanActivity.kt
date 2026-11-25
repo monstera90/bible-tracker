@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 14.0 (25.11)
 // Версия: 13.11 (21.11) — двойное нажатие на заметку в карточке «Заметки» снимает её с виджета (`isNoteTap`/`beginNoteWait`/`noteDouble` → QrWidgets.removeNote), одно нажатие открывает заметку после ожидания HABIT_DOUBLE_MS (`noteSingle`). Откат: ScanActivity.kt 13.10.
 // Версия: 13.10 (20.11) — `booktap` теперь запоминает открытую книгу/заметку (extra `wid`, `slot`, `bkey` → QrWidgets.groupOpened). Откат: ScanActivity.kt 13.9.
 // Версия: 13.9 (17.11) — `booktap` (id книги): нажатие на карточку «Книги» в виджете открывает приложение на этой книге (MainActivity.ACTION_OPEN_BOOK), окно сканера не нужно. Откат: ScanActivity.kt 13.7.
@@ -124,6 +125,7 @@ class ScanActivity : ComponentActivity() {
      */
     private fun handleAlarm(i: Intent?): Boolean {
         if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("alarm")) return false
+        if (alarmWaitKeyOf(i) != null) return false // не заведён: окно ждёт второго нажатия (beginAlarmWait)
         if (QrWidgets.tokenOk(this, i.getStringExtra("tok"))) {
             val key = i.getStringExtra("alarm") ?: ""
             try {
@@ -206,6 +208,70 @@ class ScanActivity : ComponentActivity() {
             }
         }
         return true
+    }
+
+    /** Ключ карточки-будильника, если это нажатие на неё в виджете (extra `alarm`, тот же `tok`) и будильник сейчас не заведён; иначе null. */
+    private fun alarmWaitKeyOf(i: Intent?): String? {
+        if (i == null || i.action != ACTION_SCAN_CODE || !i.hasExtra("alarm")) return null
+        if (!QrWidgets.tokenOk(this, i.getStringExtra("tok"))) return null
+        val key = i.getStringExtra("alarm") ?: return null
+        return if (QrWidgets.alarmUnset(applicationContext, key)) key else null
+    }
+
+    private var alarmWaiting = false
+    private var alarmKey = ""
+    private val alarmSingleRun = Runnable { alarmSingle() }
+
+    /** Первое нажатие на не заведённый будильник: ждём второго (его принимает [dispatchTouchEvent] или новый intent виджета). */
+    private fun beginAlarmWait(key: String) {
+        if (alarmWaiting && alarmKey == key) {
+            alarmDouble()
+            return
+        }
+        alarmKey = key
+        alarmWaiting = true
+        habitHandler.removeCallbacks(alarmSingleRun)
+        habitHandler.postDelayed(alarmSingleRun, HABIT_DOUBLE_MS)
+    }
+
+    /** Второго нажатия не было: будильник заводится (как раньше по одному нажатию). */
+    private fun alarmSingle() {
+        if (!alarmWaiting) return
+        alarmWaiting = false
+        val key = alarmKey
+        try {
+            if (QrWidgets.toggleAlarm(applicationContext, key, true)) QrWidgets.onCardFired(applicationContext, key) // нажатие = действие сработало («после срабатывания»)
+        } catch (e: Exception) {
+            // не получилось — карточка останется как была, можно нажать ещё раз
+        }
+        closeAfterAlarmWait()
+    }
+
+    /** Двойное нажатие: будильник не заводится, приложение открывается на форме правки этой карточки (окно запущено нами, фоновых запретов нет). */
+    private fun alarmDouble() {
+        if (!alarmWaiting) return
+        alarmWaiting = false
+        habitHandler.removeCallbacks(alarmSingleRun)
+        try {
+            val open = Intent(this, MainActivity::class.java).apply {
+                action = MainActivity.ACTION_OPEN_CARD
+                putExtra(MainActivity.EXTRA_CARD_ID, alarmKey)
+                putExtra(MainActivity.EXTRA_CARD_MODE, "alarmedit")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(open)
+        } catch (e: Exception) {
+            // приложение не запустилось — просто закрываем окно
+        }
+        closeAfterAlarmWait()
+    }
+
+    /** Окна со страницей нет (ждали нажатия без неё) — закрываемся; окно сканера, если оно было открыто, остаётся как было. */
+    private fun closeAfterAlarmWait() {
+        if (!::webView.isInitialized) {
+            finishAndRemoveTask()
+            overridePendingTransition(0, 0)
+        }
     }
 
     /** Ключ карточки-привычки, если это нажатие на неё в виджете (extra `habit`, тот же `tok`); иначе null. */
@@ -397,6 +463,10 @@ class ScanActivity : ComponentActivity() {
             if (ev.actionMasked == MotionEvent.ACTION_DOWN) habitDouble()
             return true
         }
+        if (alarmWaiting) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) alarmDouble()
+            return true
+        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -488,6 +558,13 @@ class ScanActivity : ComponentActivity() {
             return
         }
 
+        // Нажатие на не заведённый будильник в виджете: страницу не строим, ждём второго нажатия (одно заводит, два подряд открывают форму правки)
+        val alarmKeyNow = alarmWaitKeyOf(intent)
+        if (alarmKeyNow != null) {
+            beginAlarmWait(alarmKeyNow)
+            return
+        }
+
         initWeb()
         readCode(intent)
         webView.loadUrl(SCAN_URL)
@@ -548,12 +625,20 @@ class ScanActivity : ComponentActivity() {
             beginHabitWait(habit)
             return
         }
+        // Не заведённый будильник в виджете: второе нажатие, пока окно ждёт, — двойное; иначе новое ожидание
+        val alarmKeyNow = alarmWaitKeyOf(intent)
+        if (alarmKeyNow != null) {
+            beginAlarmWait(alarmKeyNow)
+            return
+        }
         // Ярлык нажат повторно, пока окно открыто: перезапускаем сканер (или показываем код карточки из виджета).
         habitWaiting = false
         taskWaiting = false
         noteWaiting = false
+        alarmWaiting = false
         habitHandler.removeCallbacks(habitSingleRun)
         habitHandler.removeCallbacks(noteSingleRun)
+        habitHandler.removeCallbacks(alarmSingleRun)
         initWeb()
         readCode(intent)
         webView.loadUrl(SCAN_URL)

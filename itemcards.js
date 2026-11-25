@@ -1,5 +1,6 @@
 /* ===========================================================================
    itemcards.js
+   Версия: 51.0 (25.11)
    Версия: 50.0 (21.11) — привычка в приложении как в виджете: одно нажатие (после ожидания 400 мс) открывает карту дней, два подряд отмечают сегодня без слоя (`habitTap`); путь `alarmmark:` использует то же решение по нажатию на будильник. Откат: itemcards.js 49.9.
    Версия: 49.9 (21.11) — карточка «Будильник» в приложении ведёт себя как в виджете: не заведён — заводится (одним или двумя нажатиями); заведён — одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем (`alarmTapDecision`, `silenceAlarmForCard`; мост ≥ 41: `cardAlarmTap`, `silenceCardAlarm`). Откат: itemcards.js 49.8.
    Версия: 49.8 (19.11) — только комментарии: «режим чтения» в пояснениях к кнопкам справа от «домика» заменён на «полноэкранный режим» (режима чтения в приложении нет; класс окна `reading-mode-active` — историческое имя, его ставит только полноэкранный режим). Код не менялся.
@@ -1565,9 +1566,29 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
       openHabitMap(c.id);
     }, HABIT_DOUBLE_MS);
   }
+  // будильник, который не заведён: одно нажатие (после ожидания 400 мс) заводит его, два подряд открывают форму правки (заведённый — как раньше: одно заглушает, два выключают)
+  var alarmTapWait = { id: "", timer: 0 };
+  function alarmUnsetTap(c){
+    if(alarmTapWait.timer && alarmTapWait.id === c.id){ // второе нажатие: форма правки, будильник не заводится
+      clearTimeout(alarmTapWait.timer); alarmTapWait.timer = 0; alarmTapWait.id = "";
+      openForm("alarm", c);
+      return;
+    }
+    if(alarmTapWait.timer) clearTimeout(alarmTapWait.timer);
+    alarmTapWait.id = c.id;
+    alarmTapWait.timer = setTimeout(function(){ // второго нажатия не было: завести
+      alarmTapWait.timer = 0; alarmTapWait.id = "";
+      var cur = findCard(c.id);
+      if(!cur || cur.type !== "alarm") return;
+      notifyWidgetFired(cur);
+      startAlarmForCard(cur);
+    }, HABIT_DOUBLE_MS);
+  }
   function onCardTap(c){
     if(c.type === "habit"){ habitTap(c); return; } // привычка — как в виджете: одно нажатие открывает карту дней (отметка — нажатием на день), два подряд отмечают сегодня; скан кода по-прежнему отмечает сегодня
     if(c.type === "alarm" && alarmSupported()){ // будильник — как в виджете: не заведён — заводим (одним или двумя нажатиями); заведён — одно нажатие заглушает звонок (повторы остаются), два подряд выключают совсем; лицо меняет надпись «Не заведён» ↔ «Заведён»
+      refreshAlarms();
+      if(!alarmInfo(runId(c))){ alarmUnsetTap(c); return; } // не заведён: одно нажатие заводит, два подряд открывают форму правки
       var ad = alarmTapDecision(runId(c));
       if(ad === 0){ notifyWidgetFired(c); startAlarmForCard(c); }
       else if(ad === 1) silenceAlarmForCard(c);
@@ -3450,6 +3471,12 @@ var PENDING_CLIMB_KEY = "pendingScanClimb_v1"; // очередь «окно яр
   // вход из оболочки (ScanActivity → MainActivity): mode "note" — «Мой дневник» (id карточки) либо заметка по QR (id заметки),
   // "create" — создать карточку с этим id (код уже напечатан)
   function openCardFromNative(id, mode){
+    if(mode === "alarmedit"){ // двойное нажатие на не заведённый будильник в виджете: форма правки этого будильника
+      reloadCards();
+      var ec = findCard(id);
+      if(ec && ec.type === "alarm") openForm("alarm", ec); else renderGrid();
+      return;
+    }
     if(mode === "habitmap"){ // одно нажатие на карточку-привычку в виджете: карта дней
       reloadCards();
       var hc = findCard(id);

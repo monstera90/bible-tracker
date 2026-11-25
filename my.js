@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.3 (25.11)
    Версия: 154.2 (24.11) — задачи: при закрытии виртуальной клавиатуры задача больше не сдвигается — в `initTaskKeyboardLift` добавлено удержание строки (`startPin`/`stopPin`): при уходе фокуса из поля задачи или когда клавиатуру убрали при сохранённом фокусе запоминается положение верха строки в окне списка и каждый кадр ~1,4 с возвращается на то же место (сворачивание строки, снятие подложки и режима «поверх» больше не двигают список); снимается, если человек листает сам, пришла клавиатура снова, строка исчезла или `AppKeyboard.cancelScrollGuards` (кнопка «+»). Откат: my.js 154.1.
    Версия: 154.1 (24.11) — задачи, правка текста: «прыгающий пробел» — красная строка абзаца (1ch, `.ed-para`) появлялась/пропадала через 120 мс после Enter в середине текста или Backspace на стыке абзацев, и текст дёргался вбок. Теперь сверка абзацев (`bindTaskEditParas`) идёт сразу в событии ввода, а в момент набора слова клавиатурой — сразу после него; каретка на пустой строке, с которой начнётся абзац (касание, стрелки, после Enter), получает красную строку ещё до первой буквы (`taskEditPrepareParaAtCaret`, слушатель selectionchange); `.ed-para` на пустой строке больше не считается ошибкой (`taskEditParasOk`). Текст, каретка и выделение не меняются. Откат: my.js 154.0.
    Версия: 154.0 (24.11) — структурная правка: (1) вкладки «Claude» (set2s_10) и «Задачи в работе» (сундучок) по умолчанию скрыты у всех: включаются галочкой на вкладке «Скрытие вкладок» (`DEFAULT_HIDDEN_TAB_IDS`; включение хранится как «+id» в `__hiddenTabs`); (2) нажатие на сундучок у задачи открывает плашку с номерами вкладок Claude (`openClaudeTaskPicker`): выбор отмечает задачу «в работе», значок становится цифрой вкладки в закрашенном круге (`taskWorktasksBtnHtml`), а оболочка в фоне скачивает свежий архив репозитория и отправляет его с текстом задачи в новый диалог выбранной вкладки (`sendTaskToClaude` → `ClaudeTabMod.sendTask`; итог — `onClaudeTaskResult`, при сбое сундучок возвращается в прежнее состояние); какая вкладка выбрана — только на этом устройстве (localStorage `claudeTaskTabs_v1`); долгое нажатие по-прежнему снимает отметку. Цикл «в работе → нужно проверить» по нажатию убран (`cycleTaskWorkState` остался в коде). Откат: my.js 153.12.
@@ -11742,13 +11743,13 @@
     // «Комбинированный» из окна ярлыка: вкладку не переключаем — сначала выполняется очередь (задача, «открыть»)
     if(String(id) === "combo"){ ensureItemCards().openCardFromNative("combo", "note"); return; }
     openSettingsTabDirect("set2s_9");
-    ensureItemCards().openCardFromNative(String(id), mode === "create" ? "create" : (mode === "habitmap" ? "habitmap" : "note"));
+    ensureItemCards().openCardFromNative(String(id), (mode === "create" || mode === "habitmap" || mode === "alarmedit") ? mode : "note");
   }
   window.__ltOpenCard = openCardFromNative;
   function handleCardLaunchParam(){
     var m = /[?&]card=([A-Za-z0-9]{4,32})(?:&|$)/.exec(location.search || "");
     if(!m) return;
-    var mode = /[?&]cardmode=create(?:&|$)/.test(location.search) ? "create" : (/[?&]cardmode=habitmap(?:&|$)/.test(location.search) ? "habitmap" : "note");
+    var mm = /[?&]cardmode=(create|habitmap|alarmedit)(?:&|$)/.exec(location.search || ""), mode = mm ? mm[1] : "note";
     try{ history.replaceState(null, "", location.pathname + location.hash); }catch(e){}
     setTimeout(function(){ openCardFromNative(m[1], mode); }, 0);
   }
