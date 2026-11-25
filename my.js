@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.2 (24.11) — задачи: при закрытии виртуальной клавиатуры задача больше не сдвигается — в `initTaskKeyboardLift` добавлено удержание строки (`startPin`/`stopPin`): при уходе фокуса из поля задачи или когда клавиатуру убрали при сохранённом фокусе запоминается положение верха строки в окне списка и каждый кадр ~1,4 с возвращается на то же место (сворачивание строки, снятие подложки и режима «поверх» больше не двигают список); снимается, если человек листает сам, пришла клавиатура снова, строка исчезла или `AppKeyboard.cancelScrollGuards` (кнопка «+»). Откат: my.js 154.1.
    Версия: 154.1 (24.11) — задачи, правка текста: «прыгающий пробел» — красная строка абзаца (1ch, `.ed-para`) появлялась/пропадала через 120 мс после Enter в середине текста или Backspace на стыке абзацев, и текст дёргался вбок. Теперь сверка абзацев (`bindTaskEditParas`) идёт сразу в событии ввода, а в момент набора слова клавиатурой — сразу после него; каретка на пустой строке, с которой начнётся абзац (касание, стрелки, после Enter), получает красную строку ещё до первой буквы (`taskEditPrepareParaAtCaret`, слушатель selectionchange); `.ed-para` на пустой строке больше не считается ошибкой (`taskEditParasOk`). Текст, каретка и выделение не меняются. Откат: my.js 154.0.
    Версия: 154.0 (24.11) — структурная правка: (1) вкладки «Claude» (set2s_10) и «Задачи в работе» (сундучок) по умолчанию скрыты у всех: включаются галочкой на вкладке «Скрытие вкладок» (`DEFAULT_HIDDEN_TAB_IDS`; включение хранится как «+id» в `__hiddenTabs`); (2) нажатие на сундучок у задачи открывает плашку с номерами вкладок Claude (`openClaudeTaskPicker`): выбор отмечает задачу «в работе», значок становится цифрой вкладки в закрашенном круге (`taskWorktasksBtnHtml`), а оболочка в фоне скачивает свежий архив репозитория и отправляет его с текстом задачи в новый диалог выбранной вкладки (`sendTaskToClaude` → `ClaudeTabMod.sendTask`; итог — `onClaudeTaskResult`, при сбое сундучок возвращается в прежнее состояние); какая вкладка выбрана — только на этом устройстве (localStorage `claudeTaskTabs_v1`); долгое нажатие по-прежнему снимает отметку. Цикл «в работе → нужно проверить» по нажатию убран (`cycleTaskWorkState` остался в коде). Откат: my.js 153.12.
    Версия: 153.12 (23.11) — карточки задач (вкладки задач): поворот экрана больше не сбивает место в списке. Вертикальный и горизонтальный режимы (1/2/3/4 колонки) показывают одни и те же карточки; если в режиме ничего не листали после прошлого выхода из него — список возвращается ровно в то положение, в каком был оставлен; если листали в другом режиме — встаёт у той же карточки (якорь: первая видимая карточка + смещение, «самый верх»/«самый низ» — отдельно): `taskOrient*`. Откат: my.js 153.11.
@@ -27472,8 +27473,10 @@
     var liftSuspendedUntil = 0; // до этого момента подъём не работает (нажатие кнопки другой строки, см. taskKeepListStill)
     var releaseHoldUntil = 0;   // до этого момента подложку под клавиатуру не снимаем (идёт сворачивание карточки, см. blur в renderTaskRowEdit)
     var snapUntil = 0;      // до этого момента строку нужно не только поднять, но и опустить вплотную к клавиатуре
+    var stopPinFn = null;   // снять удержание строки при закрытии клавиатуры (назначается ниже, когда оно определено)
     function cancelScrollGuards(){
       if(window.Debug && window.Debug.cancelTaskListScrollGuards) window.Debug.cancelTaskListScrollGuards();
+      if(stopPinFn) stopPinFn(); // прокрутку дальше меняет само приложение (новая строка «+») — удержание старой строки не мешает
     }
     window.AppKeyboard = {
       getTop: function(){
@@ -27648,7 +27651,56 @@
     }
     liftNow = function(){ if(activeEditable) applyLift(); };
 
+    // ТЗ 24.11: закрытие клавиатуры не должно сдвигать задачу. В эти ~секунду подряд происходят сразу несколько вещей (клавиатура
+    // уходит, строка сворачивается, снимается подложка и режим «поверх»), и любая из них могла подвинуть список на несколько
+    // пикселей. Поэтому в момент закрытия запоминаем, где на экране стоит верх строки, и каждый кадр возвращаем её на это место,
+    // пока всё не уляжется (или человек сам не взялся за прокрутку, или клавиатура не пришла снова).
+    var PIN_MS = 1400;
+    var pin = null;
+    function stopPin(){
+      if(!pin) return;
+      try{ cancelAnimationFrame(pin.raf); }catch(e){}
+      try{
+        pin.box.removeEventListener("touchmove", pin.mark, true);
+        pin.box.removeEventListener("wheel", pin.mark, true);
+      }catch(e){}
+      pin = null;
+    }
+    stopPinFn = stopPin;
+    function pinFindRow(){
+      if(document.body.contains(pin.row)) return pin.row;
+      var r = pin.id ? pin.box.querySelector('.task-row[data-id="' + pin.id + '"]') : null;
+      if(r) pin.row = r;
+      return r;
+    }
+    function pinTick(){
+      if(!pin) return;
+      if(pin.moved || Date.now() > pin.until || !document.body.contains(pin.box)){ stopPin(); return; }
+      var row = pinFindRow();
+      if(!row){ stopPin(); return; } // строку убрали/перенесли — держать нечего
+      var d = (row.getBoundingClientRect().top - pin.box.getBoundingClientRect().top) - pin.off;
+      if(Math.abs(d) > 0.5) pin.box.scrollTop += d;
+      pin.raf = requestAnimationFrame(pinTick);
+    }
+    function startPin(el){
+      if(!el || !el.closest || !document.body.contains(el)) return;
+      var row = el.closest(".task-row");
+      var box = row ? getScrollBox(el) : null;
+      if(!row || !box) return;
+      if(pin && pin.row === row){ pin.until = Date.now() + PIN_MS; return; } // то же закрытие: прежнее место — верное, не пересчитываем
+      stopPin();
+      var p = { row: row, box: box, id: row.getAttribute("data-id"), moved: false, until: Date.now() + PIN_MS, raf: 0 };
+      p.off = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      p.mark = function(){ p.moved = true; }; // человек сам листает — не мешаем
+      box.addEventListener("touchmove", p.mark, { passive: true, capture: true });
+      box.addEventListener("wheel", p.mark, { passive: true, capture: true });
+      pin = p;
+      p.raf = requestAnimationFrame(pinTick);
+    }
+    var kbWasUp = false; // в этой правке клавиатура уже появлялась (нужно, чтобы нулевой geometrychange при открытии не принять за закрытие)
+
     document.addEventListener("focusin", function(e){
+      if(isLiftEditable(e.target) || isTitleInput(e.target)){ stopPin(); kbWasUp = false; }
       if(isTitleInput(e.target)){
         clearTimeout(releaseTimer);
         activeTitleInput = e.target;
@@ -27665,6 +27717,7 @@
     });
     document.addEventListener("focusout", function(e){
       if(!isLiftEditable(e.target) && !isTitleInput(e.target)) return;
+      if(isTaskEditable(e.target)) startPin(e.target); // клавиатура уходит вместе с фокусом: строка остаётся на месте
       clearTimeout(releaseTimer);
       var tryRelease = function(){
         if(isLiftEditable(document.activeElement) || isTitleInput(document.activeElement)) return;
@@ -27677,6 +27730,9 @@
     });
     // клавиатура появилась/исчезла/сменила высоту (в т.ч. переключение раскладки)
     vk.addEventListener("geometrychange", function(){
+      if(kbRect()) kbWasUp = true;
+      else if(kbWasUp && activeEditable && isTaskEditable(activeEditable)){ kbWasUp = false; startPin(activeEditable); } // клавиатуру убрали, фокус остался в поле
+      if(kbRect()) stopPin(); // клавиатура пришла снова — снова работает подъём над ней
       // поле имени убрано из DOM (нажали ✓/×) — blur при удалении элемента приходит не везде
       if(activeTitleInput && !document.body.contains(activeTitleInput)){ activeTitleInput = null; release(); return; }
       if(activeTitleInput) liftDialog();
