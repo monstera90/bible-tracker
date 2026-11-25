@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 25.1 (25.11) — нажатия на остров внутри приложения: плавающее окно видео (FloatingVideo) создаётся позже острова и лежало выше него — перекрывало капсулу/карточку и забирало тапы; теперь после показа окна видео остров поднимается выше (`raiseOverlay`); тап по капсуле не теряется во время анимации сворачивания и при «залипшем» состоянии «раскрыта». Откат: InAppIsland.kt 25.0.
 // Версия: 25.0 (25.11) — занятие «агент Claude» (`K_AGENT`, `agentItem`; ТЗ TASK_AGENT_ISLAND.md): номер агента слева от камеры, кольцо шага 1–4 справа (`pillRing`, `Item.ringFn`), карточка с шагом и подробностью, нажатие открывает вкладку Claude. Откат: InAppIsland.kt 24.3.
 // Версия: 24.3 (22.11) — разрешение «Поверх других приложений»: на Xiaomi/Redmi/POCO кнопка открывает страницу разрешений именно этого приложения (редактор MIUI/HyperOS), а не общий список; запрос показывается сразу после обновления APK (не ждёт 12 часов); в запросе добавлена кнопка «Общий экран». Откат: InAppIsland.kt 24.2.
 // Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
@@ -136,6 +137,21 @@ class InAppIsland private constructor(private val appCtx: Context) {
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     )
                 } catch (e2: Exception) {
+                }
+            }
+        }
+
+        /**
+         * Из FloatingVideo после показа его окна (главный поток): окно видео — отдельное окно «поверх всех», созданное позже плашки,
+         * поэтому лежит выше неё и перехватывает нажатия там, где перекрывает капсулу или раскрытую карточку. Плашка поднимается выше.
+         */
+        fun raiseOverlay() {
+            val i = instance ?: return
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    i.raiseToTop()
+                } catch (e: Exception) {
+                    // плашка — украшение
                 }
             }
         }
@@ -516,6 +532,30 @@ class InAppIsland private constructor(private val appCtx: Context) {
             attached = true
         } catch (e: Exception) {
             mode = 0 // окно не готово или разрешение отозвано: попробуем при следующем обновлении
+        }
+    }
+
+    /**
+     * Поднимает окно плашки выше остальных окон «поверх всех» (плавающее видео): порядок окон одного типа — по времени добавления,
+     * поэтому окно снимается и добавляется заново с теми же параметрами. В запасном режиме (в decorView) — на верх своего родителя.
+     */
+    private fun raiseToTop() {
+        if (!attached) return
+        if (mode == 1) {
+            layer.bringToFront()
+            return
+        }
+        if (mode != 2) return
+        val old = winLp ?: return
+        val lp = WindowManager.LayoutParams()
+        lp.copyFrom(old)
+        try {
+            wm().removeViewImmediate(layer)
+            wm().addView(layer, lp)
+            winLp = lp
+        } catch (e: Exception) {
+            attached = false // окно не встало: refresh() поставит его заново при следующем обновлении
+            mode = 0
         }
     }
 
@@ -912,7 +952,10 @@ class InAppIsland private constructor(private val appCtx: Context) {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 if (animating && SystemClock.uptimeMillis() - animStart > animDur + 500L) finishStuckAnim()
-                tapArmed = !expanded && !animating && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
+                // «раскрыта», хотя карточка давно свёрнута и не движется (прервалась анимация/пересборка окна): без этого плашка не нажималась бы вовсе
+                if (expanded && !animating && progress <= 0.001f) expanded = false
+                // во время сворачивания (animTo == 0) нажатие не теряется: плашка тут же раскроется снова
+                tapArmed = !expanded && (!animating || animTo == 0f) && pill.visibility == View.VISIBLE && inPill(ev.x, ev.y)
                 tapItem = if (tapArmed) curItems.firstOrNull() else null
                 if (tapItem == null) tapArmed = false
                 tapX = ev.x
@@ -927,7 +970,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
             MotionEvent.ACTION_UP -> {
                 handler.removeCallbacks(longStopTask)
                 val m = tapItem
-                val fire = tapArmed && !expanded && !animating && inPill(ev.x, ev.y)
+                val fire = tapArmed && !expanded && (!animating || animTo == 0f) && inPill(ev.x, ev.y)
                 tapArmed = false
                 if (fire && m != null) activate(m)
             }

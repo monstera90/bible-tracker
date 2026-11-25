@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (25.11) — после показа окна плашка острова поднимается выше него (`InAppIsland.raiseOverlay`): окно видео больше не перехватывает нажатия на остров. Откат: FloatingVideo.kt 1.0.
 // Версия: 1.0 (03.11)
 
 import android.app.AlertDialog
@@ -245,6 +246,7 @@ class FloatingVideo(private val activity: MainActivity, private val callback: Ca
                 lp = l
                 wm().addView(box, l)
                 mode = 1
+                InAppIsland.raiseOverlay() // плашка острова остаётся выше окна видео и нажимается
             } else {
                 val p = FrameLayout.LayoutParams(curW, curH)
                 p.gravity = Gravity.TOP or Gravity.START
@@ -252,6 +254,7 @@ class FloatingVideo(private val activity: MainActivity, private val callback: Ca
                 p.topMargin = posY
                 (activity.window.decorView as ViewGroup).addView(box, p)
                 mode = 2
+                InAppIsland.raiseOverlay()
             }
         } catch (e: Exception) {
             mode = 0
