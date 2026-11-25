@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.5 (25.11) — `KIND_AGENT`: занятие «агент Claude» (прогресс по шагам, AgentRuns) в порядке острова наравне с загрузками. Откат: DownloadTask.kt 1.4.
 // Версия: 1.4 (22.11) — `openUri`: куда лёг скачанный файл (для кнопки «Открыть» в острове). Откат: DownloadTask.kt 1.3.
 // Версия: 1.3 (22.11) — этап 2 (Flibusta, 6.2): `handoffId` — результат отдаётся странице (библиотека «Книги»), а не кладётся в «Загрузки». Откат: DownloadTask.kt 1.2.
 // Версия: 1.2 (22.11) — этап 5: `title` (имя занятия в острове), `maxBytes` (предел размера), `dest` (итоговый файл обновления). Откат: DownloadTask.kt 1.1.
@@ -76,6 +77,7 @@ object IslandOrder {
     const val KIND_VIDEO = 4
     const val KIND_WORKOUT = 5
     const val KIND_DOWNLOAD = 6
+    const val KIND_AGENT = 7
 
     /** Меньше — выше. [timerDone] — сработавший таймер (звонит): это сигнал, он всегда первый. */
     fun rank(kind: Int, timerDone: Boolean = false): Int = when (kind) {
@@ -84,6 +86,7 @@ object IslandOrder {
         KIND_MUSIC -> 2
         KIND_VIDEO -> 3
         KIND_DOWNLOAD -> 4
+        KIND_AGENT -> 4 // наравне с загрузками: оба занятия — то, что человек сам запустил и ждёт
         KIND_SW -> 6
         KIND_WORKOUT -> 7
         else -> 8

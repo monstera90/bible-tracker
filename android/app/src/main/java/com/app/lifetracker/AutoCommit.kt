@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (25.11) — плашка агента в острове (AgentRuns): fix.zip пришёл — шаг 3 с долей по Content-Length (blob: — без доли), коммит — шаг 4 с долей по запросам GitHubCommit; итог — галочка / «нечего коммитить» / ошибка. `intercept(..., tabId)`. Откат: AutoCommit.kt 1.2.
 // Версия: 1.2 (24.11) — intercept(expected): скачивание zip сразу после автонажатия на карточку считается fix.zip даже без имени. Откат: AutoCommit.kt 1.1.
 // Версия: 1.1 (24.11) — autoClickReady / recordNote для автоскачивания карточки fix.zip (auto_fix.js). Откат: AutoCommit.kt 1.0.
 // Версия: 1.0 (24.11) — ТЗ «автокоммит fix.zip» (TASK_AUTO_COMMIT.md): перехват скачивания fix.zip во вкладке Claude, настройки и токен, итог тостом.
@@ -144,7 +145,8 @@ object AutoCommit {
         }
     }
 
-    private fun fail(activity: MainActivity, reason: String) {
+    private fun fail(activity: MainActivity, reason: String, run: AgentRuns.Run? = null) {
+        run?.let { AgentRuns.fail(it, reason) }
         record(activity, "error", reason)
         toast(activity, "Ошибка: $reason")
     }
@@ -157,7 +159,7 @@ object AutoCommit {
      */
     fun intercept(
         activity: MainActivity, view: WebView, name: String?, url: String?, userAgent: String?, mime: String?, cookies: CookieManager,
-        expected: Boolean = false
+        expected: Boolean = false, tabId: String = ClaudeTab.MAIN_ID
     ): Boolean {
         // expected — скрипт автоскачивания только что нажал на карточку fix.zip: zip без имени (WebView его часто не передаёт) тоже берём.
         val zipLike = (mime?.contains("zip", ignoreCase = true) == true) || (name?.endsWith(".zip", ignoreCase = true) == true) || (name?.startsWith("download", ignoreCase = true) == true)
@@ -172,8 +174,11 @@ object AutoCommit {
         val u = url.trim()
         // Сообщаем скрипту автоскачивания (auto_fix.js), что файл забрало приложение: вторую кнопку «Скачать» он нажимать не будет.
         try { view.evaluateJavascript("window.__ltFixDl=Date.now();", null) } catch (e: Exception) { }
+        // плашка агента в острове: fix.zip пришёл — шаг 3 (скачивание); дальше шаг 4 (коммит) в [process]
+        val run = AgentRuns.beginFix(tabId)
+        InAppIsland.ensureBackground(activity)
         val got = { bytes: ByteArray?, err: String? ->
-            if (bytes == null) fail(activity, err ?: "не удалось получить файл") else worker.execute { process(activity, bytes) }
+            if (bytes == null) fail(activity, err ?: "не удалось получить файл", run) else worker.execute { process(activity, bytes, run) }
         }
         when {
             u.startsWith("blob:", ignoreCase = true) -> {
@@ -186,7 +191,7 @@ object AutoCommit {
             }
             u.startsWith("http://", ignoreCase = true) || u.startsWith("https://", ignoreCase = true) -> worker.execute {
                 try {
-                    got(downloadHttp(u, userAgent, cookies), null)
+                    got(downloadHttp(u, userAgent, cookies) { f -> AgentRuns.progress(run, f) }, null)
                 } catch (e: java.net.UnknownHostException) {
                     got(null, "нет сети")
                 } catch (e: java.net.SocketTimeoutException) {
@@ -195,7 +200,10 @@ object AutoCommit {
                     got(null, "скачивание fix.zip не удалось: " + (e.message ?: e.javaClass.simpleName))
                 }
             }
-            else -> return false
+            else -> {
+                AgentRuns.fail(run, "неподдерживаемая ссылка на fix.zip")
+                return false
+            }
         }
         return true
     }
@@ -204,7 +212,7 @@ object AutoCommit {
     private fun hostOf(url: String?): String = try { URL(url).host } catch (e: Exception) { "" }
 
     /** Обычная ссылка: байты напрямую, с cookie WebView и тем же user-agent (адрес закрыт входом на claude.ai). */
-    private fun downloadHttp(url: String, userAgent: String?, cookies: CookieManager): ByteArray {
+    private fun downloadHttp(url: String, userAgent: String?, cookies: CookieManager, onProgress: (Float) -> Unit): ByteArray {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 20_000
@@ -215,6 +223,7 @@ object AutoCommit {
             if (!userAgent.isNullOrBlank()) conn.setRequestProperty("User-Agent", userAgent)
             val code = conn.responseCode
             if (code !in 200..299) throw java.io.IOException("HTTP $code")
+            val len = conn.contentLength // -1 — размер неизвестен: кольцо шага 3 тогда просто крутится
             val out = ByteArrayOutputStream()
             conn.inputStream.use { ins ->
                 val buf = ByteArray(16384)
@@ -222,6 +231,7 @@ object AutoCommit {
                     val n = ins.read(buf)
                     if (n < 0) break
                     out.write(buf, 0, n)
+                    if (len > 0) onProgress(out.size().toFloat() / len)
                     if (out.size() > MAX_DOWNLOAD_BYTES) throw java.io.IOException("файл слишком большой")
                 }
             }
@@ -233,38 +243,41 @@ object AutoCommit {
 
     // ---------- распаковка и коммит ----------
 
-    private fun process(activity: MainActivity, bytes: ByteArray) {
+    private fun process(activity: MainActivity, bytes: ByteArray, run: AgentRuns.Run) {
+        AgentRuns.setStep(run, AgentRuns.STEP_COMMIT, 0f) // шаг 4: коммит
         val p = plain(activity)
         val owner = p.getString(K_OWNER, "")?.trim().orEmpty()
         val repo = p.getString(K_REPO, "")?.trim().orEmpty()
         val branch = p.getString(K_BRANCH, "main")?.trim().orEmpty().ifEmpty { "main" }
         val tk = token(activity)
-        if (tk.isEmpty()) { fail(activity, "не задан токен GitHub"); return }
-        if (owner.isEmpty() || repo.isEmpty()) { fail(activity, "в настройках не заданы owner и repo"); return }
+        if (tk.isEmpty()) { fail(activity, "не задан токен GitHub", run); return }
+        if (owner.isEmpty() || repo.isEmpty()) { fail(activity, "в настройках не заданы owner и repo", run); return }
 
         val content = try {
             GitHubCommit.readZip(bytes)
         } catch (e: java.io.IOException) {
-            fail(activity, "повреждённый архив (" + (e.message ?: "ошибка чтения") + ")"); return
+            fail(activity, "повреждённый архив (" + (e.message ?: "ошибка чтения") + ")", run); return
         } catch (e: Exception) {
-            fail(activity, "повреждённый архив"); return
+            fail(activity, "повреждённый архив", run); return
         }
         if (content.entries.isEmpty()) {
-            fail(activity, if (content.skipped.isEmpty()) "архив пуст или повреждён" else "в архиве нет допустимых файлов (небезопасных путей: ${content.skipped.size})")
+            fail(activity, if (content.skipped.isEmpty()) "архив пуст или повреждён" else "в архиве нет допустимых файлов (небезопасных путей: ${content.skipped.size})", run)
             return
         }
         val message = "fix.zip " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
-        when (val r = GitHubCommit.commit(GitHubCommit.Config(tk, owner, repo, branch), content.entries, message)) {
+        when (val r = GitHubCommit.commit(GitHubCommit.Config(tk, owner, repo, branch), content.entries, message) { d, t -> AgentRuns.progress(run, d.toFloat() / t) }) {
             is GitHubCommit.Result.Committed -> {
                 val skip = if (content.skipped.isEmpty()) "" else "; пропущено небезопасных путей: ${content.skipped.size}"
+                AgentRuns.done(run, "${r.files} файлов, ${r.sha.take(7)}")
                 record(activity, "ok", "${r.files} файлов, ${r.sha.take(7)}$skip")
                 toast(activity, "Закоммичено: ${r.files} файлов" + (if (content.skipped.isEmpty()) "" else "\nПропущено небезопасных путей: ${content.skipped.size}"))
             }
             is GitHubCommit.Result.NothingToCommit -> {
+                AgentRuns.nothing(run)
                 record(activity, "nothing", "Нечего коммитить")
                 toast(activity, "Нечего коммитить")
             }
-            is GitHubCommit.Result.Failed -> fail(activity, r.reason)
+            is GitHubCommit.Result.Failed -> fail(activity, r.reason, run)
         }
     }
 

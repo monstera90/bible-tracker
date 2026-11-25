@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.4 (25.11) — `agentBadgeBitmap` / `agentRingBitmap`: значки плашки агента Claude в приложении (номер агента, кольцо шага 1–4). Откат: XiaomiIsland.kt 12.3.
 // Версия: 12.3 (22.11) — кнопка «Открыть» у скачанного файла в системном острове (downloadExtras, TOGGLE_OPEN). Откат: XiaomiIsland.kt 12.2.
 // Версия: 12.2 (22.11) — `downloadExtras`: системный остров загрузок (ТЗ скачивания файлов, этап 3): свёрнутый — кольцо и «45 %», раскрытый — имя, скорость, кнопки «Пауза/Продолжить/Повторить» и «Стоп». Откат: XiaomiIsland.kt 12.1.
 // Версия: 12.1 (21.11) — `downloadIconBitmap`: значок загрузки для внутреннего острова (ТЗ скачивания файлов, этап 1). Откат: XiaomiIsland.kt 12.0.
@@ -875,6 +876,83 @@ object XiaomiIsland {
                 c.drawLine(48f, 29f, 48f, 61f, paint)
                 c.drawPath(Path().apply { moveTo(35f, 49f); lineTo(48f, 62f); lineTo(61f, 49f) }, paint)
             }
+        }
+        return bmp
+    }
+
+    // ---------- значки агента Claude (плашка в приложении, AgentRuns) ----------
+
+    /** Цвет колец агента — глина Claude; не повторяет цвета помодоро, таймера, секундомера, музыки, видео, тренировки и загрузок. */
+    const val AGENT_COLOR = 0xFFD97757.toInt()
+    private const val AGENT_OK_COLOR = 0xFF34C759.toInt()
+
+    private fun agentDigit(c: Canvas, text: String, color: Int) {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.style = Paint.Style.FILL
+        p.color = color
+        p.textAlign = Paint.Align.CENTER
+        p.typeface = Typeface.DEFAULT_BOLD
+        p.textSize = 52f
+        c.drawText(text, 48f, 48f - (p.ascent() + p.descent()) / 2f, p)
+    }
+
+    /** Значок слева от камеры: тёмный круг с номером агента (вкладки Claude). */
+    fun agentBadgeBitmap(number: Int, size: Int = 96): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF1E1E1E.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        agentDigit(c, number.coerceIn(0, 99).toString(), Color.WHITE)
+        return bmp
+    }
+
+    /**
+     * Кольцо шага справа от камеры: тёмный круг, в центре номер шага (1–4). [fraction] — доля шага от верха по часовой;
+     * < 0 — доли нет, по кольцу бежит дуга ([phase] — её поворот, шаги по 45°). [state]: [AgentRuns.ST_RUN] — идёт;
+     * [AgentRuns.ST_DONE] / [AgentRuns.ST_NOTHING] — вместо цифры галочка (второе — серая); [AgentRuns.ST_ERROR] — красное кольцо и «!».
+     */
+    fun agentRingBitmap(step: Int, fraction: Float, state: Int, size: Int = 96, phase: Int = 0): Bitmap {
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.scale(size / 96f, size / 96f)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF1E1E1E.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        val color = when (state) {
+            AgentRuns.ST_DONE -> AGENT_OK_COLOR
+            AgentRuns.ST_NOTHING -> 0xFF8A8A8A.toInt()
+            AgentRuns.ST_ERROR -> 0xFFE53935.toInt()
+            else -> AGENT_COLOR
+        }
+        val ring = RectF(10f, 10f, 86f, 86f)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 8f
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.color = 0xFF3A3A3A.toInt()
+        c.drawArc(ring, 0f, 360f, false, paint)
+        paint.color = color
+        if (state != AgentRuns.ST_RUN || fraction >= 0.999f) c.drawArc(ring, 0f, 360f, false, paint)
+        else if (fraction < 0f) c.drawArc(ring, -90f + 45f * phase, 100f, false, paint)
+        else if (fraction > 0f) c.drawArc(ring, -90f, 360f * fraction, false, paint)
+        when (state) {
+            AgentRuns.ST_DONE, AgentRuns.ST_NOTHING -> {
+                paint.color = Color.WHITE
+                paint.strokeWidth = 7f
+                c.drawPath(Path().apply { moveTo(34f, 49f); lineTo(44f, 59f); lineTo(63f, 38f) }, paint)
+            }
+            AgentRuns.ST_ERROR -> {
+                paint.color = Color.WHITE
+                paint.strokeWidth = 7f
+                c.drawLine(48f, 30f, 48f, 52f, paint)
+                paint.style = Paint.Style.FILL
+                c.drawCircle(48f, 65f, 4.5f, paint)
+            }
+            else -> agentDigit(c, step.coerceIn(1, 4).toString(), Color.WHITE)
         }
         return bmp
     }

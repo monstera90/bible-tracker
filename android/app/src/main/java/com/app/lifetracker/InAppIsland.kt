@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 25.0 (25.11) — занятие «агент Claude» (`K_AGENT`, `agentItem`; ТЗ TASK_AGENT_ISLAND.md): номер агента слева от камеры, кольцо шага 1–4 справа (`pillRing`, `Item.ringFn`), карточка с шагом и подробностью, нажатие открывает вкладку Claude. Откат: InAppIsland.kt 24.3.
 // Версия: 24.3 (22.11) — разрешение «Поверх других приложений»: на Xiaomi/Redmi/POCO кнопка открывает страницу разрешений именно этого приложения (редактор MIUI/HyperOS), а не общий список; запрос показывается сразу после обновления APK (не ждёт 12 часов); в запросе добавлена кнопка «Общий экран». Откат: InAppIsland.kt 24.2.
 // Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
 // Версия: 24.2 (22.11) — у скачанного файла вместо «Готово» — «Открыть»: нажатие открывает файл и убирает плашку, не нажали за 10 с — плашка исчезает. Откат: InAppIsland.kt 24.1.
@@ -53,6 +54,7 @@ private const val K_MUSIC = IslandOrder.KIND_MUSIC
 private const val K_VIDEO = IslandOrder.KIND_VIDEO
 private const val K_WORKOUT = IslandOrder.KIND_WORKOUT
 private const val K_DOWNLOAD = IslandOrder.KIND_DOWNLOAD
+private const val K_AGENT = IslandOrder.KIND_AGENT
 
 /** Одно занятие на плашке: всё, что нужно нарисовать свёрнутую капсулу, кружок и раскрытую карточку. */
 private class Item(val key: String, val kind: Int) {
@@ -75,13 +77,15 @@ private class Item(val key: String, val kind: Int) {
     var modeFn: (() -> Bitmap)? = null
     var onMode: (() -> Unit)? = null // null — у занятия обычный значок, кнопки режима нет
     var tabKey: String? = null // вкладка, откуда запущено занятие (скачивание): нажатие на карточку открывает её
+    var ringKey = "" // кольцо шага агента (справа от камеры и в карточке вместо значка); меняется, когда его надо перерисовать
+    var ringFn: ((Int) -> Bitmap)? = null // null — у занятия обычное время справа
     var onDone: (() -> Unit)? = null // сработавший таймер: капсула висит прежнего размера, одинарное нажатие гасит вибрацию и убирает её; карточки нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
     val expandable: Boolean get() = onDone == null
 
     /** Карточка с крупными цифрами (таймер, помодоро, секундомер, тренировка); у музыки и видео — название одной строкой. */
-    val digitCard: Boolean get() = kind != K_MUSIC && kind != K_VIDEO
+    val digitCard: Boolean get() = kind != K_MUSIC && kind != K_VIDEO && kind != K_AGENT
 }
 
 class InAppIsland private constructor(private val appCtx: Context) {
@@ -175,6 +179,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
     private val pillIcon = ImageView(appCtx)
     private val pillName = TextView(appCtx)
     private val pillTime = StrokeText(appCtx) // время первого занятия (справа от камеры)
+    private val pillRing = ImageView(appCtx) // кольцо шага агента вместо времени (справа от камеры)
+    private var shownRing: String? = null
     private val dots = Array(1) { ImageView(appCtx) } // кружок следующего занятия справа от капсулы (один); с разрешением «Поверх других приложений» — в своём окне
     private val dotLps = arrayOfNulls<WindowManager.LayoutParams>(1)
     private val dotMode = IntArray(1) // 0 — не показан, 1 — ребёнок layer (запасной режим), 2 — своё окно
@@ -858,6 +864,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         K_WORKOUT -> "workouts"
         K_VIDEO -> SiteMedia.tabId.takeIf { it.isNotEmpty() }?.let { "utab_$it" }
         K_DOWNLOAD -> m.tabKey?.takeIf { it.isNotEmpty() }
+        K_AGENT -> "set2s_10" // вкладка Claude
         else -> null
     }
 
@@ -1188,9 +1195,34 @@ class InAppIsland private constructor(private val appCtx: Context) {
             }
         }
         if (outside) {
+            for (r in AgentRuns.visible(now)) out.add(agentItem(r, now))
             for (t in FileDownloads.islandTasks(now)) out.add(downloadItem(t, now))
         }
         return IslandOrder.sort(out) { IslandOrder.rank(it.kind, it.onDone != null) }
+    }
+
+    /**
+     * Занятие «агент Claude» (ТЗ TASK_AGENT_ISLAND.md): слева от камеры номер агента, справа кольцо с номером шага 1–4
+     * (1, 2 — кольцо-загрузка; 3, 4 — круговой прогресс; готово — галочка). Карточка: шаг и подробность одной строкой каждая, нажатие открывает
+     * вкладку Claude, крестик (и долгое нажатие на капсулу) убирает плашку, не прерывая работу.
+     */
+    private fun agentItem(r: AgentRuns.Run, now: Long): Item {
+        val id = r.id
+        val m = Item("ag:$id", K_AGENT)
+        val num = ClaudeTabs.numberOf(appCtx, r.tabId)
+        val state = r.state
+        val step = r.step
+        val frac = r.frac
+        val phase = if (state == AgentRuns.ST_RUN && frac < 0f) ((now / 500L) % 8L).toInt() else 0 // дуга кольца-загрузки сдвигается на каждом тике
+        m.tabKey = "set2s_10"
+        m.iconKey = "a$num"
+        m.iconFn = { s -> XiaomiIsland.agentBadgeBitmap(num, s) }
+        m.ringKey = "" + state + "/" + step + "/" + (if (frac < 0f) -1 else (frac * 50f).roundToInt()) + "/" + phase
+        m.ringFn = { s -> XiaomiIsland.agentRingBitmap(step, frac, state, s, phase) }
+        m.big = AgentRuns.title(r)
+        m.sub = AgentRuns.detail(r, num)
+        m.onStop = { AgentRuns.dismiss(id) }
+        return m
     }
 
     /** Открыть скачанный файл приложением по умолчанию; нет подходящей программы — короткое сообщение. */
@@ -1315,6 +1347,16 @@ class InAppIsland private constructor(private val appCtx: Context) {
         pillName.visibility = if (a.name.isNotEmpty()) View.VISIBLE else View.GONE
         setIcon(0, pillIcon, a)
         setTxt(0, pillName, a.name)
+        val ring = a.ringFn
+        pillRing.visibility = if (ring != null) View.VISIBLE else View.GONE
+        pillTime.visibility = if (ring != null) View.GONE else View.VISIBLE
+        if (ring != null) {
+            val rk = a.key + "|" + a.ringKey
+            if (shownRing != rk) {
+                shownRing = rk
+                pillRing.setImageBitmap(ring(96))
+            }
+        }
         setTxt(1, pillTime, a.time)
     }
 
@@ -1342,10 +1384,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
             applyCardTextMode(music)
         }
         plusBtn.visibility = if (plus) View.VISIBLE else View.GONE
-        val ik = sel.key + "|" + sel.iconKey
+        val ik = sel.key + "|" + sel.iconKey + "|" + sel.ringKey
         if (ik != shownCardIcon) {
             shownCardIcon = ik
-            cardIcon.setImageBitmap(sel.iconFn(192))
+            val iconDraw = sel.ringFn ?: sel.iconFn // у агента в карточке — кольцо шага, номер агента слева в капсуле
+            cardIcon.setImageBitmap(iconDraw(192))
         }
         val hasMode = sel.onMode != null
         cardIcon.visibility = if (hasMode) View.INVISIBLE else View.VISIBLE
@@ -1444,7 +1487,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             var timeW = 0f
             for (t in a.samples) timeW = max(timeW, pillTime.paint.measureText(t))
             left = max(left, l)
-            right = max(right, timeW + extra + scrW * 0.0272f)
+            // у агента справа не время, а кольцо шага — ширина значка; больше секундомера капсула не становится
+            right = max(right, (if (a.ringFn != null) iconW else timeW + extra) + scrW * 0.0272f)
         }
         setPillWidth(left.roundToInt(), right.roundToInt())
     }
@@ -1505,7 +1549,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val left = r.centerX() - w / 2
 
         // дети переезжают в новые контейнеры: сначала отцепляем от старых (иначе addView бросает исключение)
-        for (v in listOf<View>(pillIcon, pillName, pillTime)) (v.parent as? ViewGroup)?.removeView(v)
+        for (v in listOf<View>(pillIcon, pillName, pillTime, pillRing)) (v.parent as? ViewGroup)?.removeView(v)
         pill.removeAllViews()
         pill.background = GradientDrawable().apply { setColor(Color.BLACK); cornerRadius = h / 2f }
         val side = (screenW * 0.024f).roundToInt()
@@ -1527,6 +1571,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val rightBox = LinearLayout(appCtx).apply {
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
             setPadding(0, 0, (screenW * 0.0272f).roundToInt(), 0)
+            addView(pillRing, LinearLayout.LayoutParams(iconSize, iconSize))
             addView(pillTime)
         }
         // порядок детей важен: setPillWidth меняет ширины половин (0 — левая, 2 — правая)

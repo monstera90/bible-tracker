@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (25.11) — `commit(..., onProgress)`: ход коммита (запросов сделано / всего) для кольца шага 4 в острове. Откат: GitHubCommit.kt 1.0.
 // Версия: 1.0 (24.11) — ТЗ «автокоммит fix.zip» (TASK_AUTO_COMMIT.md): разбор и проверка архива, коммит в ветку через Git Data API GitHub.
 
 import android.util.Base64
@@ -111,9 +112,10 @@ object GitHubCommit {
 
     // ---------- коммит ----------
 
-    fun commit(cfg: Config, entries: List<Entry>, message: String): Result {
+    /** [onProgress] (сделано запросов, всего) — для кольца шага «коммит» в острове; не обязателен. */
+    fun commit(cfg: Config, entries: List<Entry>, message: String, onProgress: ((Int, Int) -> Unit)? = null): Result {
         return try {
-            run(cfg, entries, message)
+            run(cfg, entries, message, onProgress)
         } catch (e: GhError) {
             Result.Failed(e.message ?: "ошибка GitHub")
         } catch (e: UnknownHostException) {
@@ -129,8 +131,11 @@ object GitHubCommit {
         }
     }
 
-    private fun run(cfg: Config, entries: List<Entry>, message: String): Result {
+    private fun run(cfg: Config, entries: List<Entry>, message: String, onProgress: ((Int, Int) -> Unit)?): Result {
         val http = Http(cfg.token)
+        val total = entries.size + 5 // ref, коммит, blob'ы, дерево, коммит, сдвиг ветки
+        var made = 0
+        val tick = { made++; onProgress?.invoke(minOf(made, total), total); Unit }
         val base = "/repos/" + segEnc(cfg.owner) + "/" + segEnc(cfg.repo)
         val refPath = "heads/" + cfg.branch.split('/').joinToString("/") { segEnc(it) }
         var blobShas: List<String>? = null
@@ -139,15 +144,18 @@ object GitHubCommit {
             // 1. SHA последнего коммита ветки
             val ref = http.call("GET", "$base/git/ref/$refPath", null)
             val headSha = ref.json().getJSONObject("object").getString("sha")
+            tick()
             // 2. SHA его дерева
             val head = http.call("GET", "$base/git/commits/$headSha", null)
             val baseTree = head.json().getJSONObject("tree").getString("sha")
+            tick()
             // 3. blob'ы (один раз: при повторе используются те же)
             if (blobShas == null) {
                 val list = ArrayList<String>(entries.size)
                 for (e in entries) {
                     val body = JSONObject().put("content", Base64.encodeToString(e.bytes, Base64.NO_WRAP)).put("encoding", "base64")
                     list.add(http.call("POST", "$base/git/blobs", body.toString()).json().getString("sha"))
+                    tick()
                 }
                 blobShas = list
             }
@@ -158,11 +166,13 @@ object GitHubCommit {
             }
             val treeBody = JSONObject().put("base_tree", baseTree).put("tree", items)
             val newTree = http.call("POST", "$base/git/trees", treeBody.toString()).json().getString("sha")
+            tick()
             // 5. ничего не изменилось
             if (newTree == baseTree) return Result.NothingToCommit
             // 6. коммит и сдвиг ветки без force
             val commitBody = JSONObject().put("message", message).put("tree", newTree).put("parents", JSONArray().put(headSha))
             val newCommit = http.call("POST", "$base/git/commits", commitBody.toString()).json().getString("sha")
+            tick()
             val patch = http.call("PATCH", "$base/git/refs/$refPath", JSONObject().put("sha", newCommit).put("force", false).toString(), allow422 = true)
             if (patch.code in 200..299) return Result.Committed(entries.size, newCommit)
             // 7. 422: ветка успела сдвинуться — всё с начала

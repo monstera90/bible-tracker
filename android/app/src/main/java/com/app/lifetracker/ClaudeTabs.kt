@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (25.11) — `numberOf` (номер вкладки = номер агента) и запуск плашки агента в острове при отправке задачи (AgentRuns.start). Откат: ClaudeTabs.kt 1.1.
 // Версия: 1.1 (24.11) — [sendTask]: задача из сундучка уходит в НОВЫЙ диалог указанной вкладки, не меняя текущую вкладку (скачивание архива в фоне — ClaudeTask.kt, отправка — ClaudeTab.enqueueTask). Откат: ClaudeTabs.kt 1.0.
 // Версия: 1.0 (24.11) — несколько вкладок Claude: диспетчер экземпляров [ClaudeTab]. Вкладка «main» — прежняя (общий вход приложения), остальные создаются кнопкой «+» ряда внутри вкладки Claude (claudetab.js), каждая со своим входом (профиль WebView). Методы повторяют [ClaudeTab]: вызовы моста claude* и MainActivity идут к ТЕКУЩЕЙ вкладке ([select]).
 
@@ -13,6 +14,15 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
         private val ID_RE = Regex("^[a-z0-9]{1,24}$")
         private val REQ_RE = Regex("^[A-Za-z0-9]{1,64}$")
         private const val MAX_TASK_CHARS = 100_000
+
+        /** Номер вкладки Claude в её ряду (1 — «main», дальше по порядку создания) — это и есть «номер агента» в острове. */
+        fun numberOf(ctx: Context, id: String): Int {
+            if (id == ClaudeTab.MAIN_ID) return 1
+            val ids = (ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_IDS, "") ?: "")
+                .split(",").map { it.trim() }.filter { ID_RE.matches(it) }.distinct()
+            val i = ids.indexOf(id)
+            return if (i < 0) 1 else i + 2
+        }
     }
 
     private val prefs = activity.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -77,6 +87,8 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
             if (want != ClaudeTab.MAIN_ID && (!supported() || want !in savedIds())) return false
             obtain(want) ?: return false
         }
+        AgentRuns.start(want, rid) // плашка агента в острове: шаг 1
+        InAppIsland.ensureBackground(activity)
         Thread {
             try {
                 val zip = ClaudeTaskZip.download(activity.cacheDir, rid)

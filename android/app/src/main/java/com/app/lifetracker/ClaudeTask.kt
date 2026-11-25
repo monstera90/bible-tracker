@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (25.11) — итог отправки задачи передаётся плашке агента в острове (AgentRuns.taskResult). Откат: ClaudeTask.kt 1.0.
 // Версия: 1.0 (24.11) — отправка задачи в Claude (сундучок у задачи, my.js/claudetab.js): скачивание свежего архива репозитория в фоне ([ClaudeTaskZip]) и очередь итогов для страницы ([ClaudeTaskResults]). Саму отправку в новый диалог ведёт [ClaudeTab] (assets/claude/send_task.js).
 
 import org.json.JSONArray
@@ -76,6 +77,7 @@ object ClaudeTaskResults {
 
     fun add(reqId: String, ok: Boolean, msg: String) {
         queue.add(JSONObject().put("id", reqId).put("ok", ok).put("msg", msg))
+        try { AgentRuns.taskResult(reqId, ok, msg) } catch (e: Exception) { } // плашка острова: успех — шаг 2, сбой — ошибка
         while (queue.size > 50) queue.poll()
     }
 
