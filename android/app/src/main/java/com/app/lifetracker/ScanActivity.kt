@@ -1,5 +1,5 @@
 package com.app.lifetracker
-// Версия: 14.0 (25.11)
+// Версия: 14.1 (25.11)
 // Версия: 13.11 (21.11) — двойное нажатие на заметку в карточке «Заметки» снимает её с виджета (`isNoteTap`/`beginNoteWait`/`noteDouble` → QrWidgets.removeNote), одно нажатие открывает заметку после ожидания HABIT_DOUBLE_MS (`noteSingle`). Откат: ScanActivity.kt 13.10.
 // Версия: 13.10 (20.11) — `booktap` теперь запоминает открытую книгу/заметку (extra `wid`, `slot`, `bkey` → QrWidgets.groupOpened). Откат: ScanActivity.kt 13.9.
 // Версия: 13.9 (17.11) — `booktap` (id книги): нажатие на карточку «Книги» в виджете открывает приложение на этой книге (MainActivity.ACTION_OPEN_BOOK), окно сканера не нужно. Откат: ScanActivity.kt 13.7.
@@ -76,6 +76,8 @@ class ScanActivity : ComponentActivity() {
          * (открывается карта дней в приложении), пришло — двойное (отметка на сегодня, карточка уходит из виджета до полуночи).
          */
         const val HABIT_DOUBLE_MS = 400L
+        /** Окно запускается нажатием в виджете не мгновенно (0,2–0,4 с): столько же добавляется к ожиданию второго нажатия на не заведённый будильник, иначе окно успевает «решить», что нажатие было одно. */
+        const val ALARM_LAUNCH_GRACE_MS = 350L
     }
 
     private lateinit var server: WebAssetServer
@@ -223,7 +225,7 @@ class ScanActivity : ComponentActivity() {
     private val alarmSingleRun = Runnable { alarmSingle() }
 
     /** Первое нажатие на не заведённый будильник: ждём второго (его принимает [dispatchTouchEvent] или новый intent виджета). */
-    private fun beginAlarmWait(key: String) {
+    private fun beginAlarmWait(key: String, launchGraceMs: Long = 0L) {
         if (alarmWaiting && alarmKey == key) {
             alarmDouble()
             return
@@ -231,7 +233,7 @@ class ScanActivity : ComponentActivity() {
         alarmKey = key
         alarmWaiting = true
         habitHandler.removeCallbacks(alarmSingleRun)
-        habitHandler.postDelayed(alarmSingleRun, HABIT_DOUBLE_MS)
+        habitHandler.postDelayed(alarmSingleRun, HABIT_DOUBLE_MS + launchGraceMs)
     }
 
     /** Второго нажатия не было: будильник заводится (как раньше по одному нажатию). */
@@ -561,7 +563,7 @@ class ScanActivity : ComponentActivity() {
         // Нажатие на не заведённый будильник в виджете: страницу не строим, ждём второго нажатия (одно заводит, два подряд открывают форму правки)
         val alarmKeyNow = alarmWaitKeyOf(intent)
         if (alarmKeyNow != null) {
-            beginAlarmWait(alarmKeyNow)
+            beginAlarmWait(alarmKeyNow, ALARM_LAUNCH_GRACE_MS) // окно только что открыто этим нажатием: часть времени ушла на запуск
             return
         }
 
