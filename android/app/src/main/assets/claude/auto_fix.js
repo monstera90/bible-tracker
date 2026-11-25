@@ -1,4 +1,6 @@
 /* auto_fix.js
+   Версия: 1.4 (25.11)
+   1.4 (25.11): значок скачивания выбирается по положению на экране — в одной строке с карточкой fix.zip и правее названия (рядом бывают другие файлы и «Скачать все», их не трогаем).
    Версия: 1.3 (25.11)
    1.3 (25.11): значок/кнопка скачивания ищется не только внутри найденного блока карточки, но и в соседних элементах — поднимаемся по родителям, пока в них только одна карточка fix.zip (раньше блок был только «название + ZIP», а значок справа лежал снаружи и не находился, поэтому нажималась сама карточка и ничего не происходило). В тексте ошибки — что за блок найден.
    Версия: 1.2 (24.11)
@@ -141,26 +143,24 @@
     }, 700);
   }
 
-  // Значок скачивания лежит рядом с названием, а не обязательно внутри блока «Fix / ZIP»: поднимаемся по родителям,
-  // пока в них ровно одна карточка fix.zip и блок не слишком большой; на каждом уровне — сначала по подписи, потом кнопка/значок.
-  function findCtrl(card, list){
-    var e = card, level = 0;
+  // Значок скачивания лежит справа от названия (иногда снаружи найденного блока), а рядом могут быть другие файлы и «Скачать все».
+  // Поэтому ищем по положению на экране: кнопка/значок в той же строке, что и карточка fix.zip, правее её названия; берём самый правый.
+  function findCtrl(card){
+    var r = card.getBoundingClientRect(), e = card;
     for(var up = 0; up < 6 && e && e !== document.body; up++){
-      var inside = 0;
-      for(var k = 0; k < list.length; k++){ if(e === list[k] || e.contains(list[k])) inside++; }
-      if(inside > 1) break;
-      if(up > 0 && e.offsetHeight > 220) break;
-      var found = controlsIn(e);
-      if(found.length) return found[found.length - 1];
-      var btns = e.querySelectorAll('button,[role="button"],a');
-      var withIcon = [];
-      for(var b = 0; b < btns.length; b++){
-        if(visible(btns[b]) && btns[b].querySelector("svg") && txt(btns[b]).length <= 30) withIcon.push(btns[b]);
+      if(up > 0 && e.offsetHeight > 300) break;
+      var cands = e.querySelectorAll('button,[role="button"],a,svg'), best = null, bestLeft = -1;
+      for(var i = 0; i < cands.length; i++){
+        var c = cands[i], el = (c.tagName.toLowerCase() === "svg") ? clickable(c) : c;
+        if(!visible(el) || txt(el).length > 30) continue;
+        if(el.tagName.toLowerCase() === "svg" && el.parentElement && el.parentElement.tagName === "BUTTON") continue;
+        var rr = el.getBoundingClientRect(), cy = rr.top + rr.height / 2;
+        if(cy < r.top - 12 || cy > r.bottom + 12) continue;   // другая строка (соседний файл, «Скачать все»)
+        if(rr.left < r.left) continue;                         // значок типа файла слева от названия
+        if(rr.left > bestLeft){ best = el; bestLeft = rr.left; }
       }
-      if(withIcon.length) return withIcon[withIcon.length - 1];
-      var icons = e.querySelectorAll("svg");
-      if(icons.length) return clickable(icons[icons.length - 1]);
-      e = e.parentElement; level++;
+      if(best) return best;
+      e = e.parentElement;
     }
     return null;
   }
@@ -171,7 +171,7 @@
     window.__ltFixExpect = t0; // приложению: ближайшее скачивание zip — это ожидаемый fix.zip, даже если имя файла не передалось
     var snapshot = Array.prototype.slice.call(allControls());
     // 1) значок/кнопка скачивания на карточке или рядом с ней
-    var ctrl = findCtrl(card, list || [card]);
+    var ctrl = findCtrl(card);
     if(ctrl){
       lastClicked = describe(ctrl);
       fire(ctrl);
