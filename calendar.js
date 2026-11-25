@@ -1,5 +1,6 @@
 /* ===========================================================================
    calendar.js
+   Версия: 18.8 (26.11) — мышь и тачпад: (1) перетаскивание блока в «Неделе» и «Двух неделях» теперь работает и мышью (левая кнопка удержана, блок идёт за курсором, отпускание кладёт на место, Esc отменяет; раньше `onLong` отсекал всё, кроме касания); (2) размер часа в неделе и в дневном виде меняется Ctrl+колесом мыши и щипком по тачпаду (событие wheel с ctrlKey), как щипок двумя пальцами. Откат: calendar.js 18.7.
    Версия: 18.7 (21.11) — (1) перетаскивание в «Неделе» и «Двух неделях»: долгое удержание мероприятия или задачи (`LTPress`, `DRAG_MS`), блок-копия идёт за пальцем, по отпусканию встаёт на день под пальцем и время со сдвигом в 5 минут (`DRAG_SNAP_MIN`); на другую неделю тянуть нельзя (рамка — видимые дни), у края экрана сетка сама прокручивается; у повторяющегося мероприятия спрашивает «Только это» / «Это и все последующие» (`applyOnlyThis` / `applyFollowing`), общее мероприятие читателя группы не двигается; (2) новый режим «Две недели» (`mode = "two"`, 14 колонок: текущая и следующая неделя, без стрелок и свайпа), показывается только если окно не уже `TWO_WEEK_MIN_W` (телефон в горизонтальном положении); в кругу кнопки режима: список → неделя → две недели → список; на узком экране режим «две недели» пропускается, а сохранённый выбор возвращается при повороте. Откат: calendar.js 18.6.
    Версия: 18.6 (19.11) — в нижнем ряду («Список» и «Неделя») слева от «домика» кнопка полноэкранного режима (`#calendarFullscreenBtn`, `window.LTFullscreen` из my.js). Откат: calendar.js 18.5.
    Версия: 18.5 (19.11) — настройки календаря (скрытые, цвета, переключатели) синхронизируются между устройствами через хранилище my.js (`prefGet/prefSet/hiddenAll/hiddenSet`, `importPrefs`, `refreshDayCols`); задачу в календаре можно сохранить с одной картинкой без названия (`IMG_ONLY_TITLE`). Откат: calendar.js 18.4.
@@ -1152,6 +1153,28 @@
       tracking = false; lock = null;
       if(slide && !slide.finishing) slideFinish(false);
     }, { passive: true });
+    // Ctrl+колесо мыши и щипок по тачпаду (браузер присылает его как wheel с ctrlKey) — размер часа, как щипок двумя пальцами;
+    // точка под курсором остаётся на месте, сохранение и перерисовка — когда колесо замолчит
+    var wheelTimer = null;
+    wk.addEventListener("wheel", function(e){
+      if(!e.ctrlKey || drag || slide || pinch) return;
+      var body = document.getElementById("calWkBody");
+      if(!body) return;
+      e.preventDefault();
+      var anchor = (e.clientY - body.getBoundingClientRect().top) / hourPx;
+      var dy = Math.max(-30, Math.min(30, e.deltaY));
+      applyZoom(hourPx * Math.exp(-dy * 0.01));
+      c.scrollTop += body.getBoundingClientRect().top + anchor * hourPx - e.clientY;
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(function(){
+        wheelTimer = null;
+        if(!document.getElementById("calWeek")) return;
+        pinchEndedAt = Date.now();
+        try{ localStorage.setItem(ZOOM_KEY, String(hourPx)); }catch(err){}
+        weekScrollKeep = c.scrollTop;
+        renderWeek();
+      }, 250);
+    }, { passive: false });
 
     // ----- перетаскивание: долгое удержание блока мероприятия/задачи, дальше блок-копия идёт за пальцем, по отпусканию — на новое место -----
     // Рамка — видимые дни и сутки (на другую неделю не утащить); день берётся по пальцу, время — по верху блока со сдвигом DRAG_SNAP_MIN минут.
@@ -1227,6 +1250,7 @@
       var d = drag;
       if(!d) return;
       drag = null; dragOn = false;
+      mouseDragOff();
       clearInterval(d.timer);
       if(d.ghost.parentNode) d.ghost.parentNode.removeChild(d.ghost);
       d.blk.classList.remove("cal-wk-dragging");
@@ -1236,13 +1260,29 @@
       if(!commit || (!d.dayDiff && !d.minDiff)) return;
       moveEventTo(d.ev, d.at, d.newStart);
     }
-    var lastTouch = null; // где палец: onLong от LTPress отдаёт координаты начала касания
+    // мышь / тачпад: блок удержан левой кнопкой (LTPress, via:"mouse") — дальше он идёт за курсором, отпускание кнопки кладёт его на место,
+    // Esc отменяет. Слушатели висят на document только на время переноса (курсор может выйти за пределы недели).
+    function mouseDragMove(e){ if(!drag) return; if(e.cancelable) e.preventDefault(); dragMove(e.clientX, e.clientY); }
+    function mouseDragUp(){ mouseDragOff(); if(drag) dragEnd(true); }
+    function mouseDragKey(e){ if(e.key === "Escape"){ mouseDragOff(); if(drag) dragEnd(false); } }
+    function mouseDragOn(){
+      document.addEventListener("mousemove", mouseDragMove, true);
+      document.addEventListener("mouseup", mouseDragUp, true);
+      document.addEventListener("keydown", mouseDragKey, true);
+    }
+    function mouseDragOff(){
+      document.removeEventListener("mousemove", mouseDragMove, true);
+      document.removeEventListener("mouseup", mouseDragUp, true);
+      document.removeEventListener("keydown", mouseDragKey, true);
+    }
+    var lastTouch = null; // где палец/курсор: onLong от LTPress отдаёт координаты начала удержания
     if(window.LTPress){
       LTPress.bind(wk, { sel: ".cal-wk-ev", ms: DRAG_MS, blockAll: true, onLong: function(info){
-        if(info.via !== "touch") return; // мышью/меню правой кнопки не двигаем
+        if(info.via === "context") return; // правая кнопка / клавиша «Меню»: переноса нет
         lastTouch = { x: info.x, y: info.y };
         dragStart(info.el);
         lastTouch = null;
+        if(drag && info.via === "mouse") mouseDragOn();
       } });
     }
     var goNow = weekScrollToNow; weekScrollToNow = false;
@@ -1451,6 +1491,26 @@
       draw(); // перерисовка: пересчёт раскладки пересекающихся блоков под новую высоту
     }, { passive: true });
     el.addEventListener("touchcancel", function(){ pinch = null; }, { passive: true });
+    // Ctrl+колесо мыши и щипок по тачпаду — размер часа (как щипок двумя пальцами)
+    var dayWheelTimer = null;
+    el.addEventListener("wheel", function(e){
+      if(!e.ctrlKey || pinch) return;
+      var body = el.querySelector(".cal-dc-body"), sc = document.getElementById("settingsTabContent");
+      if(!body || !sc) return;
+      e.preventDefault();
+      var anchor = (e.clientY - body.getBoundingClientRect().top) / hourPx;
+      var dy = Math.max(-30, Math.min(30, e.deltaY));
+      applyDayZoom(hourPx * Math.exp(-dy * 0.01));
+      sc.scrollTop += body.getBoundingClientRect().top + anchor * hourPx - e.clientY;
+      clearTimeout(dayWheelTimer);
+      dayWheelTimer = setTimeout(function(){
+        dayWheelTimer = null;
+        if(dead) return;
+        pinchEndedAt = Date.now();
+        try{ localStorage.setItem(ZOOM_KEY, String(hourPx)); }catch(err){}
+        draw();
+      }, 250);
+    }, { passive: false });
 
     ctl = { tick: tick, destroy: destroy, refresh: draw };
     dayCols.push(ctl);
