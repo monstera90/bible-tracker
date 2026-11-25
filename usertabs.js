@@ -1,5 +1,6 @@
 /* ===========================================================================
    usertabs.js
+   Версия: 5.5 (24.11) — «Зафиксировать иконку» теперь ездит вместе с вкладкой на другие устройства аккаунта: в записи вкладки (`utab`) — `lock` (1/0) и `icon` (data:image/png зафиксированного значка, до ICON_SYNC_MAX символов; больше — фиксация идёт без картинки). Включение/снятие галочки двигает `updatedAt` (новее побеждает, как адрес). Записи без `lock` (старые версии) не трогают фиксацию; фиксация, поставленная до этой версии, один раз уходит в облако сама. Kotlin не менялся. Откат: usertabs.js 5.4.
    Версия: 5.4 (24.11) — в форме адреса галочка «Скрывать пустые рекламные блоки» (по вкладке, по умолчанию включена; хранит оболочка, `utabAdHide` / `utabAdHideGet`, UserTabs.kt 8.9). Без нового метода моста галочки нет. Откат: usertabs.js 5.3.
    Версия: 5.3 (20.11) — `syncEdge`: «Claude» (#claudeTabView) тоже получает `.lt-site` — под рядом кнопок нет светлой подложки окна, как у вкладок-сайтов.
    Версия: 5.2 (16.11) — «Поделиться» отдаёт ссылку читаемой: процентные последовательности кириллицы и других не-ASCII символов (%D0%B...) декодируются в буквы (`readableUrl`), служебные %XX (пробел, /, ?, &, #, %) остаются, чтобы ссылка не ломалась; флаг SHARE_STRIP_SCHEME убирает «https://» (по умолчанию выключен). Откат: usertabs.js 5.1.
@@ -32,7 +33,9 @@
   var ARM_MS = 4000;       // сколько крестик ждёт второго нажатия
   var SYNC_KEY = "userTabsSync_v1"; // {synced:{id:1}, pending:[id]} — «уже была в облаке» и «удалена здесь, убрать из облака»
   var SYNC_TYPE = "utab";           // тип записи в канале карточек (itemcards.js такие записи игнорирует)
-  var LOCK_KEY = "userTabIconLock_v1"; // {id: data:image/png или ""} — вкладки с зафиксированным значком (только на этом устройстве, в облако не идёт)
+  var LOCK_KEY = "userTabIconLock_v1"; // {id: data:image/png или ""} — вкладки с зафиксированным значком (копия состояния идёт в записи вкладки `utab`: `lock`/`icon`)
+  var ICON_SYNC_MAX = 40000;        // самый большой значок (символов data-URL), который едет в облако; больше — фиксация без картинки
+  var ICON_RE = /^data:image\/png;base64,[A-Za-z0-9+\/]+={0,2}$/;
   var PULL_MIN_MS = 60000;          // облако перечитывается не чаще раза в минуту
 
   var deps = {};
@@ -455,6 +458,9 @@
       else{ delete locks[t.id]; syncIcon(t.id); }
       saveLocks();
       updateButton(t);
+      t.updatedAt = Date.now(); // фиксация едет вместе с вкладкой на другие устройства (новее побеждает)
+      save();
+      syncSoon(false);
     });
     var adBox = el("utAdHide");
     if(adBox) adBox.addEventListener("change", function(){
@@ -632,14 +638,42 @@
   }
   // запись вкладки в том виде, как она ходит между устройствами
   function cloudOf(t){
-    return { id: t.id, type: SYNC_TYPE, home: t.home, createdAt: t.createdAt || 0, updatedAt: t.updatedAt || 0 };
+    var o = { id: t.id, type: SYNC_TYPE, home: t.home, createdAt: t.createdAt || 0, updatedAt: t.updatedAt || 0 };
+    if(locked(t.id)){
+      o.lock = 1;
+      var ic = locks[t.id] || "";
+      if(ic && ic.length <= ICON_SYNC_MAX && ICON_RE.test(ic)) o.icon = ic;
+    }else o.lock = 0;
+    return o;
+  }
+  // фиксация из облака: lock 1/0, а у записи старой версии (поля нет) — null («не знаю», локальное не трогаем); icon — только настоящий png
+  function cloudLock(r){
+    if(r.lock === 1 || r.lock === true) return { on: true, icon: (typeof r.icon === "string" && r.icon.length <= ICON_SYNC_MAX && ICON_RE.test(r.icon)) ? r.icon : "" };
+    if(r.lock === 0 || r.lock === false) return { on: false, icon: "" };
+    return null;
+  }
+  // применить фиксацию из облака к этой вкладке; true — что-то изменилось
+  function applyCloudLock(id, lk){
+    if(!lk) return false;
+    if(lk.on){
+      if(locked(id) && locks[id] === lk.icon) return false;
+      locks[id] = lk.icon;
+      if(lk.icon) icons[id] = lk.icon; else delete icons[id];
+      saveLocks();
+      return true;
+    }
+    if(!locked(id)) return false;
+    delete locks[id];
+    delete icons[id]; iconRev[id] = 0; // значок снова берётся у оболочки (syncIcon)
+    saveLocks();
+    return true;
   }
   // пришедшую из облака запись проверяем: своего типа, id как у вкладки, адрес — нормальный https
   function cloudTab(r){
     if(!r || r.type !== SYNC_TYPE || typeof r.id !== "string" || !ID_RE.test(r.id)) return null;
     var home = normalizeUrl(r.home);
     if(!home) return null;
-    return { id: r.id, home: home, createdAt: Number(r.createdAt) || 0, updatedAt: Number(r.updatedAt) || 0 };
+    return { id: r.id, home: home, createdAt: Number(r.createdAt) || 0, updatedAt: Number(r.updatedAt) || 0, lk: cloudLock(r) };
   }
   // true — локальный список изменился
   function reconcile(){
@@ -680,11 +714,17 @@
       delete remote[t.id];
       info.synced[t.id] = 1;
       if(!t.home || r.updatedAt > (t.updatedAt || 0)){
-        // пришла более новая версия (или здесь вкладка ещё пустая): берём адрес из облака
+        // пришла более новая версия (или здесь вкладка ещё пустая): берём адрес и фиксацию значка из облака
+        applyCloudLock(t.id, r.lk);
         if(r.home !== t.home){ t.home = r.home; homeChanged.push(t); }
         t.updatedAt = r.updatedAt;
         if(r.createdAt) t.createdAt = r.createdAt;
         changed = true;
+      }else if(t.home && !r.lk && locked(t.id)){
+        // фиксация поставлена до этой версии, а в облачной записи про неё ничего нет: один раз отправляем (updatedAt вперёд — иначе другие устройства её не возьмут)
+        t.updatedAt = Date.now();
+        changed = true;
+        m.cardMetaSave(cloudOf(t));
       }else if(t.home && (r.home !== t.home || (r.updatedAt || 0) < (t.updatedAt || 0))){
         m.cardMetaSave(cloudOf(t)); // здесь новее
       }
@@ -694,6 +734,7 @@
     // 3) новые из облака
     Object.keys(remote).forEach(function(id){
       var r = remote[id];
+      applyCloudLock(id, r.lk);
       out.push({ id: id, home: r.home, createdAt: r.createdAt || Date.now(), updatedAt: r.updatedAt || 0 });
       info.synced[id] = 1;
       changed = true;
