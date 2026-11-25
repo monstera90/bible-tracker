@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Версия: 3.8 (24.11) — Direct Boot: будильники карточек звонят и ставятся заново до первой разблокировки (CardAlarmReceiver directBootAware, LockedBootReceiver). Откат: AndroidManifest.xml 3.7. -->
 <!-- Версия: 3.7 (21.11) — служба DownloadService (скачивание файлов, ТЗ TZ_downloads.md, этап 1). -->
 <!-- Версия: 3.6 (12.11) -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -257,7 +258,18 @@
         <!-- Будильники карточек (CardAlarms): звонок и повторы. -->
         <receiver
             android:name=".CardAlarmReceiver"
+            android:directBootAware="true"
             android:exported="false" />
+
+        <!-- Сразу после включения телефона, до ввода PIN-кода: будильники карточек заново (обычный BOOT_COMPLETED приходит только после разблокировки). -->
+        <receiver
+            android:name=".LockedBootReceiver"
+            android:directBootAware="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Тик острова Xiaomi для таймеров карточек (раз в секунду обновляет время); работает, только пока идёт таймер. -->
         <service

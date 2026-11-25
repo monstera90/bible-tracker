@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (24.11) — будильники ставятся заново и звонят сразу после включения телефона, ещё до первой разблокировки (Direct Boot): состояние лежит в хранилище, доступном до разблокировки (`prefs`, с переносом из старого), обновление виджетов безопасно при заблокированном телефоне (`notifyWidgets`). Откат: CardAlarms.kt 1.3.
 // Версия: 1.3 (21.11) — нажатие на карточку-будильник: одно заглушает звонок (повторы остаются — `silence`), два подряд выключают будильник совсем; завести можно и одним, и двумя (`tapDecision`, общее для виджета и приложения). Откат: CardAlarms.kt 1.2.
 // Версия: 1.2 (14.11)
 
@@ -16,6 +17,7 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.os.UserManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONArray
@@ -68,7 +70,61 @@ object CardAlarms {
     }
 
     // ---------- хранилище ----------
-    private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    /**
+     * Хранилище, доступное и до первой разблокировки после включения телефона (Direct Boot, Android 7+). Обычное хранилище приложения
+     * в этот момент закрыто, поэтому раньше будильники нельзя было поставить заново, пока телефон не разблокируют: системные будильники
+     * при перезагрузке сбрасываются. Старые данные из обычного хранилища переносятся один раз, как только оно доступно ([migrate]).
+     */
+    private fun prefs(ctx: Context): android.content.SharedPreferences {
+        val app = ctx.applicationContext ?: ctx
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val dev = app.createDeviceProtectedStorageContext()
+        val p = dev.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        migrate(app, p)
+        return p
+    }
+
+    @Volatile private var migrated = false
+
+    /** Один раз после разблокировки: будильники из обычного хранилища (версии до 1.4) дописываются в защищённое, затем удаляются из старого. */
+    private fun migrate(app: Context, dev: android.content.SharedPreferences) {
+        if (migrated) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val um = app.getSystemService(Context.USER_SERVICE) as UserManager
+            if (!um.isUserUnlocked) return // обычное хранилище ещё закрыто: перенесём при следующем обращении после разблокировки
+        }
+        try {
+            val old = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val oldJson = old.getString(KEY, null)
+            if (oldJson != null) {
+                val merged = JSONObject(dev.getString(KEY, "{}") ?: "{}")
+                val src = JSONObject(oldJson)
+                val it = src.keys()
+                while (it.hasNext()) {
+                    val id = it.next()
+                    if (!merged.has(id)) merged.put(id, src.get(id)) // то, что уже есть в новом хранилище, новее
+                }
+                dev.edit().putString(KEY, merged.toString()).commit()
+                old.edit().remove(KEY).commit()
+            }
+            migrated = true
+        } catch (e: Exception) {
+            // перенос не удался: повторим при следующем обращении
+        }
+    }
+
+    /** Перерисовка виджетов: их данные лежат в обычном хранилище, до разблокировки оно закрыто — тогда пропускаем (после разблокировки виджеты обновятся сами). */
+    private fun notifyWidgets(ctx: Context) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                val um = ctx.applicationContext.getSystemService(Context.USER_SERVICE) as UserManager
+                if (!um.isUserUnlocked) return
+            }
+            QrWidgets.onAlarmsChanged(ctx)
+        } catch (e: Exception) {
+            // виджет не должен мешать звонку
+        }
+    }
 
     private fun load(ctx: Context): MutableMap<String, Alarm> {
         val out = LinkedHashMap<String, Alarm>()
@@ -165,7 +221,7 @@ object CardAlarms {
         save(ctx, map)
         cancelNotification(ctx, id) // повторный скан гасит звонок прежнего заведения
         schedule(ctx, a)
-        QrWidgets.onAlarmsChanged(ctx)
+        notifyWidgets(ctx)
         firstAt
     }
 
@@ -197,7 +253,7 @@ object CardAlarms {
     fun silence(ctx: Context, id: String) = synchronized(LOCK) {
         if (!ID_RE.matches(id)) return@synchronized
         cancelNotification(ctx, id)
-        QrWidgets.onAlarmsChanged(ctx) // виджеты пересчитывают порядок: будильник больше не «звонит»
+        notifyWidgets(ctx) // виджеты пересчитывают порядок: будильник больше не «звонит»
     }
 
     /** «Выкл.» на карточке и удаление карточки: будильник снимается вместе с повторами, звонящая карточка убирается. */
@@ -211,7 +267,7 @@ object CardAlarms {
             // будильника уже нет
         }
         cancelNotification(ctx, id)
-        QrWidgets.onAlarmsChanged(ctx)
+        notifyWidgets(ctx)
     }
 
     /** Сработал системный будильник: звонок (если не опоздал) и постановка следующего повтора. */
@@ -229,13 +285,13 @@ object CardAlarms {
         if (n > a.times) {
             map.remove(id) // звонки закончились
             save(ctx, map)
-            QrWidgets.onAlarmsChanged(ctx)
+            notifyWidgets(ctx)
         } else {
             val next = Alarm(a.id, a.title, a.hour, a.minute, a.everyMin, a.times, a.firstAt, n)
             map[id] = next
             save(ctx, map)
             schedule(ctx, next)
-            QrWidgets.onAlarmsChanged(ctx) // повтор прозвонил: карточка будильника поднимается наверх стопки
+            notifyWidgets(ctx) // повтор прозвонил: карточка будильника поднимается наверх стопки
         }
     }
 
