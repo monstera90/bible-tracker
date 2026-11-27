@@ -400,48 +400,104 @@
     return new TextDecoder("utf-8").decode(bytes);
   }
 
+  // ===================== КАРТИНКИ ПО ТРЕБОВАНИЮ =====================
+  // Раньше картинки ВСЕХ глав распаковывались и кодировались в base64 при открытии книги (у иллюстрированной книги — сотни
+  // мегабайт работы ради картинок, до которых читатель, возможно, так и не долистает). Теперь images[путь] — объект с тем же
+  // контрактом {contentType, base64}, но base64 это ленивое свойство: байты картинки достаются из архива и кодируются только
+  // при первом обращении (результат запоминается). Читающий код (my.js) этого не замечает.
+  function makeLazyImages(archive, imageEntries) {
+    var images = {};
+    imageEntries.forEach(function (entry) {
+      if (!archive.has(entry.path)) return; // файл из manifest не нашёлся в архиве - пропускаем молча, как и раньше
+      var cached = null;
+      var img = { contentType: entry.contentType || "image/jpeg" };
+      Object.defineProperty(img, "base64", {
+        enumerable: true, configurable: true,
+        get: function () {
+          if (cached === null) {
+            var data = archive.readBytesSync(entry.path);
+            cached = data ? bytesToBase64(data) : "";
+          }
+          return cached;
+        }
+      });
+      images[entry.path] = img;
+    });
+    return images;
+  }
+
   // ===================== ОСНОВНАЯ ФУНКЦИЯ =====================
 
-  function parseEpub(zipData) {
+  // Версия формата результата для кэша разобранных книг (my.js): при любом изменении разбора глав — увеличить, и старые
+  // записи кэша перестанут подходить.
+  var PARSER_VERSION = 2;
+
+  function nextTick() { return new Promise(function (r) { setTimeout(r, 0); }); }
+
+  // Разбор глав порциями: после каждых ~12 мс работы отдаём поток браузеру, чтобы разбор большой книги не «замораживал»
+  // интерфейс (раньше все главы разбирались одним синхронным циклом).
+  async function parseEpub(zipData) {
     var bytes = zipData instanceof Uint8Array ? zipData : new Uint8Array(zipData);
-    if (!MiniZip || !MiniZip.extractAllFiles) {
-      return Promise.reject(new Error("EpubParse: MiniZip.extractAllFiles недоступен - minizip.js должен быть загружен раньше epubparse.js"));
+    if (!MiniZip || !MiniZip.openArchive) {
+      throw new Error("EpubParse: MiniZip.openArchive недоступен - minizip.js должен быть загружен раньше epubparse.js");
     }
-    return MiniZip.extractAllFiles(bytes).then(function (files) {
-      var fileMap = buildFileMap(files);
+    var archive = MiniZip.openArchive(bytes);
 
-      var containerEntry = findFile(fileMap, "META-INF/container.xml");
-      if (!containerEntry) throw new Error("В .epub не найден META-INF/container.xml - файл повреждён или это не epub.");
-      var opfPath = findOpfPath(new TextDecoder("utf-8").decode(containerEntry));
+    var containerBytes = await archive.readBytes("META-INF/container.xml");
+    if (!containerBytes) throw new Error("В .epub не найден META-INF/container.xml - файл повреждён или это не epub.");
+    var opfPath = findOpfPath(new TextDecoder("utf-8").decode(containerBytes));
 
-      var opfEntry = findFile(fileMap, opfPath);
-      if (!opfEntry) throw new Error("В .epub не найден файл " + opfPath);
-      var structure = parseOpfStructure(new TextDecoder("utf-8").decode(opfEntry), opfPath);
+    var opfBytes = await archive.readBytes(opfPath);
+    if (!opfBytes) throw new Error("В .epub не найден файл " + opfPath);
+    var structure = parseOpfStructure(new TextDecoder("utf-8").decode(opfBytes), opfPath);
 
-      var images = buildImagesMap(fileMap, structure.imageEntries);
+    var imageEntries = structure.imageEntries.filter(function (e) { return archive.has(e.path); });
+    var images = makeLazyImages(archive, imageEntries);
 
-      var chapters = [];
-      structure.chapterPaths.forEach(function (path) {
-        var entry = findFile(fileMap, path);
-        if (!entry) return; // глава из spine не нашлась в архиве - пропускаем, не роняя всю книгу
+    var chapters = [];
+    var paths = structure.chapterPaths;
+    var BATCH = 24, sliceStart = performance.now();
+    for (var i = 0; i < paths.length; i += BATCH) {
+      var batch = paths.slice(i, i + BATCH);
+      var datas = await Promise.all(batch.map(function (p) { return archive.readBytes(p); }));
+      for (var j = 0; j < batch.length; j++) {
+        var entry = datas[j];
+        if (!entry) continue; // глава из spine не нашлась в архиве - пропускаем, не роняя всю книгу
+        var path = batch[j];
         var chDir = dirname(path);
         var parsedChapter = parseChapterXhtml(decodeXhtmlBytes(entry));
         parsedChapter.blocks.forEach(function (block) {
-          // href из <img>/<image> - относительно САМОЙ главы; приводим к
-          // тому же виду абсолютного пути внутри архива, каким ключуются
-          // записи images выше (resolveHref(opfDir, ...) в manifest) - оба
-          // способа приводят к одному и тому же итоговому пути.
+          // href из <img>/<image> - относительно САМОЙ главы; приводим к тому же виду абсолютного пути внутри архива,
+          // каким ключуются записи images выше (resolveHref(opfDir, ...) в manifest) - оба способа дают один путь.
           if (block.type === "image" && block.imageId) block.imageId = resolveHref(chDir, block.imageId);
         });
         chapters.push({ id: null, index: chapters.length, title: parsedChapter.title, blocks: parsedChapter.blocks });
-      });
-      if (!chapters.length) throw new Error("Не удалось извлечь ни одной главы из .epub");
+        if (performance.now() - sliceStart > 12) { await nextTick(); sliceStart = performance.now(); }
+      }
+    }
+    if (!chapters.length) throw new Error("Не удалось извлечь ни одной главы из .epub");
 
-      return { chapters: chapters, images: images, title: structure.title, author: structure.author };
-    });
+    return {
+      chapters: chapters, images: images, title: structure.title, author: structure.author,
+      // imageEntries — для кэша разобранной книги (см. attachImages): по ним картинки находятся в архиве без повторного разбора
+      imageEntries: imageEntries
+    };
+  }
+
+  // Книга из кэша разобранных книг (my.js): главы уже готовы, нужно только заново привязать ленивые картинки к архиву.
+  // record — {chapters, imageEntries, title, author}.
+  function attachImages(zipData, record) {
+    var bytes = zipData instanceof Uint8Array ? zipData : new Uint8Array(zipData);
+    var archive = MiniZip.openArchive(bytes);
+    return {
+      chapters: record.chapters, images: makeLazyImages(archive, record.imageEntries || []),
+      title: record.title || "", author: record.author || "", imageEntries: record.imageEntries || []
+    };
   }
 
   global.EpubParse = {
-    parseEpub: parseEpub
+    parseEpub: parseEpub,
+    attachImages: attachImages,
+    PARSER_VERSION: PARSER_VERSION
   };
 })(typeof window !== "undefined" ? window : globalThis);

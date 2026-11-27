@@ -928,12 +928,31 @@
       node.parentNode.replaceChild(tpl.content, node);
     }
 
+    // ОТКРЫТИЕ ДЛИННЫХ КНИГ (ускорение): текст книги строится порциями (см. renderBookReaderText), и КАЖДАЯ порция
+    // будила этот наблюдатель, а runPass обходил ВЕСЬ уже собранный текст заново — время росло квадратично от длины
+    // книги (у Библии это секунды на телефоне). Теперь сегмент книги (.book-reader-seg), который уже обработан и с тех пор не
+    // менялся, помечен свойством __afDone и пропускается целиком; любая мутация внутри него (в т.ч. наша же вставка ссылки)
+    // снимает метку (см. наблюдатель ниже) — тогда сегмент будет обойдён заново ровно так же, как раньше.
     function walk(node){
       if(node.nodeType === 3){ wrapTextNode(node); return; }
       if(node.nodeType !== 1 || shouldSkip(node)) return;
+      if(node.__afDone === true) return;
       // копия childNodes — wrapTextNode заменяет обработанный текстовый узел на фрагмент, из-за
       // чего "живой" childNodes во время обхода сместился бы и часть узлов пропустилась/задвоилась
       Array.prototype.slice.call(node.childNodes).forEach(walk);
+      if(node.classList && node.classList.contains("book-reader-seg")) node.__afDone = true;
+    }
+
+    // Точечный проход по сегментам книги, изменённым в этой пачке (см. наблюдатель ниже) — то же, что runPass, но без
+    // обхода всего #settingsTabContent.
+    function runSegPass(segs){
+      if(applying) return;
+      applying = true;
+      try{
+        for(var i = 0; i < segs.length; i++){ if(segs[i].isConnected) walk(segs[i]); }
+      } finally { applying = false; }
+      refitAllVisibleTaskBodies();
+      hydrateTaskImages(root);
     }
 
     function runPass(){
@@ -1033,9 +1052,22 @@
     }
 
     new MutationObserver(function(mutations){
+      var needPass = false, segsTouched = [];
       for(var i = 0; i < mutations.length; i++){
-        if(!isInsideSkippedSubtree(mutations[i].target)){ runPass(); return; }
+        var tg = mutations[i].target;
+        // изменение внутри сегмента книги — метку «обработан» снимаем; если ВСЕ изменения пачки лежат внутри сегментов
+        // (подгрузка сегмента при ленивой сборке книги), обходим только эти сегменты, а не весь #settingsTabContent
+        var tEl = tg && (tg.nodeType === 1 ? tg : tg.parentElement);
+        var segEl = tEl && tEl.closest ? tEl.closest(".book-reader-seg") : null;
+        if(segEl){
+          if(segEl.__afDone) segEl.__afDone = false;
+          if(segsTouched.indexOf(segEl) < 0) segsTouched.push(segEl);
+          continue;
+        }
+        if(!needPass && !isInsideSkippedSubtree(tg)) needPass = true;
       }
+      if(needPass) runPass();
+      else if(segsTouched.length) runSegPass(segsTouched);
     }).observe(root, { childList: true, subtree: true, characterData: true });
     runPass();
 
@@ -13654,7 +13686,7 @@
     }).then(function(){
       // Обложка (book_covers/, вне реестра синхронизации) не участвует в манифесте books/ — чистим
       // её отдельно, чтобы не копилась без дела после удаления книги, на которую она ссылалась.
-      return deleteBookCoverFile(hash);
+      return deleteBookCoverFile(hash).then(function(){ return deleteEpubCacheFile(hash); });
     });
   }
 
@@ -14759,6 +14791,7 @@
       else hi = mid - 1;
     }
     var seg = segs[found];
+    if(seg.hasAttribute("data-lazy")) bookLazyHydrateEl(seg);
     var blocks = seg.querySelectorAll(BOOK_BLOCK_SELECTOR);
     if(!blocks.length) return null;
     var best = blocks[0];
@@ -14790,6 +14823,7 @@
       if(segs[mid].getBoundingClientRect().bottom > top){ found = mid; hi = mid - 1; }
       else lo = mid + 1;
     }
+    if(segs[found].hasAttribute("data-lazy")) bookLazyHydrateEl(segs[found]);
     var blocks = segs[found].querySelectorAll(BOOK_BLOCK_SELECTOR);
     if(!blocks.length) return null;
     var best = blocks[blocks.length - 1];
@@ -15050,6 +15084,7 @@
   var BOOK_EXACT_LAYOUT_MAX_SEGS = 150; // до этого номера сегмента место восстанавливается по точной вёрстке всех сегментов выше
   function scrollBookReaderToPosition(container, position){
     if(!position) return false;
+    bookLazyHydrateAt(position.ch, position.blk); // ленивая сборка: нужный сегмент должен быть наполнен до поиска блока
     // blk === -1 — «заголовок главы первой строкой» (ИПКД: сегодняшний день). На современном движке хватает простой прокрутки
     // scrollBookReaderToChapterTitleTop; на старом WebView (Android 5, bookCvLegacy: высоты пропущенных сегментов — оценка)
     // она читала геометрию один раз и промахивалась, поэтому там идём общим путём ниже (закрепление высот сегментов,
@@ -15305,7 +15340,53 @@
   // синхронный (decodeFb2Buffer + Fb2Parse.parseFb2 — работают с уже скачанными байтами файла
   // напрямую), но оборачивается в Promise.resolve для единообразия с epub, где разбор асинхронный
   // (нужно сначала распаковать zip через MiniZip, см. epubparse.js).
-  function parseBookBuffer(name, buffer, onProgress){
+  // Кэш разобранных epub (ускорение повторного открытия длинных книг): главы в JSON лежат в OPFS book_covers/<hash>.parsed.json
+  // (папка уже исключена из экспорта и из синхронизации — это чисто локальный кэш). Картинки в кэш не кладутся — они
+  // достаются из самого epub лениво (EpubParse.attachImages). Версия формата — EpubParse.PARSER_VERSION.
+  var EPUB_CACHE_MAX_FILES = 6;
+  function epubCacheName(hash){ return hash + ".parsed.json"; }
+  function epubCacheGet(hash){
+    if(!hash) return Promise.resolve(null);
+    return getCoversDirHandle().then(function(dir){
+      return dir.getFileHandle(epubCacheName(hash), {create: false});
+    }).then(function(fh){ return fh.getFile(); }).then(function(f){ return f.text(); }).then(function(text){
+      var rec = JSON.parse(text);
+      if(!rec || rec.v !== window.EpubParse.PARSER_VERSION || !Array.isArray(rec.chapters) || !rec.chapters.length) return null;
+      return rec;
+    }).catch(function(){ return null; });
+  }
+  function epubCachePut(hash, parsed){
+    if(!hash) return;
+    var dirRef = null;
+    getCoversDirHandle().then(function(dir){
+      dirRef = dir;
+      var json = JSON.stringify({v: window.EpubParse.PARSER_VERSION, chapters: parsed.chapters, imageEntries: parsed.imageEntries || [], title: parsed.title || "", author: parsed.author || ""});
+      return dir.getFileHandle(epubCacheName(hash), {create: true}).then(function(fh){
+        return fh.createWritable();
+      }).then(function(w){ return w.write(json).then(function(){ return w.close(); }); });
+    }).then(function(){
+      // оставляем не больше EPUB_CACHE_MAX_FILES самых свежих файлов кэша
+      var items = [];
+      return (async function(){
+        for await (var entry of dirRef.entries()){
+          if(/\.parsed\.json$/.test(entry[0]) && entry[1].kind === "file"){
+            var f = await entry[1].getFile();
+            items.push({name: entry[0], t: f.lastModified});
+          }
+        }
+        items.sort(function(a, b){ return b.t - a.t; });
+        for(var i = EPUB_CACHE_MAX_FILES; i < items.length; i++){ await dirRef.removeEntry(items[i].name).catch(function(){}); }
+      })();
+    }).catch(function(){});
+  }
+  function deleteEpubCacheFile(hash){
+    if(!hash) return Promise.resolve();
+    return getCoversDirHandle().then(function(dir){
+      return dir.removeEntry(epubCacheName(hash)).catch(function(){});
+    }).catch(function(){});
+  }
+
+  function parseBookBuffer(name, buffer, onProgress, hash){
     var lowerName = (name || "").toLowerCase();
     if(lowerName.endsWith(".pdf")){
       if(!window.PdfParse || !window.PdfParse.parsePdf){
@@ -15317,7 +15398,13 @@
       if(!window.EpubParse || !window.EpubParse.parseEpub){
         return Promise.reject(new Error("Модуль разбора epub (epubparse.js) не загружен."));
       }
-      return window.EpubParse.parseEpub(buffer);
+      return epubCacheGet(hash).then(function(rec){
+        if(rec) return window.EpubParse.attachImages(buffer, rec);
+        return window.EpubParse.parseEpub(buffer).then(function(parsed){
+          epubCachePut(hash, parsed);
+          return parsed;
+        });
+      });
     }
     return Promise.resolve(Fb2Parse.parseFb2(decodeFb2Buffer(buffer)));
   }
@@ -15412,7 +15499,7 @@
             var stEl = document.getElementById("booksStatus");
             if(stEl){ stEl.textContent = "Разбор PDF: страница " + done + " из " + total + "…"; stEl.classList.remove("error"); }
           } : null;
-          return parseBookBuffer(name, buf, onPdfProgress).then(function(parsed){
+          return parseBookBuffer(name, buf, onPdfProgress, hash).then(function(parsed){
             if(isPdfBook) pdfParsedCache = {hash: hash, parsed: parsed};
             if(window.Debug) window.Debug.log("openBookReader[" + name + "]: parseBookBuffer занял " + Math.round(performance.now() - _tParse) + "мс, глав=" + parsed.chapters.length + ", блоков=" + parsed.chapters.reduce(function(s,c){return s+c.blocks.length;},0) + ", картинок=" + Object.keys(parsed.images).length);
             if(name === IPKD_BOOK_NAME) ipkdParsedCache = {hash: hash, parsed: parsed};
@@ -15451,7 +15538,10 @@
             return cachedUrl;
           }
         });
-        imageBase64[id] = {base64: img.base64, contentType: contentType};
+        // base64 — ленивое свойство: у epub байты картинки достаются из архива только при первом обращении
+        imageBase64[id] = Object.defineProperty({contentType: contentType}, "base64", {
+          enumerable: true, configurable: true, get: function(){ return img.base64; }
+        });
       });
       if(window.Debug) window.Debug.log("openBookReader[" + name + "]: подготовка ссылок на картинки заняла " + Math.round(performance.now() - _tImg) + "мс");
       _dbg("ссылки на картинки готовы, до renderBookReader()");
@@ -16237,6 +16327,7 @@
         var chars = parseInt(seg.getAttribute("data-chars"), 10) || 0;
         if(chars < 300 || seg.getAttribute("data-imgs") !== "0") continue;
         used[idx] = true;
+        if(seg.hasAttribute("data-lazy")) bookLazyHydrateEl(seg);
         seg.style.contentVisibility = "visible";
         var h = seg.getBoundingClientRect().height;
         seg.style.contentVisibility = "";
@@ -16275,11 +16366,51 @@
     bookReaderImageObserver = io;
   }
 
+  // Ленивая сборка книги (см. renderBookReaderText): картинки только что наполненного сегмента подключаются к ОДНОМУ общему
+  // наблюдателю (bookReaderImageObserver), а не к новому наблюдателю на каждый сегмент.
+  function bindBookReaderLazyImagesIn(scopeEl, container){
+    var imgs = scopeEl.querySelectorAll("img[data-lazy-img]");
+    if(!imgs.length) return;
+    function loadImg(img){
+      var id = img.getAttribute("data-lazy-img");
+      img.removeAttribute("data-lazy-img");
+      var url = bookReaderState && bookReaderState.imageUrls ? bookReaderState.imageUrls[id] : null;
+      if(url) img.src = url;
+    }
+    if(!("IntersectionObserver" in window)){
+      for(var i = 0; i < imgs.length; i++) loadImg(imgs[i]);
+      return;
+    }
+    if(!bookReaderImageObserver){
+      bookReaderImageObserver = new IntersectionObserver(function(entries){
+        entries.forEach(function(en){
+          if(en.isIntersecting){ bookReaderImageObserver.unobserve(en.target); loadImg(en.target); }
+        });
+      }, {root: container, rootMargin: "2500px 0px 2500px 0px"});
+    }
+    for(var j = 0; j < imgs.length; j++) bookReaderImageObserver.observe(imgs[j]);
+  }
+
+  // Ленивая сборка длинных книг: сегмент, ещё не наполненный текстом (data-lazy), наполняется по требованию. Эти две точки
+  // входа зовут функции, которым нужен конкретный абзац/сегмент в DOM (позиция чтения, переход к месту, калибровка).
+  function bookLazyHydrateEl(segEl){
+    var L = bookReaderState && bookReaderState.lazy;
+    if(L && !L.dead && segEl) L.hydrateEl(segEl);
+  }
+  function bookLazyHydrateAt(ch, blk){
+    var L = bookReaderState && bookReaderState.lazy;
+    if(L && !L.dead) L.hydrateAt(ch, blk);
+  }
+  // С этого числа блоков (абзацев+картинок) книга собирается лениво; меньшие книги — прежним путём (они и так быстрые).
+  var BOOK_LAZY_MIN_BLOCKS = 1500;
+  var BOOK_LAZY_WINDOW = 14; // сегментов в каждую сторону от экрана, которые фон держит наполненными
+
   function renderBookReaderText(container){
     // ВРЕМЕННО.
     var _tBuild = performance.now();
     if(bookTraceOn()) bookTrace("renderBookReaderText: начало сборки, restorePosition=" + posText(bookReaderState.restorePosition) + ", глав=" + bookReaderState.chapters.length);
     var hash = bookReaderState.hash;
+    if(bookReaderState.lazy){ bookReaderState.lazy.kill(); bookReaderState.lazy = null; } // ленивая сборка прежней отрисовки больше не нужна
     bookReaderState.textReady = false; // 69.0: до кадра восстановления места (см. finishRenderBookReaderText) позицию из DOM брать нельзя
     var stateData = getBookState(hash);
     var bmByBlock = {}, ulByBlock = {}, pinByBlock = {};
@@ -16450,6 +16581,12 @@
         }
       }
       if(window.Debug) window.Debug.log("renderBookReaderText: калибровка сегментов заняла " + Math.round(performance.now() - _tCal) + "мс, сегментов=" + container.querySelectorAll(".book-reader-seg").length);
+      if(lazyCtl){
+        // наполняем окрестность места чтения (чуть выше и заметно ниже) ДО показа — остальное доберёт фон
+        var _rp0 = bookReaderState.restorePosition;
+        if(_rp0 && typeof _rp0.ch === "number") lazyCtl.hydrateAround(_rp0.ch, _rp0.blk, 1, 2);
+        else lazyCtl.hydrateAround(0, 0, 0, 2);
+      }
       requestAnimationFrame(function(){
         if(renderIsStale()){ if(bookTraceOn()) bookTrace("кадр восстановления: рендер УСТАРЕЛ за один кадр — место НЕ восстановлено"); return; } // за кадр ридер успели закрыть или подменить — чужой restorePosition не трогаем
         // Шаг 16: сохранённая позиция чтения применяется РОВНО ОДИН РАЗ, сразу после открытия
@@ -16474,15 +16611,162 @@
         bookReaderScrollHandler = function(){ scheduleBookReaderPositionSave(); };
         bookReaderScrollContainer = container;
         container.addEventListener("scroll", bookReaderScrollHandler, { passive: true });
+        if(lazyCtl) lazyCtl.start(); // остальные сегменты — в фоне
       });
       bindBookReaderFabRow();
-      bindBookReaderImages();
-      bindBookReaderLazyImages(container);
-      bindBookReaderUnderlineClicks();
-      bindBookReaderBookmarkMarks();
+      if(!lazyCtl){
+        bindBookReaderImages();
+        bindBookReaderLazyImages(container);
+        bindBookReaderUnderlineClicks();
+        bindBookReaderBookmarkMarks();
+      } // при ленивой сборке эти привязки делает каждый сегмент сам при наполнении (hydrateSeg)
       bindBookReaderHoldMarker(rootEl);
     }
 
+    // ---- ЛЕНИВАЯ СБОРКА (длинные книги, современный WebView) ----
+    // Раньше книга целиком (у Библии — ~31 тыс. абзацев) переводилась в DOM порциями ДО показа: на телефоне это секунды, пока
+    // читатель смотрит на пустой экран. Теперь сразу строится лёгкий скелет (главы с заголовками и пустые сегменты с оценкой
+    // высоты — та же, что у пропущенных content-visibility сегментов, поэтому геометрия книги не меняется), текстом
+    // наполняется только окрестность места чтения — и книга показывается. Остальные сегменты наполняются в фоне, ближайшими к
+    // экрану в первую очередь (и сразу, если до них что-то дотянулось: позиция чтения, переход, калибровка).
+    var lazyCtl = null;
+    function buildLazySkeleton(){
+      var plan = [], chSegs = [];
+      for(var ci = 0; ci < chapters.length; ci++){
+        var blocks = chapters[ci].blocks, list = [], cur = null;
+        for(var bi = 0; bi < blocks.length; bi++){
+          var b = blocks[bi], chars = 0, isImg = false;
+          if(b.type === "image"){
+            if(!(b.imageId && bookReaderState.imageBase64 && bookReaderState.imageBase64[b.imageId])) continue;
+            isImg = true;
+          } else {
+            for(var ri = 0; ri < b.runs.length; ri++) chars += b.runs[ri].text.length;
+          }
+          if(!cur){ cur = {ch: ci, from: bi, to: bi + 1, n: 0, chars: 0, imgs: 0}; plan.push(cur); list.push(plan.length - 1); }
+          cur.to = bi + 1; cur.n++; cur.chars += chars; if(isImg) cur.imgs++;
+          if(cur.n >= BOOK_READER_SEG_SIZE) cur = null;
+        }
+        chSegs.push(list);
+      }
+      var sk = [];
+      for(var c2 = 0; c2 < chapters.length; c2++){
+        sk.push('<div class="book-reader-chapter" id="bookChapter_' + c2 + '">');
+        if(chapters[c2].title) sk.push('<h4 class="book-reader-chapter-title">' + escapeHtml(chapters[c2].title) + '</h4>');
+        var l2 = chSegs[c2];
+        for(var si = 0; si < l2.length; si++){
+          var sg = plan[l2[si]];
+          sk.push('<div class="book-reader-seg" data-lazy="1" data-seg="' + l2[si] + '" data-chars="' + sg.chars + '" data-imgs="' + sg.imgs +
+            '" style="--seg-chars:' + sg.chars + ';--seg-imgs:' + sg.imgs + '"></div>');
+        }
+        sk.push('</div>');
+      }
+      rootEl.innerHTML = sk.join("");
+      var segEls = rootEl.querySelectorAll(".book-reader-seg");
+      var hydrated = new Uint8Array(plan.length), nHydrated = 0;
+
+      // HTML одного блока — тот же, что у buildBlockHtml выше (прежний путь), только строкой
+      function blockHtmlLazy(idx, bi, block){
+        var key = idx + "_" + bi;
+        if(block.type === "image"){
+          if(!(block.imageId && bookReaderState.imageBase64 && bookReaderState.imageBase64[block.imageId])) return "";
+          var pinned = !!pinByBlock[key];
+          return '<div class="book-reader-image-wrap" data-ch="' + idx + '" data-blk="' + bi + '" data-img="' + escapeHtml(block.imageId) + '">' +
+            '<img class="cm-md-image book-reader-image" decoding="async"' + bookImageSizeAttrs(block.imageId) + ' data-lazy-img="' + escapeHtml(block.imageId) + '">' +
+            '<button type="button" class="book-reader-pin-btn' + (pinned ? ' pinned' : '') +
+              '" title="' + (pinned ? "Убрать из заметки" : "Отправить в заметку") + '">' + READER_PIN_ICON_SVG + '</button>' +
+          '</div>';
+        }
+        var bm = bmByBlock[key];
+        return '<p class="book-reader-p" id="bookP_' + idx + '_' + bi + '" data-ch="' + idx + '" data-blk="' + bi + '">' +
+          renderRunsHtml(block.runs, ulByBlock[key] || null) +
+          (bm ? '<button type="button" class="book-reader-bookmark-mark" data-bookmark-id="' + escapeHtml(bm.id) + '" title="Убрать закладку">' + READER_BOOKMARK_ICON_SVG + '</button>' : '') +
+          '</p>';
+      }
+      function hydrateSeg(k){
+        if(k < 0 || k >= plan.length || hydrated[k] || ctl.dead) return;
+        hydrated[k] = 1; nHydrated++;
+        var sg = plan[k], el = segEls[k], blocks2 = chapters[sg.ch].blocks, html = "";
+        for(var b2 = sg.from; b2 < sg.to; b2++) html += blockHtmlLazy(sg.ch, b2, blocks2[b2]);
+        el.innerHTML = html;
+        el.removeAttribute("data-lazy");
+        bindBookReaderImages(el);
+        bindBookReaderUnderlineClicks(el);
+        bindBookReaderBookmarkMarks(el);
+        bindBookReaderLazyImagesIn(el, container);
+      }
+      function segIndexFor(ch, blk){
+        var list = chSegs[ch];
+        if(!list || !list.length) return -1;
+        if(!(blk > 0)) return list[0];
+        for(var i = 0; i < list.length; i++){ if(blk < plan[list[i]].to) return list[i]; }
+        return list[list.length - 1];
+      }
+      function viewportSegIndex(){
+        var cr = container.getBoundingClientRect(), mid = cr.top + cr.height / 2;
+        var lo = 0, hi = segEls.length - 1, found = 0;
+        while(lo <= hi){
+          var m = (lo + hi) >> 1;
+          if(segEls[m].getBoundingClientRect().top <= mid){ found = m; lo = m + 1; } else hi = m - 1;
+        }
+        return found;
+      }
+      // Фон наполняет не всю книгу, а окно вокруг экрана (±BOOK_LAZY_WINDOW сегментов) — стоимость зависит от того, что читают,
+      // а не от длины книги. Всё, до чего дотягиваются позиция чтения/переход/калибровка, наполняется сразу и без окна.
+      function nextToHydrate(c){
+        var n = plan.length, lim = Math.min(n, BOOK_LAZY_WINDOW + 1);
+        for(var d = 0; d < lim; d++){
+          if(c + d < n && !hydrated[c + d]) return c + d;
+          if(d > 0 && c - d >= 0 && !hydrated[c - d]) return c - d;
+        }
+        return -1;
+      }
+      var bgQueued = false;
+      function bgTick(){
+        bgQueued = false;
+        if(renderIsStale()){ ctl.kill(); return; }
+        if(nHydrated >= plan.length) return;
+        var t0 = performance.now(), c = viewportSegIndex(), more = true;
+        do {
+          var k = nextToHydrate(c);
+          if(k < 0){ more = false; break; }
+          hydrateSeg(k);
+        } while(nHydrated < plan.length && !shouldYieldNow(t0));
+        if(more) bgSchedule(); // окно вокруг экрана ещё не заполнено; закончили — снова разбудит прокрутка (onLazyScroll)
+      }
+      function bgSchedule(){
+        if(bgQueued || ctl.dead || nHydrated >= plan.length) return;
+        bgQueued = true;
+        requestAnimationFrame(bgTick);
+      }
+      function onLazyScroll(){ bgSchedule(); }
+      container.addEventListener("scroll", onLazyScroll, {passive: true});
+      var ctl = {
+        dead: false, plan: plan,
+        kill: function(){ ctl.dead = true; container.removeEventListener("scroll", onLazyScroll); },
+        hydrateEl: function(el){ var k = parseInt(el.getAttribute("data-seg"), 10); if(!isNaN(k)) hydrateSeg(k); },
+        hydrateAt: function(ch, blk){ hydrateSeg(segIndexFor(ch, blk)); },
+        hydrateAround: function(ch, blk, before, after){
+          var k = segIndexFor(ch, blk);
+          if(k < 0) k = 0;
+          for(var d = -before; d <= after; d++) hydrateSeg(k + d);
+        },
+        start: bgSchedule
+      };
+      return ctl;
+    }
+
+    var totalBlocksAll = 0;
+    for(var tbi = 0; tbi < chapters.length; tbi++) totalBlocksAll += chapters[tbi].blocks.length;
+    if(!bookCvLegacy && totalBlocksAll >= BOOK_LAZY_MIN_BLOCKS){
+      requestAnimationFrame(function(){
+        if(renderIsStale()) return;
+        lazyCtl = buildLazySkeleton();
+        bookReaderState.lazy = lazyCtl;
+        if(window.Debug) window.Debug.log("renderBookReaderText: скелет книги построен за " + Math.round(performance.now() - _tBuild) + "мс, сегментов=" + lazyCtl.plan.length + " (ленивая сборка)");
+        finishRenderBookReaderText();
+      });
+      return;
+    }
     requestAnimationFrame(renderChunk);
   }
 
@@ -17001,8 +17285,8 @@
   // картинок в "Моём блокноте" (MdEditor.openImageViewer, экспортирована специально для этого) —
   // своего просмотрщика в ридере не заводим. Кнопка-кнопка — отдельный обработчик со
   // stopPropagation, чтобы клик по ней не долетал до <img> и не открывал просмотрщик заодно.
-  function bindBookReaderImages(){
-    var container = document.getElementById("settingsTabContent");
+  function bindBookReaderImages(scope){
+    var container = scope || document.getElementById("settingsTabContent");
     if(!container || !bookReaderState) return;
     var wraps = container.querySelectorAll(".book-reader-image-wrap");
     for(var i = 0; i < wraps.length; i++){
@@ -17734,8 +18018,8 @@
   }
   // Полный обход всех пиктограмм закладок после рендера текста (тем же приёмом, что
   // bindBookReaderUnderlineClicks/bindBookReaderImages выше).
-  function bindBookReaderBookmarkMarks(){
-    var container = document.getElementById("settingsTabContent");
+  function bindBookReaderBookmarkMarks(scope){
+    var container = scope || document.getElementById("settingsTabContent");
     if(!container) return;
     container.querySelectorAll(".book-reader-bookmark-mark").forEach(function(btn){
       bindBookReaderBookmarkMarkClick(btn);

@@ -261,6 +261,59 @@
     return files;
   }
 
+  // Открывает архив БЕЗ распаковки: читается только центральный каталог (имена и смещения), содержимое файлов
+  // распаковывается по требованию. Нужен epubparse.js: раньше extractAllFiles распаковывал ВЕСЬ архив (в том числе все
+  // картинки иллюстрированной книги) ради нескольких глав. Имена ищутся с запасом на ведущий "/" и регистр (так же, как
+  // искал findFile в epubparse.js).
+  //   resolve(name) -> имя записи в архиве | null;  has(name) -> bool
+  //   readBytes(name) -> Promise<Uint8Array|null> (нативный DecompressionStream, при его отсутствии - minideflate.js)
+  //   readBytesSync(name) -> Uint8Array|null - синхронно (для одной картинки по требованию); null, если распаковать
+  //   синхронно нечем (нет MiniDeflate) или записи нет.
+  function openArchive(zipData) {
+    const bytes = zipData instanceof Uint8Array ? zipData : new Uint8Array(zipData);
+    const entries = readCentralDirectory(bytes);
+    const clean = new Map();
+    let lower = null;
+    for (const k of entries.keys()) clean.set(k.replace(/^\/+/, ""), k);
+    function resolve(name) {
+      const c = String(name).replace(/^\/+/, "");
+      if (clean.has(c)) return clean.get(c);
+      if (!lower) {
+        lower = new Map();
+        for (const [ck, orig] of clean) lower.set(ck.toLowerCase(), orig);
+      }
+      return lower.get(c.toLowerCase()) || null;
+    }
+    function compressedSlice(entry) {
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      if (readUint32LE(view, entry.localHeaderOffset) !== 0x04034b50) {
+        throw new Error("Повреждён локальный заголовок файла в ZIP");
+      }
+      const nameLen = readUint16LE(view, entry.localHeaderOffset + 26);
+      const extraLen = readUint16LE(view, entry.localHeaderOffset + 28);
+      const dataStart = entry.localHeaderOffset + 30 + nameLen + extraLen;
+      return bytes.subarray(dataStart, dataStart + entry.compressedSize);
+    }
+    return {
+      resolve: resolve,
+      has: function (name) { return resolve(name) !== null; },
+      readBytes: async function (name) {
+        const k = resolve(name);
+        return k === null ? null : extractEntry(bytes, entries.get(k));
+      },
+      readBytesSync: function (name) {
+        const k = resolve(name);
+        if (k === null) return null;
+        const entry = entries.get(k);
+        if (entry.compressionMethod === 0) return compressedSlice(entry);
+        if (entry.compressionMethod === 8 && global.MiniDeflate && global.MiniDeflate.inflateRawSync) {
+          return global.MiniDeflate.inflateRawSync(compressedSlice(entry), entry.uncompressedSize);
+        }
+        return null;
+      },
+    };
+  }
+
   // ---------------------------------------------------------------------
   // Запись ZIP (метод STORE - без сжатия). Нужна для сборки .xlsx на
   // выходе: .xlsx - тоже просто zip-архив с XML внутри, а хранение файлов
@@ -400,5 +453,6 @@
     createZip: createZip,
     extractMarkdownFiles: extractMarkdownFiles,
     extractAllFiles: extractAllFiles,
+    openArchive: openArchive,
   };
 })(typeof window !== "undefined" ? window : globalThis);
