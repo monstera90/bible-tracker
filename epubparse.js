@@ -358,6 +358,14 @@
     extractImageRefBlocks(xml).forEach(function (b) { combined.push({ start: b.start, kind: "image", href: b.href }); });
     combined.sort(function (a, b) { return a.start - b.start; });
 
+    // Абзацы-«навигация» (class содержит "navigation", например хлебные крошки «Бытие 3 : 1 - 24» со ссылками в
+    // epub «Перевод Нового мира») - это не текст книги, а ссылки на соседние страницы; в ридере они только мешают.
+    combined = combined.filter(function (item) {
+      if (item.kind !== "text") return true;
+      var open = /^<[a-z0-9]+\b[^>]*>/i.exec(item.xml);
+      return !(open && /\bclass\s*=\s*"[^"]*navigation[^"]*"/i.test(open[0]));
+    });
+
     var blocks = combined.map(function (item) {
       if (item.kind === "image") return { type: "image", imageId: item.href || null };
       return { type: "paragraph", runs: paragraphRuns(stripOuterTag(item.xml)) };
@@ -387,10 +395,23 @@
     return { title: (text && text.length <= 200) ? text : "", rest: rest };
   }
 
+  // <title> документа (в <head>): запасное имя главы, когда в теле нет заголовка h1..h6 (в epub «Перевод Нового мира»
+  // каждая глава Библии - отдельный файл без заголовка, но с <title>Бытие 3</title>).
+  function extractDocTitle(rawXhtml) {
+    var m = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(rawXhtml);
+    if (!m) return "";
+    var t = decodeEntities(m[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim();
+    return t.length <= 200 ? t : "";
+  }
+
   function parseChapterXhtml(rawXhtml) {
     var bodyXml = findBodyXml(rawXhtml);
     var titleResult = extractChapterTitle(bodyXml);
-    return { title: titleResult.title, blocks: extractBodyBlocks(titleResult.rest) };
+    var blocks = extractBodyBlocks(titleResult.rest);
+    // Страница навигации: нет ни текста, ни картинок, зато есть ссылки (оглавление, таблицы «книга/глава/стих»). Их сотни
+    // в таких книгах (у Библии - 1252), и в «Главах» и в тексте они выглядели как пустые «главы». Здесь только помечаем.
+    var navLike = !blocks.length && (bodyXml.match(/<a\b/gi) || []).length >= 2;
+    return { title: titleResult.title, docTitle: extractDocTitle(rawXhtml), blocks: blocks, navLike: navLike };
   }
 
   // epub, в отличие от fb2 (произвольная кодировка, см. decodeFb2Buffer в
@@ -398,6 +419,23 @@
   // кодировки не требуется.
   function decodeXhtmlBytes(bytes) {
     return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  // Имя главы без заголовка в теле - <title> документа, если он не общий для книги: совпадающий у нескольких глав (или с
+  // названием всей книги) <title> ничего не говорит. Заголовок, повторяющийся у многих глав («КРАТКОЕ СОДЕРЖАНИЕ» у каждой
+  // книги Библии), заменяется на уникальный <title> («Исход. Краткое содержание»). Уникальный заголовок остаётся как есть.
+  function applyDocTitles(chapters, bookTitle) {
+    var docCount = {}, headCount = {};
+    chapters.forEach(function (c) {
+      if (c._docTitle) docCount[c._docTitle] = (docCount[c._docTitle] || 0) + 1;
+      if (c.title) headCount[c.title] = (headCount[c.title] || 0) + 1;
+    });
+    chapters.forEach(function (c) {
+      var d = c._docTitle;
+      delete c._docTitle;
+      if (c.nav || !d || docCount[d] !== 1 || d === bookTitle) return;
+      if (!c.title || headCount[c.title] > 1) c.title = d;
+    });
   }
 
   // ===================== КАРТИНКИ ПО ТРЕБОВАНИЮ =====================
@@ -430,7 +468,7 @@
 
   // Версия формата результата для кэша разобранных книг (my.js): при любом изменении разбора глав — увеличить, и старые
   // записи кэша перестанут подходить.
-  var PARSER_VERSION = 2;
+  var PARSER_VERSION = 3;
 
   function nextTick() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
@@ -471,11 +509,15 @@
           // каким ключуются записи images выше (resolveHref(opfDir, ...) в manifest) - оба способа дают один путь.
           if (block.type === "image" && block.imageId) block.imageId = resolveHref(chDir, block.imageId);
         });
-        chapters.push({ id: null, index: chapters.length, title: parsedChapter.title, blocks: parsedChapter.blocks });
+        var chap = { id: null, index: chapters.length, title: parsedChapter.title, blocks: parsedChapter.blocks };
+        if (parsedChapter.navLike) { chap.nav = true; chap.title = ""; } // индексы глав не меняются - позиции чтения/закладки остаются верными
+        chap._docTitle = parsedChapter.docTitle;
+        chapters.push(chap);
         if (performance.now() - sliceStart > 12) { await nextTick(); sliceStart = performance.now(); }
       }
     }
     if (!chapters.length) throw new Error("Не удалось извлечь ни одной главы из .epub");
+    applyDocTitles(chapters, structure.title);
 
     return {
       chapters: chapters, images: images, title: structure.title, author: structure.author,

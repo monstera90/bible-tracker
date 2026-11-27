@@ -17318,6 +17318,7 @@
     var html = '<div class="mdeditor-tab book-reader-tab"><h3 class="common-tab-title">' + escapeHtml(bookReaderState.name) + ' — главы</h3>';
     html += '<div class="mdeditor-list" id="bookChaptersList">';
     bookReaderState.chapters.forEach(function(ch, idx){
+      if(ch.nav) return; // страница навигации epub (только ссылки) — не глава; индексы остальных не меняются
       html += '<div class="mdeditor-row" data-idx="' + idx + '"><span class="mdeditor-row-name">' +
         escapeHtml(ch.title || ("Глава " + (idx + 1))) + '</span></div>';
     });
@@ -17358,7 +17359,9 @@
     // её refine().
     if(bookTraceOn()) bookTrace("jumpToChapterFromChaptersList(" + idx + "): " + (bookReaderState ? "состояние есть, режим " + bookReaderState.mode + ", глав " + (bookReaderState.chapters ? bookReaderState.chapters.length : "?") + ", restorePosition до=" + posText(bookReaderState.restorePosition) : "bookReaderState НЕТ — выход без действия"));
     if(!bookReaderState) return;
-    bookReaderState.restorePosition = { ch: idx, blk: 0 };
+    // У главы есть заголовок — целимся в него (blk -1), чтобы он оказался первой строкой, а не остался над экраном
+    var jumpCh = bookReaderState.chapters && bookReaderState.chapters[idx];
+    bookReaderState.restorePosition = { ch: idx, blk: (jumpCh && jumpCh.title) ? -1 : 0 };
     bookReaderState.restoreSource = "переход по главе из содержания";
     try{ switchBookReaderMode("text"); }
     catch(eJump){ bookTraceErr("switchBookReaderMode после выбора главы", eJump); throw eJump; }
