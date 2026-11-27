@@ -404,6 +404,19 @@
     return t.length <= 200 ? t : "";
   }
 
+  // Библейская глава в epub «Перевод Нового мира»: абзац class="w_navigation w_biblebookname" со ссылками «книга», «глава»,
+  // «стихи» (<a>Бытие</a> <a>3</a> : <a>1 - 24</a>; у книг из одной главы второй ссылки-номера нет). -> {b: "Бытие", n: 3} | null.
+  // Нужен ридеру, чтобы показать главы этой книги квадратиками с номерами (my.js, renderBookReaderChapters).
+  function extractBibleRef(bodyXml) {
+    var m = /<p\b[^>]*class\s*=\s*"[^"]*\bw_biblebookname\b[^"]*"[^>]*>([\s\S]*?)<\/p>/i.exec(bodyXml);
+    if (!m) return null;
+    var links = [], re = /<a\b[^>]*>([\s\S]*?)<\/a>/gi, a;
+    while ((a = re.exec(m[1]))) links.push(decodeEntities(a[1].replace(/<[^>]*>/g, "")).replace(/\s+/g, " ").trim());
+    if (!links.length || !links[0]) return null;
+    var n = links.length > 1 && /^\d+$/.test(links[1]) ? parseInt(links[1], 10) : 1;
+    return { b: links[0], n: n };
+  }
+
   function parseChapterXhtml(rawXhtml) {
     var bodyXml = findBodyXml(rawXhtml);
     var titleResult = extractChapterTitle(bodyXml);
@@ -411,7 +424,7 @@
     // Страница навигации: нет ни текста, ни картинок, зато есть ссылки (оглавление, таблицы «книга/глава/стих»). Их сотни
     // в таких книгах (у Библии - 1252), и в «Главах» и в тексте они выглядели как пустые «главы». Здесь только помечаем.
     var navLike = !blocks.length && (bodyXml.match(/<a\b/gi) || []).length >= 2;
-    return { title: titleResult.title, docTitle: extractDocTitle(rawXhtml), blocks: blocks, navLike: navLike };
+    return { title: titleResult.title, docTitle: extractDocTitle(rawXhtml), blocks: blocks, navLike: navLike, bk: extractBibleRef(bodyXml) };
   }
 
   // epub, в отличие от fb2 (произвольная кодировка, см. decodeFb2Buffer в
@@ -468,7 +481,7 @@
 
   // Версия формата результата для кэша разобранных книг (my.js): при любом изменении разбора глав — увеличить, и старые
   // записи кэша перестанут подходить.
-  var PARSER_VERSION = 3;
+  var PARSER_VERSION = 4;
 
   function nextTick() { return new Promise(function (r) { setTimeout(r, 0); }); }
 
@@ -511,6 +524,7 @@
         });
         var chap = { id: null, index: chapters.length, title: parsedChapter.title, blocks: parsedChapter.blocks };
         if (parsedChapter.navLike) { chap.nav = true; chap.title = ""; } // индексы глав не меняются - позиции чтения/закладки остаются верными
+        if (parsedChapter.bk) chap.bk = parsedChapter.bk;
         chap._docTitle = parsedChapter.docTitle;
         chapters.push(chap);
         if (performance.now() - sliceStart > 12) { await nextTick(); sliceStart = performance.now(); }

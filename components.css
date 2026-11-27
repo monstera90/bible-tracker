@@ -2588,6 +2588,37 @@
     .mdeditor-row:hover{ background:var(--parchment-dark); }
   }
   .mdeditor-row svg{ width:19px; height:19px; flex-shrink:0; color:var(--wood); }
+  /* Содержание «Перевода Нового мира» (my.js, renderBookReaderChapters): главы книги Библии — квадратики с номерами, 10 в ряду. */
+  .book-chapters-bookname{
+    margin:14px 0 6px 0;
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:15px;
+    font-weight:bold;
+    color:var(--ink);
+  }
+  .book-chapters-grid{
+    display:grid;
+    grid-template-columns:repeat(10, minmax(0, 1fr));
+    gap:4px;
+    margin-bottom:6px;
+  }
+  .book-chapters-cell{
+    box-sizing:border-box;
+    aspect-ratio:1 / 1;
+    min-width:0;
+    padding:0;
+    border:1px solid var(--groove-shadow);
+    border-radius:4px;
+    background:var(--parchment-dark);
+    color:var(--ink);
+    font-family:"Palatino Linotype",Georgia,serif;
+    font-size:12.5px;
+    line-height:1;
+    cursor:pointer;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;
+    user-select:none;
+  }
   .mdeditor-row-name{
     flex:1;
     min-width:0;

@@ -17317,17 +17317,33 @@
   function renderBookReaderChapters(container){
     var html = '<div class="mdeditor-tab book-reader-tab"><h3 class="common-tab-title">' + escapeHtml(bookReaderState.name) + ' — главы</h3>';
     html += '<div class="mdeditor-list" id="bookChaptersList">';
+    // «Перевод Нового мира» (epub с библейскими главами — у них ch.bk = {b: книга, n: номер}): главы каждой книги Библии —
+    // квадратики с номерами, по 10 в ряду, под названием книги. Остальное (статьи до Бытия, «Краткое содержание»,
+    // приложения) — обычными строками. У других книг ch.bk нет, и список прежний.
+    var openBook = null;
+    function closeGrid(){ if(openBook !== null){ html += '</div>'; openBook = null; } }
     bookReaderState.chapters.forEach(function(ch, idx){
       if(ch.nav) return; // страница навигации epub (только ссылки) — не глава; индексы остальных не меняются
+      if(ch.bk){
+        if(openBook !== ch.bk.b){
+          closeGrid();
+          html += '<div class="book-chapters-bookname">' + escapeHtml(String(ch.bk.b).replace(/\u00A0/g, " ")) + '</div><div class="book-chapters-grid">';
+          openBook = ch.bk.b;
+        }
+        html += '<button type="button" class="book-chapters-cell" data-idx="' + idx + '">' + ch.bk.n + '</button>';
+        return;
+      }
+      closeGrid();
       html += '<div class="mdeditor-row" data-idx="' + idx + '"><span class="mdeditor-row-name">' +
         escapeHtml(ch.title || ("Глава " + (idx + 1))) + '</span></div>';
     });
+    closeGrid();
     html += '</div>' + bookReaderFabRowHtml() + '</div>';
     container.innerHTML = html;
     requestAnimationFrame(function(){ container.scrollTop = bookReaderState.chaptersScrollTop || 0; });
     var listEl = document.getElementById("bookChaptersList");
     if(listEl){
-      listEl.querySelectorAll(".mdeditor-row").forEach(function(row){
+      listEl.querySelectorAll(".mdeditor-row, .book-chapters-cell").forEach(function(row){
         row.addEventListener("click", function(){
           if(bookTraceOn()) bookTrace("КЛИК по строке содержания, data-idx=" + row.getAttribute("data-idx"));
           jumpToChapterFromChaptersList(parseInt(row.getAttribute("data-idx"), 10));
