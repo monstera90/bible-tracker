@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (27.11) — [ClaudeTaskResults.begin/end]: задача, которая уже отправляется, второй раз не принимается (повторный вызов моста с тем же id не ставит вторую отправку в очередь). Откат: ClaudeTask.kt 1.2.
 // Версия: 1.2 (25.11) — [ClaudeTaskImages]: картинки задачи (JSON от страницы: имя, тип, base64) складываются в кэш и уходят в чат вместе с архивом. Откат: ClaudeTask.kt 1.1.
 // Версия: 1.1 (25.11) — итог отправки задачи передаётся плашке агента в острове (AgentRuns.taskResult). Откат: ClaudeTask.kt 1.0.
 // Версия: 1.0 (24.11) — отправка задачи в Claude (сундучок у задачи, my.js/claudetab.js): скачивание свежего архива репозитория в фоне ([ClaudeTaskZip]) и очередь итогов для страницы ([ClaudeTaskResults]). Саму отправку в новый диалог ведёт [ClaudeTab] (assets/claude/send_task.js).
@@ -133,8 +134,22 @@ object ClaudeTaskImages {
 /** Итоги отправок, которые страница забирает опросом (`claudeTaskResults`). Живут, пока жив процесс приложения. */
 object ClaudeTaskResults {
     private val queue = ConcurrentLinkedQueue<JSONObject>()
+    /** Задачи, принятые к отправке и ещё без итога: id → когда приняты. Запись старше [IN_FLIGHT_MAX_MS] считается забытой. */
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val IN_FLIGHT_MAX_MS = 6L * 60 * 1000
+
+    /** true — задача принята к отправке; false — такая отправка уже идёт (второй раз не ставим). */
+    fun begin(reqId: String): Boolean {
+        val now = System.currentTimeMillis()
+        inFlight.entries.removeAll { now - it.value > IN_FLIGHT_MAX_MS }
+        return inFlight.putIfAbsent(reqId, now) == null
+    }
+
+    /** Снять отметку «отправляется» без итога (отправка не началась). */
+    fun end(reqId: String) { inFlight.remove(reqId) }
 
     fun add(reqId: String, ok: Boolean, msg: String) {
+        inFlight.remove(reqId)
         queue.add(JSONObject().put("id", reqId).put("ok", ok).put("msg", msg))
         try { AgentRuns.taskResult(reqId, ok, msg) } catch (e: Exception) { } // плашка острова: успех — шаг 2, сбой — ошибка
         while (queue.size > 50) queue.poll()

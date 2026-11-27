@@ -1,4 +1,5 @@
 /* send_task.js
+   Версия: 1.3 (27.11) — защита от дублей сообщения: (а) одна отправка на попытку (`cfg.attempt`): повторные `__ltTaskStart`/`__ltTaskInit`/`__ltTaskPut`, пока отправка идёт, игнорируются; (б) метка «отправлено» в localStorage claude.ai: если страницу перезагрузили после нажатия «Отправить», та же попытка заново не уходит; (в) архив прикрепляется ОДНИМ способом — запасные (drop, paste) только если за 20 с вложения нет совсем; перед отправкой лишние копии вложения (по кнопке «Убрать» у каждой карточки) убираются; (г) текст: после вставки ждём, пока поле его примет, не печатаем второй раз, если длинный текст ушёл в карточку «вставленное», и проверяем, что текст не задвоен. Откат: send_task.js 1.2.
    Версия: 1.2 (25.11) — вместе с архивом в сообщение прикрепляются картинки задачи (cfg.images: [{name, type}], их байты приходят как файлы №1, №2 … — __ltTaskInit(size, idx) / __ltTaskPut(b64, idx); архив — файл №0). Все файлы кладутся в поле выбора файла одной пачкой; если картинку на странице не нашли, отправка идёт дальше, а в итоге (state "sent", msg) стоит предупреждение. Откат: send_task.js 1.1.
    Версия: 1.1 (24.11) — при сбое в сообщении добавляется «снимок» страницы (адрес, видимость, поле ввода, поля выбора файла, размер окна), чтобы было видно, на чём встало; имя файла ищется без учёта регистра; перед началом ждём, пока страница дозагрузится (readyState). Откат: send_task.js 1.0.
    Версия: 1.0 (24.11)
@@ -12,12 +13,20 @@
   if(window.__ltTaskPut) return;
   var bufs = {}, offs = {};
   var st = { reqId: "", state: "idle", msg: "" };
+  var running = false, doneKey = "";
+  var SENT_PREFIX = "__ltTaskSent_";
+  var STAGE_SENT = "Отправлено, жду подтверждения"; // это слово ждёт и ClaudeTab.kt (STAGE_SENT): после него страницу заново не грузим
 
   // файл №idx: 0 — архив репозитория, 1… — картинки задачи
-  window.__ltTaskInit = function(size, idx){ idx = idx | 0; bufs[idx] = new Uint8Array(size); offs[idx] = 0; };
+  window.__ltTaskInit = function(size, idx){
+    if(running) return; // отправка в этой странице уже идёт: повторная передача файлов только сбила бы её
+    idx = idx | 0; bufs[idx] = new Uint8Array(size); offs[idx] = 0;
+  };
   window.__ltTaskPut = function(b64, idx){
+    if(running) return;
     idx = idx | 0;
-    var buf = bufs[idx], off = offs[idx], bin = atob(b64);
+    var buf = bufs[idx]; if(!buf) return;
+    var off = offs[idx], bin = atob(b64);
     for(var i = 0; i < bin.length; i++) buf[off++] = bin.charCodeAt(i);
     offs[idx] = off;
   };
@@ -33,6 +42,22 @@
       await sleep(step || 300);
     }
     return null;
+  }
+  function norm(s){ return String(s || "").replace(/\s+/g, " ").trim(); }
+
+  // метка «эта попытка уже нажала «Отправить»»: живёт в localStorage claude.ai, переживает перезагрузку страницы
+  function sentMark(key){ try{ return localStorage.getItem(SENT_PREFIX + key); }catch(e){ return null; } }
+  function setSentMark(key){ try{ localStorage.setItem(SENT_PREFIX + key, String(Date.now())); }catch(e){} }
+  function clearSentMark(key){ try{ localStorage.removeItem(SENT_PREFIX + key); }catch(e){} }
+  function pruneMarks(){
+    try{
+      var now = Date.now(), del = [];
+      for(var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if(k && k.indexOf(SENT_PREFIX) === 0 && now - (+localStorage.getItem(k) || 0) > 86400000) del.push(k);
+      }
+      del.forEach(function(k){ localStorage.removeItem(k); });
+    }catch(e){}
   }
 
   function composer(){
@@ -86,9 +111,12 @@
     }
     return list.length ? list[0] : null;
   }
+  // Основной способ — поле выбора файла, и ждём его долго: каждый запасной способ прикрепил бы файл ещё раз.
+  // Запасные (drop, paste) включаются только если вложения нет совсем.
   async function attach(files, base){
     var dt = new DataTransfer();
     files.forEach(function(f){ dt.items.add(f); });
+    var seen = function(){ return hasAttachment(base); };
     // 1) скрытое поле выбора файла
     var inp = fileInput();
     if(inp){
@@ -97,24 +125,26 @@
         inp.dispatchEvent(new Event("input", { bubbles: true }));
         inp.dispatchEvent(new Event("change", { bubbles: true }));
       }catch(e){}
-      if(await waitFor(function(){ return hasAttachment(base); }, 8000, 400)) return true;
+      if(await waitFor(seen, 20000, 400)) return true;
     }
     // 2) перетаскивание на поле ввода
+    if(seen()) return true;
     var target = composerRoot();
     try{
       ["dragenter", "dragover", "drop"].forEach(function(t){
         target.dispatchEvent(new DragEvent(t, { dataTransfer: dt, bubbles: true, cancelable: true }));
       });
     }catch(e){}
-    if(await waitFor(function(){ return hasAttachment(base); }, 8000, 400)) return true;
+    if(await waitFor(seen, 12000, 400)) return true;
     // 3) вставка файла как из буфера обмена
+    if(seen()) return true;
     var c = composer();
     if(c){
       try{
         c.focus();
         c.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
       }catch(e){}
-      if(await waitFor(function(){ return hasAttachment(base); }, 8000, 400)) return true;
+      if(await waitFor(seen, 12000, 400)) return true;
     }
     return false;
   }
@@ -129,22 +159,82 @@
     }
     return false;
   }
+  // Лишние копии вложения. У каждой карточки вложения своя кнопка «Убрать»; берём только те кнопки, чья карточка содержит имя файла
+  // (если подписи кнопок не распознаются — ничего не трогаем). Первая копия остаётся, остальные убираются.
+  var REMOVE_SEL = 'button[aria-label*="emove" i], button[aria-label*="Удал" i]';
+  function cardOf(btn, name){
+    var low = String(name).toLowerCase(), el = btn;
+    for(var up = 0; up < 6 && el.parentElement; up++){
+      el = el.parentElement;
+      if(el.querySelectorAll(REMOVE_SEL).length > 1) return null; // уже охватили несколько карточек
+      if(String(el.innerText || el.textContent || "").toLowerCase().indexOf(low) >= 0) return el;
+    }
+    return null;
+  }
+  async function dropExtraCopies(name){
+    var removed = 0;
+    try{
+      var mine = [];
+      Array.prototype.slice.call(composerRoot().querySelectorAll(REMOVE_SEL)).forEach(function(b){
+        if(cardOf(b, name)) mine.push(b);
+      });
+      for(var i = 1; i < mine.length; i++){ mine[i].click(); removed++; await sleep(400); }
+    }catch(e){}
+    return removed;
+  }
 
   // ---------- текст ----------
-  function putText(text){
+  function clearComposer(){
+    var c = composer(); if(!c) return;
+    c.focus();
+    try{ document.execCommand("selectAll", false, null); document.execCommand("delete", false, null); }catch(e){}
+  }
+  // длинный текст сайт может убрать в карточку «вставленное»: поле ввода остаётся пустым, а начало текста видно в превью карточки
+  function pastedAsCard(want){
+    try{
+      var probe = want.slice(0, 30).toLowerCase();
+      return probe.length >= 8 && norm(document.body.innerText).toLowerCase().indexOf(probe) >= 0;
+    }catch(e){ return false; }
+  }
+  // Текст кладётся ровно один раз. Редактор принимает вставку не мгновенно, поэтому после неё ждём; печатаем запасным способом
+  // только если за это время текста нет ни в поле, ни в карточке «вставленное».
+  async function putText(text){
     var c = composer(); if(!c) return false;
+    var want = norm(text);
+    if(composerText()){ clearComposer(); await sleep(200); }
     c.focus();
     try{
       var dt = new DataTransfer();
       dt.setData("text/plain", text);
       c.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
     }catch(e){}
-    if(composerText()) return true;
-    try{ document.execCommand("selectAll", false, null); document.execCommand("insertText", false, text); }catch(e){}
-    if(composerText()) return true;
-    c.textContent = text;
-    c.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-    return !!composerText();
+    var ok = await waitFor(function(){ return composerText() || pastedAsCard(want); }, 2500, 250);
+    if(!ok){
+      c = composer(); if(!c) return false;
+      try{ c.focus(); document.execCommand("selectAll", false, null); document.execCommand("insertText", false, text); }catch(e){}
+      ok = await waitFor(function(){ return composerText() || pastedAsCard(want); }, 1500, 250);
+    }
+    if(!ok){
+      c = composer(); if(!c) return false;
+      c.textContent = text;
+      c.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      ok = await waitFor(function(){ return composerText(); }, 1000, 250);
+    }
+    if(!ok) return false;
+    await sleep(600);
+    // текст задвоился (вставка дошла позже запасного способа): очищаем и кладём один раз
+    var got = composerText();
+    if(want.length >= 20 && got.length >= want.length * 1.8){
+      clearComposer(); await sleep(300);
+      c = composer(); if(!c) return false;
+      try{ c.focus(); document.execCommand("insertText", false, text); }catch(e){}
+      if(!await waitFor(function(){ return composerText(); }, 1500, 250)){
+        c = composer(); if(!c) return false;
+        c.textContent = text;
+        c.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      }
+    }
+    return true;
   }
   function sendButton(){
     var c = composer(); if(!c) return null;
@@ -162,6 +252,13 @@
   }
 
   async function run(cfg){
+    var key = String(cfg.attempt || cfg.reqId || "");
+    var persist = !!cfg.attempt; // метка между перезагрузками — только у попытки с собственным номером (иначе повторная отправка той же задачи позже была бы заблокирована)
+    pruneMarks();
+    if(persist && sentMark(key)){
+      st = { reqId: cfg.reqId, state: "sent", msg: "повторная отправка пропущена: эта задача уже ушла в чат" };
+      return;
+    }
     st = { reqId: cfg.reqId, state: "working", msg: "Жду страницу" };
     try{
       if(!fileReady(0)) throw new Error("архив не дошёл до страницы");
@@ -189,15 +286,22 @@
       }
       st.msg = "Жду загрузки архива";
       if(!await waitUploaded(120000)) throw new Error("архив не загрузился за 2 минуты");
+      // лишние копии вложений (сайт мог принять один файл дважды) — убираем до отправки
+      var extra = await dropExtraCopies(base);
+      for(var jj = 0; jj < imgs.length; jj++) extra += await dropExtraCopies(imgs[jj].name);
+      if(extra) warn = (warn ? warn + "; " : "") + "убрано лишних копий вложений: " + extra;
       st.msg = "Вставляю текст задачи";
-      if(!putText(String(cfg.text || ""))) throw new Error("не удалось вставить текст");
+      if(!await putText(String(cfg.text || ""))) throw new Error("не удалось вставить текст");
       st.msg = "Отправляю";
       var btn = await waitFor(sendReady, 40000, 400);
+      var cc = btn ? null : composer();
+      if(!btn && !cc) throw new Error("кнопка «Отправить» не стала активной");
+      // с этого мига сообщение может уйти: метка не даёт отправить то же самое после перезагрузки страницы
+      if(persist) setSentMark(key);
+      st.msg = STAGE_SENT;
       if(btn){
         btn.click();
       }else{
-        var cc = composer();
-        if(!cc) throw new Error("кнопка «Отправить» не стала активной");
         ["keydown", "keypress", "keyup"].forEach(function(type){
           cc.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
         });
@@ -205,11 +309,20 @@
       var sent = await waitFor(function(){
         return (location.pathname || "").indexOf("/chat/") === 0 || (!composerText() && !hasAttachment(base));
       }, 30000, 500);
-      if(!sent) throw new Error("сообщение не отправилось");
+      if(!sent){
+        if(persist) clearSentMark(key);
+        throw new Error("сообщение не отправилось");
+      }
       st.state = "sent"; st.msg = warn;
     }catch(e){
       st.state = "error"; st.msg = String(e && e.message || e) + " [" + diag() + "]";
     }
   }
-  window.__ltTaskStart = function(cfg){ run(cfg); };
+  // Одна отправка на попытку: повторный вызов (страница загрузилась дважды, гонка потоков оболочки) ничего не делает.
+  window.__ltTaskStart = function(cfg){
+    var key = String((cfg && (cfg.attempt || cfg.reqId)) || "");
+    if(!key || running || key === doneKey) return;
+    running = true; doneKey = key;
+    run(cfg).then(function(){ running = false; }, function(){ running = false; });
+  };
 })();

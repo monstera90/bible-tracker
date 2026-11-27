@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.8 (27.11) — `sendTask`: пока задача с этим id отправляется (итог ещё не пришёл), повторный вызов не отправляет её второй раз и не увеличивает счётчик ожидания (защита от дубля сообщения в чате). Откат: claudetab.js 1.7.
    Версия: 1.7 (25.11) — отправка задачи с картинками: `sendTask(tabId, taskId, text, images)`, где images — [{name, mime, b64}] (мост `claudeSendTaskImages`); `canSendImages()` — есть ли такой метод в оболочке. Без картинок всё как раньше. Откат: claudetab.js 1.6.
    Версия: 1.6 (24.11) — отправка задачи в новый диалог выбранной вкладки Claude (сундучок у задачи, my.js): `ClaudeTabMod.sendTask(tabId, taskId, text)` → мост `claudeSendTask` (оболочка в фоне скачивает архив репозитория, открывает claude.ai/new в этой вкладке, прикрепляет архив и отправляет текст задачи); итог приходит опросом `claudeTaskResults` → `ClaudeTabMod.onTaskResult(taskId, ok, msg)`. Также наружу: `tabIds()` (номера вкладок для выбора), `canSendTask()`, `ensureStyle()`, `tabIconHtml(n)`. Нужен мост с методами claudeSendTask/claudeTaskResults (иначе выбор показывает пояснение).
    Версия: 1.5 (24.11) — ряд вкладок Claude внутри вкладки: колонка слева от бокового ряда (выходит из его вкладок, начиная со второй: нижняя вкладка бокового ряда стоит над нижним рядом кнопок приложения, из неё ничего не выходит). Первая вкладка нового ряда — прежняя «Claude» (вход общий, как раньше), над ней «+»: новая вкладка Claude БЕЗ входа, у каждой вкладки свой вход (профиль WebView, ClaudeTabs.kt/ClaudeTab.kt 1.8). Долгое нажатие на добавленную вкладку (1 с) → крестик, следующее нажатие закрывает её вместе со входом. Список вкладок — localStorage `claudeTabs_v1` ({tabs:[id], cur}), только на этом устройстве. Нужны методы моста claudeSelect/claudeRemove/claudeTabsSupported (иначе ряда нет, вкладка одна, как раньше). claude.ai укорачивается по колонке (она не должна лежать под нативным WebView).
@@ -466,6 +467,7 @@
   function tabIconHtml(n){ return ICON_CLAUDE + '<span class="claude-sub-num">' + n + '</span>'; }
 
   var taskPollTimer = null, taskPendingCount = 0;
+  var taskInflight = {}; // id задачи → когда отправили; снимается, когда пришёл итог (или через 6 минут)
   function taskPoll(){
     var b = window.LifeTrackerNative;
     if(!b || typeof b.claudeTaskResults !== "function") return;
@@ -475,6 +477,7 @@
     arr.forEach(function(r){
       if(!r || typeof r.id !== "string") return;
       if(taskPendingCount > 0) taskPendingCount--;
+      delete taskInflight[r.id];
       try{ if(typeof api.onTaskResult === "function") api.onTaskResult(r.id, !!r.ok, String(r.msg || "")); }catch(e){}
     });
     if(taskPendingCount <= 0 && taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer = null; taskPendingCount = 0; }
@@ -485,6 +488,7 @@
   function sendTask(tabId, taskId, text, images){
     var b = window.LifeTrackerNative;
     if(!canSendTask() || typeof taskId !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(taskId)) return false;
+    if(taskInflight[taskId] && Date.now() - taskInflight[taskId] < 6 * 60 * 1000) return true; // эта задача уже отправляется — второй раз не шлём
     var ok = false;
     try{
       if(images && images.length){
@@ -494,7 +498,7 @@
         ok = !!b.claudeSendTask(String(tabId || MAIN), taskId, String(text || ""));
       }
     }catch(e){ ok = false; }
-    if(ok){ taskPendingCount++; taskPollStart(); }
+    if(ok){ taskInflight[taskId] = Date.now(); taskPendingCount++; taskPollStart(); }
     return ok;
   }
   // итоги прежних отправок (страницу могли перезагрузить, пока шла отправка)

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (27.11) — [sendTask]: задача, которая уже отправляется (тот же id), второй раз не принимается (ClaudeTaskResults.begin). Откат: ClaudeTabs.kt 1.3.
 // Версия: 1.3 (25.11) — [sendTask] принимает картинки задачи ([imagesJson]): они сохраняются в кэш ([ClaudeTaskImages]) и уходят в чат вместе с архивом. Откат: ClaudeTabs.kt 1.2.
 // Версия: 1.2 (25.11) — `numberOf` (номер вкладки = номер агента) и запуск плашки агента в острове при отправке задачи (AgentRuns.start). Откат: ClaudeTabs.kt 1.1.
 // Версия: 1.1 (24.11) — [sendTask]: задача из сундучка уходит в НОВЫЙ диалог указанной вкладки, не меняя текущую вкладку (скачивание архива в фоне — ClaudeTask.kt, отправка — ClaudeTab.enqueueTask). Откат: ClaudeTabs.kt 1.0.
@@ -88,6 +89,7 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
             if (want != ClaudeTab.MAIN_ID && (!supported() || want !in savedIds())) return false
             obtain(want) ?: return false
         }
+        if (!ClaudeTaskResults.begin(rid)) return true // эта задача уже отправляется: вторую отправку не ставим
         AgentRuns.start(want, rid) // плашка агента в острове: шаг 1
         InAppIsland.ensureBackground(activity)
         Thread {

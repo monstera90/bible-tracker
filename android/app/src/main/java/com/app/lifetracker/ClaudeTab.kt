@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.6 (27.11) — отправка задачи не дублируется: (а) у попытки свой номер (TaskJob.attempt) — скрипт отправки по нему не даёт отправить одно и то же дважды, даже после перезагрузки страницы; (б) если страница ушла в чат (/chat/…) или скрипт дошёл до «Отправить» (sentSeen), страницу заново не грузим — раньше при потере состояния скрипта через 40 с срабатывал restartJob и задача уходила в новый чат ещё раз (до трёх раз); (в) уход в чат считается успешной отправкой. Откат: ClaudeTab.kt 2.5.
 // Версия: 2.5 (25.11) — к задаче из сундучка можно приложить картинки: они уходят в чат вместе с архивом (TaskJob.images, startUpload передаёт каждый файл кусками; предупреждение скрипта при успехе доходит до страницы). Откат: ClaudeTab.kt 2.4.
 // Версия: 2.4 (25.11) — перехват fix.zip знает вкладку (tabId): по ней плашка агента в острове находит свой запуск. Откат: ClaudeTab.kt 2.3.
 // Версия: 2.3 (24.11) — перехват fix.zip учитывает метку автоскачивания (__ltFixExpect). Откат: ClaudeTab.kt 2.2.
@@ -54,6 +55,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         private const val TASK_STALL_MS = 40_000L // скрипт отправки не стартовал за это время — страницу грузим заново
         private const val TASK_KICK_MS = 10_000L // то же при заходе на вкладку
         private const val TASK_MAX_RESTARTS = 3
+        /** Этап, который скрипт отправки (send_task.js) ставит сразу после нажатия «Отправить»; с него страницу заново не грузим. */
+        private const val STAGE_SENT = "Отправлено, жду подтверждения"
         private const val TASK_CHUNK = 393216 // кратно 3: куски base64 декодируются по отдельности
         const val MAIN_ID = "main"
         /** Умеет ли установленный Android System WebView отдельные профили (отдельный вход на вкладку). */
@@ -226,6 +229,10 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         @Volatile var lastSig = ""
         @Volatile var stage = ""
         @Volatile var restarts = 0
+        /** Номер попытки: скрипт отправки помечает его в localStorage claude.ai после нажатия «Отправить» и не отправляет повторно. */
+        val attempt: String = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        /** Сообщение уже могло уйти (скрипт дошёл до «Отправить» или страница в чате): страницу заново не грузим. */
+        @Volatile var sentSeen = false
         fun deleteFiles() {
             try { zip.delete() } catch (e: Exception) { }
             images.forEach { try { it.file.delete() } catch (e: Exception) { } }
@@ -278,9 +285,18 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
 
     private fun taskActive(): Boolean = job?.let { !it.done } == true
 
+    /** Страница сейчас в чате (/chat/…): новый диалог создан, то есть сообщение ушло. */
+    private fun onChatPage(v: WebView): Boolean {
+        val p = try { Uri.parse(v.url ?: "").path ?: "" } catch (e: Exception) { "" }
+        return p.startsWith("/chat/")
+    }
+
     /** Страницу грузим заново: onPageFinished снова запустит передачу архива. */
     private fun restartJob(j: TaskJob, v: WebView) {
         if (j.done || j.restarts >= TASK_MAX_RESTARTS) return
+        // Сообщение могло уйти: заново страницу не грузим, иначе задача отправится ещё раз.
+        if (j.sentSeen) return
+        if (j.gen > 0 && onChatPage(v)) { j.sentSeen = true; finishJob(j, true, ""); return }
         j.restarts++
         j.lastChangeAt = System.currentTimeMillis()
         j.lastSig = ""
@@ -301,6 +317,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                     try { o = JSONObject(raw) } catch (e: Exception) { o = null }
                 }
                 if (o == null || o.optString("reqId") != j.reqId) {
+                    // страница ушла в чат — сообщение отправлено, скрипт остался в прежней странице; заново не отправляем
+                    if (j.gen > 0 && onChatPage(v)) { j.sentSeen = true; finishJob(j, true, ""); return@evaluateJavascript }
                     // скрипт отправки ещё не стартовал (или страница потеряла его): ждём, а если долго — грузим заново
                     if (now - j.lastChangeAt > TASK_STALL_MS) restartJob(j, v)
                     return@evaluateJavascript
@@ -308,6 +326,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 val sig = o.optString("state") + "|" + o.optString("msg")
                 if (sig != j.lastSig) { j.lastSig = sig; j.lastChangeAt = now }
                 if (o.optString("state") == "working") j.stage = o.optString("msg")
+                if (o.optString("msg") == STAGE_SENT) j.sentSeen = true
                 when (o.optString("state")) {
                     "sent" -> finishJob(j, true, o.optString("msg")) // непустое msg — предупреждение (например, картинка не подтвердилась)
                     "error" -> finishJob(j, false, o.optString("msg").ifEmpty { "не удалось отправить" })
@@ -350,6 +369,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         val path = u.path ?: "/"
         if (path.startsWith("/login") || path.startsWith("/logout")) {
             finishJob(j, false, "во вкладке нет входа в Claude — войдите и повторите")
+            return
+        }
+        // Страница ушла в чат: сообщение отправлено (скрипт остался в прежней странице). Заново не отправляем.
+        if (path.startsWith("/chat/")) {
+            if (j.gen > 0) { j.sentSeen = true; finishJob(j, true, "") }
             return
         }
         if (path == "/new" || path == "/" || path.isEmpty()) startUpload(v, j)
@@ -399,7 +423,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 if (j.done || j.gen != myGen) return@Thread
                 val imgs = JSONArray()
                 j.images.forEach { imgs.put(JSONObject().put("name", it.name).put("type", it.mime)) }
-                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).put("images", imgs).toString()
+                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).put("images", imgs).put("attempt", j.attempt).toString()
                 activity.runOnUiThread {
                     if (!j.done && j.gen == myGen) view?.evaluateJavascript("window.__ltTaskStart(" + cfg + ")", null)
                 }
