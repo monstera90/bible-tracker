@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.12 (28.11) — `claudeSendTaskPlain(tabId, reqId, text, imagesJson)`: «Обычная задача» из сундучка — текст и картинки уходят в новый диалог как есть, без архива репозитория и без автокоммита fix.zip в этом чате. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.11.
 // Версия: 30.11 (25.11) — `claudeSendTaskImages(tabId, reqId, text, imagesJson)`: то же, что `claudeSendTask`, но с картинками задачи (JSON [{name, mime, b64}]) — они прикрепляются в чате рядом с архивом. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.10.
 // Версия: 30.10 (24.11) — `autoCommitGet` / `autoCommitSave` / `autoCommitSetToken`: настройки автокоммита fix.zip (AutoCommit); токен в страницу не отдаётся. Версию моста не меняет. Откат: NativeBridge.kt 30.9.
 // Версия: 30.9 (24.11) — `utabAdHide(id, on)` / `utabAdHideGet(id)`: скрытие пустых рекламных блоков на вкладке-сайте (UserTabs 8.9, AdHider). Версию моста не меняет: страница проверяет наличие метода.
@@ -980,6 +981,16 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeSendTaskImages(tabId: String?, reqId: String?, text: String?, imagesJson: String?): Boolean {
         if (!activity.pageTrusted) return false
         return try { activity.claudeTab.sendTask(tabId, reqId, text, imagesJson) } catch (e: Exception) { false }
+    }
+
+    /**
+     * «Обычная задача»: текст и картинки ([imagesJson] — [{name, mime, b64}], может быть пустым) уходят в новый диалог вкладки [tabId] как есть.
+     * Архив репозитория не скачивается и не прикладывается, плашка агента не заводится, а fix.zip в этом чате автокоммитом не обрабатывается.
+     */
+    @JavascriptInterface
+    fun claudeSendTaskPlain(tabId: String?, reqId: String?, text: String?, imagesJson: String?): Boolean {
+        if (!activity.pageTrusted) return false
+        return try { activity.claudeTab.sendTask(tabId, reqId, text, imagesJson, true) } catch (e: Exception) { false }
     }
 
     /** Итоги фоновых отправок: JSON-массив [{id, ok, msg}], очередь очищается. */

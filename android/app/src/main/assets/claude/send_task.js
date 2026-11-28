@@ -1,4 +1,5 @@
 /* send_task.js
+   Версия: 1.4 (28.11) — «Обычная задача» (`cfg.plain`): архива нет (файл №0 не нужен), прикрепляются только картинки (если есть), без картинок вложений нет совсем; после отправки скрипт ждёт адрес чата и отдаёт его в статусе (`path`) — оболочка запоминает чат, чтобы fix.zip в нём не забирался автоматически. Откат: send_task.js 1.3.
    Версия: 1.3 (27.11) — защита от дублей сообщения: (а) одна отправка на попытку (`cfg.attempt`): повторные `__ltTaskStart`/`__ltTaskInit`/`__ltTaskPut`, пока отправка идёт, игнорируются; (б) метка «отправлено» в localStorage claude.ai: если страницу перезагрузили после нажатия «Отправить», та же попытка заново не уходит; (в) архив прикрепляется ОДНИМ способом — запасные (drop, paste) только если за 20 с вложения нет совсем; перед отправкой лишние копии вложения (по кнопке «Убрать» у каждой карточки) убираются; (г) текст: после вставки ждём, пока поле его примет, не печатаем второй раз, если длинный текст ушёл в карточку «вставленное», и проверяем, что текст не задвоен. Откат: send_task.js 1.2.
    Версия: 1.2 (25.11) — вместе с архивом в сообщение прикрепляются картинки задачи (cfg.images: [{name, type}], их байты приходят как файлы №1, №2 … — __ltTaskInit(size, idx) / __ltTaskPut(b64, idx); архив — файл №0). Все файлы кладутся в поле выбора файла одной пачкой; если картинку на странице не нашли, отправка идёт дальше, а в итоге (state "sent", msg) стоит предупреждение. Откат: send_task.js 1.1.
    Версия: 1.1 (24.11) — при сбое в сообщении добавляется «снимок» страницы (адрес, видимость, поле ввода, поля выбора файла, размер окна), чтобы было видно, на чём встало; имя файла ищется без учёта регистра; перед началом ждём, пока страница дозагрузится (readyState). Откат: send_task.js 1.0.
@@ -12,7 +13,7 @@
   "use strict";
   if(window.__ltTaskPut) return;
   var bufs = {}, offs = {};
-  var st = { reqId: "", state: "idle", msg: "" };
+  var st = { reqId: "", state: "idle", msg: "", path: "" };
   var running = false, doneKey = "";
   var SENT_PREFIX = "__ltTaskSent_";
   var STAGE_SENT = "Отправлено, жду подтверждения"; // это слово ждёт и ClaudeTab.kt (STAGE_SENT): после него страницу заново не грузим
@@ -31,7 +32,7 @@
     offs[idx] = off;
   };
   function fileReady(idx){ return !!bufs[idx] && offs[idx] === bufs[idx].length; }
-  window.__ltTask = { status: function(){ return { reqId: st.reqId, state: st.state, msg: st.msg }; } };
+  window.__ltTask = { status: function(){ return { reqId: st.reqId, state: st.state, msg: st.msg, path: st.path || "" }; } };
 
   function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
   async function waitFor(fn, ms, step){
@@ -74,6 +75,7 @@
     return c.closest("fieldset") || c.closest("form") || (c.parentElement && c.parentElement.parentElement) || document.body;
   }
   function hasAttachment(base){
+    if(!base) return false;
     try{ return String(document.body.innerText || "").toLowerCase().indexOf(String(base).toLowerCase()) >= 0; }catch(e){ return false; }
   }
   // картинка видна в поле ввода: имя в тексте страницы или в подписях (alt / aria-label / title) миниатюры
@@ -261,7 +263,8 @@
     }
     st = { reqId: cfg.reqId, state: "working", msg: "Жду страницу" };
     try{
-      if(!fileReady(0)) throw new Error("архив не дошёл до страницы");
+      var plain = !!cfg.plain; // «Обычная задача»: без архива репозитория
+      if(!plain && !fileReady(0)) throw new Error("архив не дошёл до страницы");
       var imgs = Array.isArray(cfg.images) ? cfg.images : [];
       for(var ii = 0; ii < imgs.length; ii++){
         if(!fileReady(ii + 1)) throw new Error("картинка «" + imgs[ii].name + "» не дошла до страницы");
@@ -270,13 +273,15 @@
       var c = await waitFor(function(){ return loginPage() ? "login" : composer(); }, 45000);
       if(c === "login" || loginPage()) throw new Error("во вкладке нет входа в Claude — войдите и повторите");
       if(!c) throw new Error("не нашёл поле ввода на странице claude.ai");
-      var base = String(cfg.name || "archive.zip").replace(/\.zip$/i, "");
-      st.msg = imgs.length ? "Прикрепляю архив и картинки" : "Прикрепляю архив";
-      var files = [new File([bufs[0]], cfg.name || "archive.zip", { type: "application/zip", lastModified: Date.now() })];
+      // base — по чему узнаём вложение в странице; у обычной задачи это первая картинка (без картинок вложений нет, base пустой)
+      var base = plain ? (imgs.length ? String(imgs[0].name) : "") : String(cfg.name || "archive.zip").replace(/\.zip$/i, "");
+      var files = [];
+      if(!plain) files.push(new File([bufs[0]], cfg.name || "archive.zip", { type: "application/zip", lastModified: Date.now() }));
       imgs.forEach(function(im, k){
         files.push(new File([bufs[k + 1]], im.name, { type: im.type || "image/png", lastModified: Date.now() }));
       });
-      if(!await attach(files, base)) throw new Error("не удалось прикрепить архив");
+      st.msg = plain ? (imgs.length ? "Прикрепляю картинки" : "Вставляю текст") : (imgs.length ? "Прикрепляю архив и картинки" : "Прикрепляю архив");
+      if(files.length && !await attach(files, base)) throw new Error(plain ? "не удалось прикрепить картинки" : "не удалось прикрепить архив");
       var warn = "";
       if(imgs.length){
         // картинки пришли той же пачкой, что и архив: ждём их миниатюры; не дождались — шлём дальше, но говорим об этом
@@ -284,10 +289,12 @@
         var lost = imgs.filter(function(im){ return !hasImageNamed(im.name); }).map(function(im){ return im.name; });
         if(lost.length) warn = "не удалось подтвердить прикрепление картинок: " + lost.join(", ");
       }
-      st.msg = "Жду загрузки архива";
-      if(!await waitUploaded(120000)) throw new Error("архив не загрузился за 2 минуты");
+      if(files.length){
+        st.msg = plain ? "Жду загрузки картинок" : "Жду загрузки архива";
+        if(!await waitUploaded(120000)) throw new Error(plain ? "картинки не загрузились за 2 минуты" : "архив не загрузился за 2 минуты");
+      }
       // лишние копии вложений (сайт мог принять один файл дважды) — убираем до отправки
-      var extra = await dropExtraCopies(base);
+      var extra = (!plain && base) ? await dropExtraCopies(base) : 0;
       for(var jj = 0; jj < imgs.length; jj++) extra += await dropExtraCopies(imgs[jj].name);
       if(extra) warn = (warn ? warn + "; " : "") + "убрано лишних копий вложений: " + extra;
       st.msg = "Вставляю текст задачи";
@@ -312,6 +319,11 @@
       if(!sent){
         if(persist) clearSentMark(key);
         throw new Error("сообщение не отправилось");
+      }
+      // обычная задача: ждём, пока страница перейдёт в чат, и отдаём его адрес — по нему оболочка отключает в этом чате автоскачивание fix.zip
+      if(plain){
+        await waitFor(function(){ return (location.pathname || "").indexOf("/chat/") === 0; }, 15000, 300);
+        st.path = location.pathname || "";
       }
       st.state = "sent"; st.msg = warn;
     }catch(e){

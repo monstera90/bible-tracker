@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 1.9 (28.11) — режим «Обычная задача»: `canSendPlain()` и `sendTask(tabId, taskId, text, images, plain)` — при plain задача уходит как есть (текст + картинки), без архива репозитория и без автокоммита (мост `claudeSendTaskPlain`). Стили второй плашки выбора режима. Откат: claudetab.js 1.8.
    Версия: 1.8 (27.11) — `sendTask`: пока задача с этим id отправляется (итог ещё не пришёл), повторный вызов не отправляет её второй раз и не увеличивает счётчик ожидания (защита от дубля сообщения в чате). Откат: claudetab.js 1.7.
    Версия: 1.7 (25.11) — отправка задачи с картинками: `sendTask(tabId, taskId, text, images)`, где images — [{name, mime, b64}] (мост `claudeSendTaskImages`); `canSendImages()` — есть ли такой метод в оболочке. Без картинок всё как раньше. Откат: claudetab.js 1.6.
    Версия: 1.6 (24.11) — отправка задачи в новый диалог выбранной вкладки Claude (сундучок у задачи, my.js): `ClaudeTabMod.sendTask(tabId, taskId, text)` → мост `claudeSendTask` (оболочка в фоне скачивает архив репозитория, открывает claude.ai/new в этой вкладке, прикрепляет архив и отправляет текст задачи); итог приходит опросом `claudeTaskResults` → `ClaudeTabMod.onTaskResult(taskId, ok, msg)`. Также наружу: `tabIds()` (номера вкладок для выбора), `canSendTask()`, `ensureStyle()`, `tabIconHtml(n)`. Нужен мост с методами claudeSendTask/claudeTaskResults (иначе выбор показывает пояснение).
@@ -95,7 +96,11 @@
       ".claude-pick-title{font-size:14px;line-height:1.3;margin:0 0 10px;text-align:center;}" +
       ".claude-pick-note{font-size:13px;line-height:1.4;max-width:260px;}" +
       ".claude-pick-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;}" +
-      ".claude-pick-row .claude-sub-tab{width:44px;height:56px;flex:0 0 44px;border-radius:12px;border:1px solid var(--wood,#5b4a8a);box-shadow:1px 2px 5px rgba(0,0,0,.3);}";
+      ".claude-pick-row .claude-sub-tab{width:44px;height:56px;flex:0 0 44px;border-radius:12px;border:1px solid var(--wood,#5b4a8a);box-shadow:1px 2px 5px rgba(0,0,0,.3);}" +
+      // вторая плашка: режим отправки (fix.zip / обычная задача)
+      ".claude-pick-modes{display:flex;flex-direction:column;gap:8px;min-width:200px;}" +
+      ".claude-pick-mode{display:block;width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid var(--wood,#5b4a8a);background:var(--tab-bg,var(--parchment,#f4f0f8));color:var(--wood,#5b4a8a);font:inherit;font-size:15px;line-height:1.2;text-align:center;box-shadow:1px 2px 5px rgba(0,0,0,.3);cursor:pointer;-webkit-appearance:none;appearance:none;-webkit-tap-highlight-color:transparent;}" +
+      ".claude-pick-mode:active{background:var(--wood,#5b4a8a);color:var(--parchment,#f4f0f8);}";
     document.head.appendChild(st);
   }
 
@@ -464,6 +469,10 @@
     var b = window.LifeTrackerNative;
     return !!(canSendTask() && typeof b.claudeSendTaskImages === "function");
   }
+  function canSendPlain(){
+    var b = window.LifeTrackerNative;
+    return !!(canSendTask() && typeof b.claudeSendTaskPlain === "function");
+  }
   function tabIconHtml(n){ return ICON_CLAUDE + '<span class="claude-sub-num">' + n + '</span>'; }
 
   var taskPollTimer = null, taskPendingCount = 0;
@@ -485,13 +494,17 @@
   function taskPollStart(){ if(!taskPollTimer) taskPollTimer = setInterval(taskPoll, 2000); }
   // true — оболочка приняла задачу (дальше всё в фоне; итог — onTaskResult)
   // images — необязательный массив [{name, mime, b64}]: картинки задачи, которые уйдут в чат вместе с архивом
-  function sendTask(tabId, taskId, text, images){
+  // plain — «Обычная задача»: текст и картинки уходят как есть, без архива репозитория; автокоммит в этом чате не работает
+  function sendTask(tabId, taskId, text, images, plain){
     var b = window.LifeTrackerNative;
     if(!canSendTask() || typeof taskId !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(taskId)) return false;
     if(taskInflight[taskId] && Date.now() - taskInflight[taskId] < 6 * 60 * 1000) return true; // эта задача уже отправляется — второй раз не шлём
     var ok = false;
     try{
-      if(images && images.length){
+      if(plain){
+        if(!canSendPlain()) return false;
+        ok = !!b.claudeSendTaskPlain(String(tabId || MAIN), taskId, String(text || ""), JSON.stringify(images || []));
+      }else if(images && images.length){
         if(!canSendImages()) return false;
         ok = !!b.claudeSendTaskImages(String(tabId || MAIN), taskId, String(text || ""), JSON.stringify(images));
       }else{
@@ -505,6 +518,6 @@
   setTimeout(function(){ if(canSendTask()){ taskPendingCount = 1; taskPoll(); } }, 3000);
 
   var api = { render: render, onSwitch: onSwitch, hide: hide,
-    tabIds: tabIds, canSendTask: canSendTask, canSendImages: canSendImages, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
+    tabIds: tabIds, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
   window.ClaudeTabMod = api;
 })();

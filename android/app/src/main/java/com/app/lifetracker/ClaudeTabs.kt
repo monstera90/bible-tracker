@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.5 (28.11) — [sendTask] с plain = true («Обычная задача»): архив репозитория не скачивается, плашка агента не заводится, в чат уходят только текст и картинки. Откат: ClaudeTabs.kt 1.4.
 // Версия: 1.4 (27.11) — [sendTask]: задача, которая уже отправляется (тот же id), второй раз не принимается (ClaudeTaskResults.begin). Откат: ClaudeTabs.kt 1.3.
 // Версия: 1.3 (25.11) — [sendTask] принимает картинки задачи ([imagesJson]): они сохраняются в кэш ([ClaudeTaskImages]) и уходят в чат вместе с архивом. Откат: ClaudeTabs.kt 1.2.
 // Версия: 1.2 (25.11) — `numberOf` (номер вкладки = номер агента) и запуск плашки агента в острове при отправке задачи (AgentRuns.start). Откат: ClaudeTabs.kt 1.1.
@@ -7,6 +8,7 @@ package com.app.lifetracker
 
 import android.content.Context
 import android.widget.FrameLayout
+import java.io.File
 
 class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayout) {
 
@@ -79,7 +81,7 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
      * Сундучок у задачи: в фоне скачать свежий архив репозитория и отправить его вместе с текстом [text] в новый диалог вкладки [id]
      * (текущая вкладка не меняется). true — задача принята; итог (успех/причина сбоя) страница забирает через [ClaudeTaskResults] по [reqId].
      */
-    fun sendTask(id: String?, reqId: String?, text: String?, imagesJson: String? = null): Boolean {
+    fun sendTask(id: String?, reqId: String?, text: String?, imagesJson: String? = null, plain: Boolean = false): Boolean {
         val rid = reqId ?: return false
         if (!REQ_RE.matches(rid)) return false
         val body = (text ?: "").trim().take(MAX_TASK_CHARS)
@@ -90,8 +92,10 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
             obtain(want) ?: return false
         }
         if (!ClaudeTaskResults.begin(rid)) return true // эта задача уже отправляется: вторую отправку не ставим
-        AgentRuns.start(want, rid) // плашка агента в острове: шаг 1
-        InAppIsland.ensureBackground(activity)
+        if (!plain) {
+            AgentRuns.start(want, rid) // плашка агента в острове: шаг 1 (у обычной задачи шагов репозитория и коммита нет — плашки нет)
+            InAppIsland.ensureBackground(activity)
+        }
         Thread {
             try {
                 val images = try {
@@ -100,14 +104,14 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
                     ClaudeTaskResults.add(rid, false, "не удалось принять картинки задачи: " + (e.message ?: "ошибка"))
                     return@Thread
                 }
-                val zip = try {
+                val zip: File? = if (plain) null else try {
                     ClaudeTaskZip.download(activity.cacheDir, rid)
                 } catch (e: Exception) {
                     images.forEach { try { it.file.delete() } catch (x: Exception) { } }
                     ClaudeTaskResults.add(rid, false, "не удалось скачать репозиторий: " + (e.message ?: "нет сети"))
                     return@Thread
                 }
-                activity.runOnUiThread { tab.enqueueTask(rid, body, zip, images) }
+                activity.runOnUiThread { tab.enqueueTask(rid, body, zip, images, plain) }
             } catch (e: Exception) {
                 ClaudeTaskResults.add(rid, false, "не удалось отправить: " + (e.message ?: "ошибка"))
             }

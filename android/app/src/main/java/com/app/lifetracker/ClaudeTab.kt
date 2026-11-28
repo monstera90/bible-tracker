@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.7 (28.11) — «Обычная задача»: задача уходит без архива репозитория (TaskJob.zip может быть null, TaskJob.plain), а чат, созданный такой отправкой, запоминается ([markPlainChat], SharedPreferences): fix.zip в нём не скачивается автоматически (auto_fix.js выключается для адреса чата) и автокоммитом не забирается (скачивание идёт как у любого файла). Откат: ClaudeTab.kt 2.6.
 // Версия: 2.6 (27.11) — отправка задачи не дублируется: (а) у попытки свой номер (TaskJob.attempt) — скрипт отправки по нему не даёт отправить одно и то же дважды, даже после перезагрузки страницы; (б) если страница ушла в чат (/chat/…) или скрипт дошёл до «Отправить» (sentSeen), страницу заново не грузим — раньше при потере состояния скрипта через 40 с срабатывал restartJob и задача уходила в новый чат ещё раз (до трёх раз); (в) уход в чат считается успешной отправкой. Откат: ClaudeTab.kt 2.5.
 // Версия: 2.5 (25.11) — к задаче из сундучка можно приложить картинки: они уходят в чат вместе с архивом (TaskJob.images, startUpload передаёт каждый файл кусками; предупреждение скрипта при успехе доходит до страницы). Откат: ClaudeTab.kt 2.4.
 // Версия: 2.4 (25.11) — перехват fix.zip знает вкладку (tabId): по ней плашка агента в острове находит свой запуск. Откат: ClaudeTab.kt 2.3.
@@ -67,6 +68,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         private const val PREFS = "claude_tab"
         private const val KEY_ENABLED = "auto_enabled"
         private const val KEY_TEXT = "auto_text"
+        private const val KEY_PLAIN_CHATS = "plain_chats"
+        private const val MAX_PLAIN_CHATS = 60
         private const val OFFSCREEN_X = 20000f
         private const val STATUS_POLL_MS = 4000L
         private val ALLOWED_HOSTS = listOf("claude.ai", "anthropic.com", "claude.com")
@@ -221,7 +224,9 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     }
 
     // ---------- отправка задачи в новый диалог ----------
-    private class TaskJob(val reqId: String, val text: String, val zip: File, val images: List<ClaudeTaskImage> = emptyList()) {
+    private class TaskJob(val reqId: String, val text: String, val zip: File?, val images: List<ClaudeTaskImage> = emptyList(), val plain: Boolean = false) {
+        /** Адрес чата (/chat/…), который страница назвала после отправки (нужен у обычной задачи). */
+        @Volatile var chatPath = ""
         @Volatile var gen = 0
         @Volatile var done = false
         /** Когда в последний раз что-то двигалось: загрузка страницы, кусок архива, смена этапа в скрипте. */
@@ -234,7 +239,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         /** Сообщение уже могло уйти (скрипт дошёл до «Отправить» или страница в чате): страницу заново не грузим. */
         @Volatile var sentSeen = false
         fun deleteFiles() {
-            try { zip.delete() } catch (e: Exception) { }
+            try { zip?.delete() } catch (e: Exception) { }
             images.forEach { try { it.file.delete() } catch (e: Exception) { } }
         }
     }
@@ -242,8 +247,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     private var job: TaskJob? = null
 
     /** Поток интерфейса. Задачи одной вкладки идут по очереди: каждая — в свой новый чат. */
-    fun enqueueTask(reqId: String, text: String, zip: File, images: List<ClaudeTaskImage> = emptyList()) {
-        taskQueue.addLast(TaskJob(reqId, text, zip, images))
+    fun enqueueTask(reqId: String, text: String, zip: File?, images: List<ClaudeTaskImage> = emptyList(), plain: Boolean = false) {
+        taskQueue.addLast(TaskJob(reqId, text, zip, images, plain))
         if (job == null) nextTask()
     }
 
@@ -284,6 +289,34 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     }
 
     private fun taskActive(): Boolean = job?.let { !it.done } == true
+
+    // ---------- чаты «обычной задачи» ----------
+    // В таких чатах fix.zip не качается автоматически и не коммитится: адреса (/chat/<id>) помнит вкладка (SharedPreferences, не больше MAX_PLAIN_CHATS).
+    private fun plainChatList(): MutableList<String> =
+        (prefs.getString(k(KEY_PLAIN_CHATS), "") ?: "").split("\n").filter { it.startsWith("/chat/") }.toMutableList()
+
+    /** Путь /chat/<id> из адреса claude.ai; null — страница не в чате. */
+    private fun chatPathOf(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        return try {
+            val u = Uri.parse(url)
+            if (u.host?.lowercase() != "claude.ai") null else u.path?.takeIf { it.startsWith("/chat/") && it.length > 6 }?.trimEnd('/')
+        } catch (e: Exception) { null }
+    }
+
+    private fun markPlainChat(path: String) {
+        val l = plainChatList()
+        if (path in l) return
+        l.add(path)
+        while (l.size > MAX_PLAIN_CHATS) l.removeAt(0)
+        prefs.edit().putString(k(KEY_PLAIN_CHATS), l.joinToString("\n")).apply()
+    }
+
+    /** Открыт ли сейчас чат, созданный обычной задачей. */
+    private fun inPlainChat(v: WebView?): Boolean {
+        val p = chatPathOf(try { v?.url } catch (e: Exception) { null }) ?: return false
+        return p in plainChatList()
+    }
 
     /** Страница сейчас в чате (/chat/…): новый диалог создан, то есть сообщение ушло. */
     private fun onChatPage(v: WebView): Boolean {
@@ -327,6 +360,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 if (sig != j.lastSig) { j.lastSig = sig; j.lastChangeAt = now }
                 if (o.optString("state") == "working") j.stage = o.optString("msg")
                 if (o.optString("msg") == STAGE_SENT) j.sentSeen = true
+                o.optString("path").let { if (it.startsWith("/chat/")) j.chatPath = it }
                 when (o.optString("state")) {
                     "sent" -> finishJob(j, true, o.optString("msg")) // непустое msg — предупреждение (например, картинка не подтвердилась)
                     "error" -> finishJob(j, false, o.optString("msg").ifEmpty { "не удалось отправить" })
@@ -341,6 +375,11 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         j.done = true
         handler.removeCallbacks(jobTimeout)
         handler.removeCallbacks(taskPoll)
+        // обычная задача ушла: чат запоминается, чтобы fix.zip в нём не забирался автоматически (адрес берём у страницы, а если её нет — у самой вкладки)
+        if (ok && j.plain) {
+            val cp = if (j.chatPath.startsWith("/chat/")) j.chatPath else chatPathOf(try { view?.url } catch (e: Exception) { null })
+            if (cp != null) markPlainChat(cp)
+        }
         ClaudeTaskResults.add(j.reqId, ok, msg)
         j.deleteFiles()
         if (job === j) job = null
@@ -388,12 +427,15 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
             finishJob(j, false, "в приложении нет скрипта отправки")
             return
         }
-        // файл №0 — архив, №1… — картинки задачи (send_task.js 1.2)
-        val files = listOf(j.zip) + j.images.map { it.file }
-        v.evaluateJavascript(script + "\nwindow.__ltTaskInit(" + j.zip.length() + ", 0);", null)
+        // файл №0 — архив (у обычной задачи его нет), №1… — картинки задачи (send_task.js 1.2)
+        val zip = j.zip
+        val files = ArrayList<Pair<Int, File>>()
+        if (zip != null) files.add(0 to zip)
+        j.images.forEachIndexed { i, im -> files.add((i + 1) to im.file) }
+        v.evaluateJavascript(script + (if (zip != null) "\nwindow.__ltTaskInit(" + zip.length() + ", 0);" else ""), null)
         Thread {
             try {
-                for ((idx, f) in files.withIndex()) {
+                for ((idx, f) in files) {
                     if (idx > 0) {
                         val size = f.length()
                         activity.runOnUiThread {
@@ -423,7 +465,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 if (j.done || j.gen != myGen) return@Thread
                 val imgs = JSONArray()
                 j.images.forEach { imgs.put(JSONObject().put("name", it.name).put("type", it.mime)) }
-                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", ClaudeTaskZip.FILE_NAME).put("images", imgs).put("attempt", j.attempt).toString()
+                val cfg = JSONObject().put("reqId", j.reqId).put("text", j.text).put("name", if (zip != null) ClaudeTaskZip.FILE_NAME else "").put("plain", j.plain).put("images", imgs).put("attempt", j.attempt).toString()
                 activity.runOnUiThread {
                     if (!j.done && j.gen == myGen) view?.evaluateJavascript("window.__ltTaskStart(" + cfg + ")", null)
                 }
@@ -488,7 +530,8 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 // fix.zip с ответом агента забирает автокоммит (AutoCommit); любой другой файл — как раньше.
                 // Скрипт автоскачивания (auto_fix.js) только что нажал на карточку? Тогда zip без имени — тоже ожидаемый fix.zip.
                 val decide = { expected: Boolean ->
-                    val taken = try {
+                    // в чате «обычной задачи» fix.zip не коммитится: файл скачивается как любой другой
+                    val taken = if (inPlainChat(v)) false else try {
                         AutoCommit.intercept(activity, v, PageDownloadLogic.pageFileName(disposition, mime), url, ua, mime, cookieMgr(), expected, tabId)
                     } catch (e: Exception) { false }
                     if (!taken) {
@@ -574,7 +617,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                     if (raw != null && raw != "null" && raw.startsWith("{")) lastStatus = raw
                 }
                 // Автоскачивание fix.zip (auto_fix.js): свежая настройка в страницу и ошибка скрипта — в «Последний результат».
-                v.evaluateJavascript("window.__ltFixCfg={enabled:" + AutoCommit.autoClickReady(activity) + "};(window.__ltFix?window.__ltFix.status():null)") { raw ->
+                v.evaluateJavascript("window.__ltFixCfg={enabled:" + (AutoCommit.autoClickReady(activity) && !inPlainChat(v)) + "};(window.__ltFix?window.__ltFix.status():null)") { raw ->
                     try {
                         if (raw != null && raw.startsWith("{")) {
                             val o = JSONObject(raw)
@@ -605,7 +648,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
         } catch (e: Exception) {
             return
         }
-        v.evaluateJavascript("window.__ltFixCfg={enabled:" + AutoCommit.autoClickReady(activity) + "};\n" + script, null)
+        v.evaluateJavascript("window.__ltFixCfg={enabled:" + (AutoCommit.autoClickReady(activity) && !inPlainChat(v)) + "};\n" + script, null)
     }
 
     private fun injectAuto(v: WebView?) {

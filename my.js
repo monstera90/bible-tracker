@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.6 (28.11) — сундучок: после выбора вкладки Claude появляется вторая плашка с режимом — «fix.zip» (как раньше: архив репозитория + задача, потом скачивание fix.zip и коммит) и «Обычная задача» (текст и картинки уходят как есть, без архива и без автокоммита; `openClaudeTaskModePicker`, `sendTaskToClaude(id, tabId, mode)`, `ClaudeTabMod.sendTask(..., plain)`). Откат: 154.5.
    Версия: 154.5 (27.11) — вкладка «Задачи в работе» (сундучок): убрана кнопка «+» (`syncTaskFabRowForTab`, `renderTaskTabList`); задачи появляются там только после отправки агенту. Откат: 154.4.
    Версия: 154.4 (25.11) — сундучок: картинки задачи («![[имя]]» в тексте) теперь уходят агенту вместе с текстом и архивом репозитория (`collectTaskImagesForClaude` читает файлы из images/ через MdEditor.getImageBlobUrl → `ClaudeTabMod.sendTask(tab, id, text, images)`). В тексте «![[имя]]» заменяется пометкой «[приложено изображение: имя]»; картинка, которой нет на этом устройстве, или не влезшая в лимит (10 шт., 16 МБ), не прикладывается, о чём говорит сообщение. Отметка «в работе» ставится сразу, при сбое сундучок возвращается как раньше. Откат: my.js 154.3.
    Версия: 154.3 (25.11)
@@ -24082,7 +24083,7 @@
     var ov = document.getElementById("claudePickOverlay");
     if(ov && ov.parentNode) ov.parentNode.removeChild(ov);
   }
-  // плашка выбора вкладки Claude; onPick(tabId) вызывается после выбора
+  // плашка выбора вкладки Claude; onPick(tabId, mode) вызывается после выбора вкладки и режима (mode: "fix" | "plain")
   function openClaudeTaskPicker(id, onPick){
     closeClaudeTaskPicker();
     var mod = window.ClaudeTabMod;
@@ -24108,14 +24109,43 @@
         bt.innerHTML = mod.tabIconHtml(i + 1);
         bt.addEventListener("click", function(e){
           e.stopPropagation();
-          closeClaudeTaskPicker();
-          onPick(tid);
+          openClaudeTaskModePicker(function(mode){ onPick(tid, mode); });
         });
         row.appendChild(bt);
       });
     }
     ov.addEventListener("click", function(e){
       if(e.target === ov && Date.now() - openedAt > 350) closeClaudeTaskPicker(); // тап мимо плашки; «призрак» того же нажатия игнорируем
+    });
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+  }
+  // вторая плашка (в том же стиле): режим отправки. «fix.zip» — всё как раньше (архив репозитория, ответ-архив, коммит);
+  // «Обычная задача» — текст и картинки как есть, без репозитория и автокоммита. onPick(mode) после выбора
+  function openClaudeTaskModePicker(onPick){
+    closeClaudeTaskPicker();
+    var openedAt = Date.now();
+    var ov = document.createElement("div");
+    ov.id = "claudePickOverlay";
+    ov.className = "claude-pick-overlay";
+    var box = document.createElement("div");
+    box.className = "claude-pick";
+    box.innerHTML = '<div class="claude-pick-title">Как отправить задачу</div><div class="claude-pick-modes"></div>';
+    var list = box.querySelector(".claude-pick-modes");
+    [["fix", "fix.zip"], ["plain", "Обычная задача"]].forEach(function(m){
+      var bt = document.createElement("button");
+      bt.type = "button";
+      bt.className = "claude-pick-mode";
+      bt.textContent = m[1];
+      bt.addEventListener("click", function(e){
+        e.stopPropagation();
+        closeClaudeTaskPicker();
+        onPick(m[0]);
+      });
+      list.appendChild(bt);
+    });
+    ov.addEventListener("click", function(e){
+      if(e.target === ov && Date.now() - openedAt > 350) closeClaudeTaskPicker();
     });
     ov.appendChild(box);
     document.body.appendChild(ov);
@@ -24168,17 +24198,23 @@
   }
   // отправка: true — оболочка приняла задачу (или, если у задачи есть картинки, принято к отправке: они собираются в фоне),
   // сундучок переведён в «в работе» с номером вкладки
-  function sendTaskToClaude(id, tabId){
+  function sendTaskToClaude(id, tabId, mode){
     if(isGroupTaskId(id) && isGroupTasksReadOnly()) return false;
+    var plain = mode === "plain"; // «Обычная задача»: без архива репозитория и без автокоммита
     var task = getTaskById(id), mod = window.ClaudeTabMod;
     if(!task) return false;
     var rawText = String(task.c.text || "").trim();
     var imgNames = claudeTaskImageNames(rawText);
     var textOnly = rawText.replace(/!\[\[([^\[\]\n]+)\]\]/g, "").trim();
     if(!textOnly && !imgNames.length){ showShortToast("У задачи нет текста — отправлять нечего", 2600); return false; }
-    var withImages = imgNames.length > 0 && !!mod && typeof mod.canSendImages === "function" && mod.canSendImages();
+    if(plain && !(mod && typeof mod.canSendPlain === "function" && mod.canSendPlain())){
+      showShortToast("«Обычная задача» работает только в обновлённом приложении (APK)", 4000);
+      return false;
+    }
+    // обычная задача уходит одним методом моста, он принимает и картинки; для fix.zip картинки — отдельный метод
+    var withImages = imgNames.length > 0 && !!mod && (plain || (typeof mod.canSendImages === "function" && mod.canSendImages()));
     if(!withImages){
-      if(!mod || typeof mod.sendTask !== "function" || !textOnly || !mod.sendTask(tabId, id, rawText)){
+      if(!mod || typeof mod.sendTask !== "function" || !textOnly || !mod.sendTask(tabId, id, rawText, undefined, plain)){
         showShortToast("Не удалось начать отправку в Claude", 2800);
         return false;
       }
@@ -24202,7 +24238,7 @@
         }).trim();
         var bad = res.missing.concat(res.skipped);
         if(bad.length) showShortToast("Не приложены картинки: " + bad.join(", ") + (res.skipped.length ? " (лимит 10 шт., 16 МБ)" : " (нет на этом устройстве)"), 6000);
-        if(!mod.sendTask(tabId, id, text, res.images)) onClaudeTaskResult(id, false, "не удалось начать отправку");
+        if(!mod.sendTask(tabId, id, text, res.images, plain)) onClaudeTaskResult(id, false, "не удалось начать отправку");
       }).catch(function(e){
         onClaudeTaskResult(id, false, "не удалось собрать картинки: " + (e && e.message ? e.message : e));
       });
@@ -26157,9 +26193,9 @@
       };
       bindTapOrHold(worktasksBtn, function(){
         flushPendingTaskEdits();
-        openClaudeTaskPicker(id, function(tabId){
+        openClaudeTaskPicker(id, function(tabId, mode){
           taskKeepListStill(body, function(){
-            if(sendTaskToClaude(id, tabId)) afterWorktasksChange();
+            if(sendTaskToClaude(id, tabId, mode)) afterWorktasksChange();
           });
         });
       }, function(){
@@ -27057,8 +27093,8 @@
       if(worktasksBtn){
         bindTapOrHold(worktasksBtn, function(){
           flushPendingTaskEdits();
-          openClaudeTaskPicker(id, function(tabId){
-            taskKeepListStill(body, function(){ if(sendTaskToClaude(id, tabId)) renderRowView(id); });
+          openClaudeTaskPicker(id, function(tabId, mode){
+            taskKeepListStill(body, function(){ if(sendTaskToClaude(id, tabId, mode)) renderRowView(id); });
           });
         }, function(){
           taskKeepListStill(body, function(){ flushPendingTaskEdits(); clearTaskWorkState(id); renderRowView(id); });
