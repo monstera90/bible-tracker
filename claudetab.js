@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 2.1 (28.11) — учёт «когда вкладке Claude последний раз давали задачу через приложение» (localStorage `claudeTabLastSent_v1`, {id вкладки: время}, только это устройство) и выбор свободного агента: `pickFreeTab()` — вкладка, которой не давали задач последние 5 ч 1 мин (из нескольких — та, что простаивает дольше всех; не бывало задач — раньше всех), `nextFreeAt()` — когда освободится ближайшая. Время ставится при принятой оболочкой отправке и откатывается, если пришёл итог «не отправлено». Откат: claudetab.js 2.0.
    Версия: 2.0 (28.11) — `focusTab(id)`: выбрать вкладку ряда перед показом вкладки Claude (нажатие на карточку агента в острове открывает вкладку, где он работает). Откат: claudetab.js 1.9.
    Версия: 1.9 (28.11) — режим «Обычная задача»: `canSendPlain()` и `sendTask(tabId, taskId, text, images, plain)` — при plain задача уходит как есть (текст + картинки), без архива репозитория и без автокоммита (мост `claudeSendTaskPlain`). Стили второй плашки выбора режима. Откат: claudetab.js 1.8.
    Версия: 1.8 (27.11) — `sendTask`: пока задача с этим id отправляется (итог ещё не пришёл), повторный вызов не отправляет её второй раз и не увеличивает счётчик ожидания (защита от дубля сообщения в чате). Откат: claudetab.js 1.7.
@@ -477,7 +478,39 @@
   function tabIconHtml(n){ return ICON_CLAUDE + '<span class="claude-sub-num">' + n + '</span>'; }
 
   var taskPollTimer = null, taskPendingCount = 0;
-  var taskInflight = {}; // id задачи → когда отправили; снимается, когда пришёл итог (или через 6 минут)
+  var taskInflight = {}; // id задачи → {t: когда отправили, tab: вкладка, prev: прежнее «последний раз» вкладки}; снимается, когда пришёл итог (или через 6 минут)
+
+  // ---------- свободный агент ----------
+  // Агент = вкладка Claude. Свободен, если последние 5 часов и 1 минуту ему не давались задачи через приложение.
+  var LAST_KEY = "claudeTabLastSent_v1";
+  var FREE_MS = (5 * 60 + 1) * 60 * 1000;
+  function lastLoad(){
+    try{
+      var o = JSON.parse(localStorage.getItem(LAST_KEY) || "{}");
+      return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+    }catch(e){ return {}; }
+  }
+  function lastSave(m){ try{ localStorage.setItem(LAST_KEY, JSON.stringify(m)); }catch(e){} }
+  function lastOf(m, id){ var v = m[id]; return (typeof v === "number" && isFinite(v) && v > 0) ? v : 0; }
+  // свободная вкладка (id) или null; из нескольких — та, что простаивает дольше всех (при равенстве — первая в ряду)
+  function pickFreeTab(){
+    var m = lastLoad(), now = Date.now(), best = null, bestT = Infinity;
+    tabIds().forEach(function(id){
+      var t = lastOf(m, id);
+      if(now - t > FREE_MS && t < bestT){ best = id; bestT = t; }
+    });
+    return best;
+  }
+  // когда освободится ближайший агент (мс), или 0, если свободный уже есть / вкладок нет
+  function nextFreeAt(){
+    var m = lastLoad(), now = Date.now(), min = Infinity, ids = tabIds();
+    for(var i = 0; i < ids.length; i++){
+      var at = lastOf(m, ids[i]) + FREE_MS;
+      if(at < now) return 0;
+      if(at < min) min = at;
+    }
+    return min === Infinity ? 0 : min;
+  }
   function taskPoll(){
     var b = window.LifeTrackerNative;
     if(!b || typeof b.claudeTaskResults !== "function") return;
@@ -487,6 +520,11 @@
     arr.forEach(function(r){
       if(!r || typeof r.id !== "string") return;
       if(taskPendingCount > 0) taskPendingCount--;
+      var fl = taskInflight[r.id];
+      if(fl && !r.ok){ // не отправлено — вкладка не получала задачу: возвращаем прежнее «последний раз», если его не перекрыла более новая отправка
+        var lm = lastLoad();
+        if(lm[fl.tab] === fl.t){ if(fl.prev) lm[fl.tab] = fl.prev; else delete lm[fl.tab]; lastSave(lm); }
+      }
       delete taskInflight[r.id];
       try{ if(typeof api.onTaskResult === "function") api.onTaskResult(r.id, !!r.ok, String(r.msg || "")); }catch(e){}
     });
@@ -499,7 +537,7 @@
   function sendTask(tabId, taskId, text, images, plain){
     var b = window.LifeTrackerNative;
     if(!canSendTask() || typeof taskId !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(taskId)) return false;
-    if(taskInflight[taskId] && Date.now() - taskInflight[taskId] < 6 * 60 * 1000) return true; // эта задача уже отправляется — второй раз не шлём
+    if(taskInflight[taskId] && Date.now() - taskInflight[taskId].t < 6 * 60 * 1000) return true; // эта задача уже отправляется — второй раз не шлём
     var ok = false;
     try{
       if(plain){
@@ -512,7 +550,13 @@
         ok = !!b.claudeSendTask(String(tabId || MAIN), taskId, String(text || ""));
       }
     }catch(e){ ok = false; }
-    if(ok){ taskInflight[taskId] = Date.now(); taskPendingCount++; taskPollStart(); }
+    if(ok){
+      var tid = String(tabId || MAIN), now = Date.now(), lm = lastLoad();
+      taskInflight[taskId] = { t: now, tab: tid, prev: lastOf(lm, tid) };
+      lm[tid] = now;
+      lastSave(lm);
+      taskPendingCount++; taskPollStart();
+    }
     return ok;
   }
   // итоги прежних отправок (страницу могли перезагрузить, пока шла отправка)
@@ -530,6 +574,6 @@
   }
 
   var api = { focusTab: focusTab, render: render, onSwitch: onSwitch, hide: hide,
-    tabIds: tabIds, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
+    tabIds: tabIds, pickFreeTab: pickFreeTab, nextFreeAt: nextFreeAt, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
   window.ClaudeTabMod = api;
 })();

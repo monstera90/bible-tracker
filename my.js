@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.9 (28.11) — сундучок: долгое нажатие на НЕАКТИВНЫЙ чемоданчик (состояние «off») отправляет задачу любому свободному агенту — вкладке Claude, которой не давали задач последние 5 ч 1 мин (`sendTaskToFreeClaude`, `ClaudeTabMod.pickFreeTab`/`nextFreeAt`; claudetab.js 2.1): показывается плашка режима («fix.zip» / «Обычная задача»), вкладка выбирается сама; свободных нет — сообщение, когда освободится ближайший. Долгое нажатие на активный чемоданчик по-прежнему сбрасывает отметку. Откат: my.js 154.8.
    Версия: 154.8 (28.11) — кнопка-колесо в нижнем ряду вкладки «В работе» (`#taskWorkSettingsBtn`, слот 2 — место снятой «+», слева от полноэкранного режима): видимость в `syncTaskFabRowForTab`, обработчик в `initTaskGlobalToolbar`, экран «Дополнительные настройки вкладки «В работе»» — `renderWorkTabSettingsScreen` (пока пустой, `#taskWorkSettingsBody`). Откат: my.js 154.7.
    Версия: 154.7 (28.11) — нажатие на раскрытую карточку агента Claude в острове открывает вкладку Claude (`set2s_10` добавлена в `ISLAND_OPEN_TABS`) и именно ту вкладку ряда, где работает агент (`__ltOpenTab` понимает `set2s_10_<id>`, `ClaudeTabMod.focusTab`). Откат: my.js 154.6.
    Версия: 154.6 (28.11) — сундучок: после выбора вкладки Claude появляется вторая плашка с режимом — «fix.zip» (как раньше: архив репозитория + задача, потом скачивание fix.zip и коммит) и «Обычная задача» (текст и картинки уходят как есть, без архива и без автокоммита; `openClaudeTaskModePicker`, `sendTaskToClaude(id, tabId, mode)`, `ClaudeTabMod.sendTask(..., plain)`). Откат: 154.5.
@@ -24100,6 +24101,26 @@
     return '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + (n ? ' has-claude-num' : '') + '" data-id="' + id + '" title="' +
       (n ? 'В работе: отправлено в Claude ' + n : 'В работе') + '">' + (n ? '<span class="task-claude-num">' + n + '</span>' : TASK_MOVE_ICON_SVG("worktasks")) + '</button>';
   }
+  // долгое нажатие на неактивный чемоданчик: задача уходит свободному агенту (вкладке Claude без задач последние 5 ч 1 мин).
+  // Режим («fix.zip» / «Обычная задача») спрашивается той же второй плашкой; вкладка выбирается после выбора режима. after() — перерисовка строки
+  function sendTaskToFreeClaude(id, after){
+    var mod = window.ClaudeTabMod;
+    if(!mod || typeof mod.pickFreeTab !== "function" || typeof mod.canSendTask !== "function" || !mod.canSendTask()){
+      showShortToast("Отправка задачи в Claude работает только в приложении (APK) с обновлённой оболочкой", 4000);
+      return;
+    }
+    function noFree(){
+      var at = typeof mod.nextFreeAt === "function" ? mod.nextFreeAt() : 0, d = at ? new Date(at) : null;
+      var hhmm = d ? ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) : "";
+      showShortToast("Свободных агентов нет: каждому давали задачу за последние 5 ч 1 мин" + (hhmm ? ". Ближайший освободится в " + hhmm : ""), 6000);
+    }
+    if(!mod.pickFreeTab()){ noFree(); return; }
+    openClaudeTaskModePicker(function(mode){
+      var tabId = mod.pickFreeTab(); // выбор мог занять время — берём свободного на момент отправки
+      if(!tabId){ noFree(); return; }
+      if(sendTaskToClaude(id, tabId, mode) && typeof after === "function") after();
+    });
+  }
   function closeClaudeTaskPicker(){
     var ov = document.getElementById("claudePickOverlay");
     if(ov && ov.parentNode) ov.parentNode.removeChild(ov);
@@ -26252,6 +26273,12 @@
           });
         });
       }, function(){
+        var cur = getTaskById(id);
+        if(cur && getTaskWorkState(cur) === "off"){ // неактивный чемоданчик: удержание — отправить свободному агенту
+          flushPendingTaskEdits();
+          sendTaskToFreeClaude(id, function(){ taskKeepListStill(body, afterWorktasksChange); });
+          return;
+        }
         taskKeepListStill(body, function(){
           flushPendingTaskEdits();
           clearTaskWorkState(id);
@@ -27150,6 +27177,12 @@
             taskKeepListStill(body, function(){ if(sendTaskToClaude(id, tabId, mode)) renderRowView(id); });
           });
         }, function(){
+          var cur = getTaskById(id);
+          if(cur && getTaskWorkState(cur) === "off"){ // неактивный чемоданчик: удержание — отправить свободному агенту
+            flushPendingTaskEdits();
+            sendTaskToFreeClaude(id, function(){ taskKeepListStill(body, function(){ renderRowView(id); }); });
+            return;
+          }
           taskKeepListStill(body, function(){ flushPendingTaskEdits(); clearTaskWorkState(id); renderRowView(id); });
         });
       }
