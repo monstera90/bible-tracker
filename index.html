@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <!-- index.html
+   Версия: 42.1 (28.11) — кнопка-колесо `#taskWorkSettingsBtn` (`.task-worktabset-wrap`) в нижнем ряду вкладки «В работе»: экран «Дополнительные настройки вкладки «В работе»» (пока пустой). Откат: index.html 42.0.
      Версия: 42.0 (22.11) — структурная правка: кнопка вкладки «Сохранение загрузок» `settingsTabSet2Btn17` (set2s_17, рядом с «Системой») и подключён `downloadfolders.js` (ТЗ TZ_downloads.md, этап 4). Откат: index.html 41.0.
      Версия: 41.0 (15.11) — структурная правка: подключён `hotkeys.js` (горячие клавиши bluetooth-клавиатуры: Ctrl+←/→ — нижний ряд язычков, Ctrl+↑/↓ — боковой ряд).
      Версия: 40.0 (11.11)
@@ -272,6 +273,12 @@ window.addEventListener("error", function(e){
            что и у остальных info-кнопок проекта (см. my.js), своя копия
            svg прямо тут по тому же принципу, что у "Ж"/"Аа"/
            текстовыделителя выше. -->
+      <!-- Колесо «Дополнительные настройки вкладки «В работе»» (.task-worktabset-wrap/taskWorkSettingsBtn, ТЗ 28.11): слот 2 —
+           место снятой «+», сразу слева от кнопки полноэкранного режима. Видна только на вкладке «В работе» (worktasks),
+           см. syncTaskFabRowForTab; открывает экран renderWorkTabSettingsScreen (my.js). -->
+      <span class="task-worktabset-wrap" id="taskWorkSettingsWrap">
+        <button type="button" class="mdeditor-fab-btn" id="taskWorkSettingsBtn" title="Дополнительные настройки вкладки «В работе»"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></button>
+      </span>
       <span class="task-info-wrap" id="taskInfoWrap">
         <button type="button" class="mdeditor-fab-btn" id="taskInfoBtn" title="Что означают кнопки задач"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"></circle><path d="M12 11v6"></path><circle cx="12" cy="7.7" r="1" fill="currentColor" stroke="none"></circle></svg></button>
       </span>

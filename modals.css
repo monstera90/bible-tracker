@@ -1,5 +1,6 @@
 /* ===========================================================================
    modals.css
+   Версия: 23.10 (28.11) — колесо «Дополнительные настройки вкладки «В работе»» `.task-worktabset-wrap` (слот 2, место снятой «+»): позиция, левша, ползунок ряда, перетаскивание, размер. Откат: modals.css 23.9.
    Версия: 23.9 (24.11) — сундучок у задачи с цифрой вкладки Claude: `.task-worktasks-btn .task-claude-num` (my.js 154.0). Откат: modals.css 23.8.
    Версия: 23.8 (22.11) — красная строка в режиме правки задачи: `.task-editable .ed-para::before` (1ch, как `.fmt-para` в обычном виде; my.js 153.8, `taskEditFill`). Откат: modals.css 23.7.
    Версия: 23.7 (22.11) — `#taskFabHomeStub`: «домик» на вкладках задач стал кнопкой (pointer-events:auto, cursor:pointer). Откат: modals.css 23.6.
@@ -2300,6 +2301,16 @@
     z-index:5;
   }
   .task-fullscreen-wrap.visible{ display:flex; }
+  /* Колесо «Дополнительные настройки вкладки «В работе»» (ТЗ 28.11) — слот 2: место снятой «+» (на этой вкладке она скрыта),
+     сразу слева от кнопки полноэкранного режима (слот 1). Видна только на вкладке worktasks (syncTaskFabRowForTab, my.js). */
+  .task-worktabset-wrap{
+    display:none;
+    position:absolute;
+    inset-inline-end:calc(var(--fab-gap, 8px) + 2 * (var(--fab-size, 30px) + var(--fab-gap, 8px)));
+    bottom:var(--fab-gap, 8px);
+    z-index:5;
+  }
+  .task-worktabset-wrap.visible{ display:flex; }
   /* "глаз" — переехал сюда (ТЗ пользователя от 18.09) с прежнего right:248,
      который теперь занят кнопкой режима чтения выше (.task-reading-wrap) —
      та должна быть видна на ЛЮБОЙ вкладке задач, а "глаз" только на
@@ -2859,8 +2870,8 @@ html.lefty .settings-modal-box > *{ direction:ltr; }
 /* ряды fab-кнопок и одиночные кнопки, позиционируемые inset-inline-end
    (селекторы по классу, а не по «ребёнок окна»: часть из них живёт внутри
    #settingsTabContent) */
-html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
-html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
+html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-worktabset-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home){ direction:rtl; }
+html.lefty :is(.mdeditor-fab-row, .task-tag-wrap, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, .task-fullscreen-wrap, .task-worktabset-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, .task-info-wrap, .task-attach-wrap) > *{ direction:ltr; }
 /* всплывающие столбики (inset-inline-start:0 — под rtl это правый край
    обёртки, то есть зеркально обычной раскладке); удвоенный класс + тег —
    чтобы перебить сброс «> *» выше, где попап — прямой ребёнок обёртки */
@@ -2886,6 +2897,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-iconsize-wrap,
 .task-format-wrap,
 .task-fullscreen-wrap,
+.task-worktabset-wrap,
 .task-hide-linked-wrap,
 .task-joint-menu-wrap,
 .task-red-sort-wrap,
@@ -2911,7 +2923,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .fab-slide-off{ opacity:1; }
 /* перетаскивание ряда пальцем (initFabRowSlider, my.js): сдвиг ведёт палец без сглаживания,
    сглаживание включается снова по отпусканию — так ряд «доезжает» до края */
-.fab-dragging :is(.task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap,   .task-fullscreen-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
+.fab-dragging :is(.task-tag-wrap, .task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap,   .task-fullscreen-wrap, .task-worktabset-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap,
   .task-info-wrap, .task-attach-wrap, .task-project-fab-link, .task-project-fab-home, .mdeditor-fab-row){
   transition:none !important;
 }
@@ -2935,6 +2947,7 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
 .task-iconsize-wrap .mdeditor-fab-btn,
 .task-format-wrap .mdeditor-fab-btn,
 .task-fullscreen-wrap .mdeditor-fab-btn,
+.task-worktabset-wrap .mdeditor-fab-btn,
 .task-hide-linked-wrap .mdeditor-fab-btn,
 .task-joint-menu-wrap .mdeditor-fab-btn,
 .task-red-sort-wrap .mdeditor-fab-btn,

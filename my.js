@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.8 (28.11) — кнопка-колесо в нижнем ряду вкладки «В работе» (`#taskWorkSettingsBtn`, слот 2 — место снятой «+», слева от полноэкранного режима): видимость в `syncTaskFabRowForTab`, обработчик в `initTaskGlobalToolbar`, экран «Дополнительные настройки вкладки «В работе»» — `renderWorkTabSettingsScreen` (пока пустой, `#taskWorkSettingsBody`). Откат: my.js 154.7.
    Версия: 154.7 (28.11) — нажатие на раскрытую карточку агента Claude в острове открывает вкладку Claude (`set2s_10` добавлена в `ISLAND_OPEN_TABS`) и именно ту вкладку ряда, где работает агент (`__ltOpenTab` понимает `set2s_10_<id>`, `ClaudeTabMod.focusTab`). Откат: my.js 154.6.
    Версия: 154.6 (28.11) — сундучок: после выбора вкладки Claude появляется вторая плашка с режимом — «fix.zip» (как раньше: архив репозитория + задача, потом скачивание fix.zip и коммит) и «Обычная задача» (текст и картинки уходят как есть, без архива и без автокоммита; `openClaudeTaskModePicker`, `sendTaskToClaude(id, tabId, mode)`, `ClaudeTabMod.sendTask(..., plain)`). Откат: 154.5.
    Версия: 154.5 (27.11) — вкладка «Задачи в работе» (сундучок): убрана кнопка «+» (`syncTaskFabRowForTab`, `renderTaskTabList`); задачи появляются там только после отправки агенту. Откат: 154.4.
@@ -1972,6 +1973,9 @@
     // звенья стоят левее неё, right:280 в modals.css).
     var fullscreenWrap = document.getElementById("taskFullscreenWrap");
     if(fullscreenWrap) fullscreenWrap.classList.toggle("visible", showTaskFab);
+    // Колесо «Дополнительные настройки вкладки «В работе»» (слот 2, место снятой «+») — только на самой вкладке worktasks.
+    var workSettingsWrap = document.getElementById("taskWorkSettingsWrap");
+    if(workSettingsWrap) workSettingsWrap.classList.toggle("visible", tab === "worktasks");
     // "глаз" (скрыть задачи, привязанные к проектам, см. initTaskGlobalToolbar/taskHideLinkedBtn
     // выше) — в отличие от соседних кнопок ряда видна только на самой вкладке "Next", не на любой
     // вкладке задач.
@@ -7680,7 +7684,7 @@
     var box = document.getElementById("settingsModalBox");
     if(!box) return;
     var TASK_TARGETS_SEL = ".task-add-fab, .task-fontsize-wrap, .task-iconsize-wrap, .task-format-wrap, " +
-      ".task-fullscreen-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
+      ".task-fullscreen-wrap, .task-worktabset-wrap, .task-hide-linked-wrap, .task-joint-menu-wrap, .task-red-sort-wrap, " +
       ".task-info-wrap, .task-attach-wrap, .task-tag-wrap, .task-project-fab-link, .task-project-fab-home";
     var EDGE = 8;           // отступ кнопок от края окна (как у самого ряда, --fab-gap в modals.css)
     var STRIP_PAD = 16;     // отступ полосы жеста над кнопками: bottom:8 + запас 8; высота полосы = STRIP_PAD + --fab-size
@@ -8165,6 +8169,16 @@
       infoBtn.addEventListener("click", function(){
         flushPendingTaskEdits();
         renderTaskInfoScreen();
+      });
+    }
+
+    // --- колесо «Дополнительные настройки вкладки «В работе»» (слот 2, только на worktasks, см. syncTaskFabRowForTab)
+    var workSettingsBtn = document.getElementById("taskWorkSettingsBtn");
+    stopMousedown(workSettingsBtn);
+    if(workSettingsBtn){
+      workSettingsBtn.addEventListener("click", function(){
+        flushPendingTaskEdits();
+        renderWorkTabSettingsScreen();
       });
     }
 
@@ -26096,6 +26110,38 @@
         // снимок текущего экрана инструкции (тот же приём, что и у openTaskNextPicker/ридера
         // книги).
         window.AppNav.push(function(){ renderTaskInfoScreen(); });
+        activeProjectPickerRerender = null;
+        renderTaskTabList(returnTab);
+        syncTaskFabRowForTab(returnTab);
+      });
+    }
+  }
+
+  // Экран «Дополнительные настройки вкладки «В работе»» — открывается колесом из нижнего ряда вкладки worktasks
+  // (taskWorkSettingsBtn в initTaskGlobalToolbar). Тем же приёмом, что renderTaskInfoScreen: подменяет #settingsTabContent
+  // целиком, внизу только свой «домик» (возвращает на вкладку, с которой открыли). Сами настройки добавляются в
+  // #taskWorkSettingsBody — пока он пустой (ТЗ 28.11: содержимое будет позже).
+  function renderWorkTabSettingsScreen(){
+    var container = document.getElementById("settingsTabContent");
+    if(!container) return;
+    syncTaskFabRowForTab(null); // прячет весь обычный ряд кнопок вкладки
+    var returnTab = currentSettingsTab;
+
+    container.innerHTML =
+      '<h3 class="common-tab-title">Дополнительные настройки вкладки «В работе»</h3>' +
+      '<div class="task-info-body" id="taskWorkSettingsBody"></div>' +
+      '<div class="mdeditor-fab-row">' +
+        '<button type="button" class="mdeditor-fab-btn" id="taskWorkSettingsHomeBtn" title="Назад к задачам">' + READER_HOME_ICON_SVG + '</button>' +
+      '</div>';
+
+    // пока открыт этот экран, фоновая синхронизация не должна подменять его списком задач (как у renderTaskInfoScreen)
+    activeProjectPickerRerender = renderWorkTabSettingsScreen;
+
+    var homeBtn = document.getElementById("taskWorkSettingsHomeBtn");
+    if(homeBtn){
+      homeBtn.addEventListener("click", function(){
+        // «Действие ВПЕРЁД»: свой шаг «назад» — снимок этого экрана (тот же приём, что у renderTaskInfoScreen)
+        window.AppNav.push(function(){ renderWorkTabSettingsScreen(); });
         activeProjectPickerRerender = null;
         renderTaskTabList(returnTab);
         syncTaskFabRowForTab(returnTab);
