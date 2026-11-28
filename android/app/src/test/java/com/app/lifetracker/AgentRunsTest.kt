@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.1 (28.11)
 // Версия: 1.0 (25.11) — проверка шагов плашки агента Claude в острове (AgentRuns): порядок шагов, доли, итоги, исчезновение.
 
 import org.junit.Assert.assertEquals
@@ -98,5 +99,89 @@ class AgentRunsTest {
         assertEquals("Агент 3 · шаг 3 из 4 · 62 %", AgentRuns.detail(r, 3))
         AgentRuns.setStep(r, AgentRuns.STEP_THINK, -1f, 2L)
         assertEquals("Агент 3 · шаг 2 из 4", AgentRuns.detail(r, 3))
+    }
+
+    private fun thinking(tab: String, req: String): AgentRuns.Run {
+        val r = AgentRuns.start(tab, req, 0L)
+        AgentRuns.taskResult(req, true, "", 1L)
+        return r
+    }
+
+    @Test fun tokensRanOutIsCross() {
+        val r = thinking("main", "t1")
+        AgentRuns.pageState("main", "tokens", false, 100L)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+        assertEquals("Задача не выполнена", AgentRuns.title(r))
+        assertEquals("Агент 1 · токены закончились", AgentRuns.detail(r, 1))
+    }
+
+    @Test fun toolsRanOutWaitsForNext() {
+        val r = thinking("main", "t2")
+        AgentRuns.pageState("main", "tools", false, 100L)
+        assertEquals(AgentRuns.ST_NEXT, r.state)
+        assertEquals("Нужно нажать «Далее»", AgentRuns.title(r))
+    }
+
+    @Test fun otherTabAndOtherStepAreIgnored() {
+        val r = thinking("main", "t3")
+        AgentRuns.pageState("x1", "tokens", false, 100L)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.setStep(r, AgentRuns.STEP_DOWNLOAD, 0.2f, 101L)
+        AgentRuns.pageState("main", "tools", false, 102L)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.pageState("main", "", false, 103L)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+    }
+
+    @Test fun nextButtonResumesAndGraceIgnoresStalePage() {
+        val r = thinking("main", "t4")
+        AgentRuns.pageState("main", "tools", false, 100L)
+        AgentRuns.resumeTab("main", 200L)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        assertEquals(AgentRuns.STEP_THINK, r.step)
+        AgentRuns.pageState("main", "tools", false, 200L + AgentRuns.RESUME_GRACE_MS - 1) // страница ещё показывает прежнее
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.pageState("main", "tools", false, 200L + AgentRuns.RESUME_GRACE_MS + 1) // действительно не пошло
+        assertEquals(AgentRuns.ST_NEXT, r.state)
+    }
+
+    @Test fun resumeTabDoesNotTouchNoTokens() {
+        val r = thinking("main", "t5")
+        AgentRuns.pageState("main", "tokens", false, 100L)
+        AgentRuns.resumeTab("main", 200L)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+    }
+
+    @Test fun generationStartedByHandResumesStoppedRun() {
+        val a = thinking("main", "t6")
+        AgentRuns.pageState("main", "tokens", false, 100L)
+        AgentRuns.pageState("main", "", true, 200L)
+        assertEquals(AgentRuns.ST_RUN, a.state)
+        val b = thinking("x1", "t7")
+        AgentRuns.pageState("x1", "tools", false, 100L)
+        AgentRuns.pageState("x1", "", true, 200L)
+        assertEquals(AgentRuns.ST_RUN, b.state)
+    }
+
+    @Test fun fixAfterStopRevivesSameRun() {
+        val r = thinking("main", "t8")
+        AgentRuns.pageState("main", "tools", false, 100L)
+        val same = AgentRuns.beginFix("main", 300L)
+        assertTrue(same === r)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        assertEquals(AgentRuns.STEP_DOWNLOAD, r.step)
+        assertEquals(1, AgentRuns.visible(301L).size)
+    }
+
+    @Test fun stoppedRunsWaitLongAndCanBeDismissed() {
+        val a = thinking("main", "t9")
+        val b = thinking("x1", "t10")
+        AgentRuns.pageState("main", "tokens", false, 1000L)
+        AgentRuns.pageState("x1", "tools", false, 1000L)
+        assertEquals(2, AgentRuns.visible(1000L + AgentRuns.ERROR_HOLD_MS + 5L).size)
+        assertTrue(AgentRuns.visible(1000L + AgentRuns.STOP_HOLD_MS + 1L).isEmpty())
+        AgentRuns.dismiss(a.id)
+        assertEquals(1, AgentRuns.visible(2000L).size)
+        assertEquals(AgentRuns.ST_NEXT, b.state)
     }
 }

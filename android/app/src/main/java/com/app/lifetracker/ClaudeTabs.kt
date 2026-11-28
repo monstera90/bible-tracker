@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (28.11)
 // Версия: 1.5 (28.11) — [sendTask] с plain = true («Обычная задача»): архив репозитория не скачивается, плашка агента не заводится, в чат уходят только текст и картинки. Откат: ClaudeTabs.kt 1.4.
 // Версия: 1.4 (27.11) — [sendTask]: задача, которая уже отправляется (тот же id), второй раз не принимается (ClaudeTaskResults.begin). Откат: ClaudeTabs.kt 1.3.
 // Версия: 1.3 (25.11) — [sendTask] принимает картинки задачи ([imagesJson]): они сохраняются в кэш ([ClaudeTaskImages]) и уходят в чат вместе с архивом. Откат: ClaudeTabs.kt 1.2.
@@ -18,6 +19,10 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
         private val ID_RE = Regex("^[a-z0-9]{1,24}$")
         private val REQ_RE = Regex("^[A-Za-z0-9]{1,64}$")
         private const val MAX_TASK_CHARS = 100_000
+        @Volatile private var inst: ClaudeTabs? = null
+
+        /** Круг с треугольником в острове: отправить «Далее» в чат агента (вкладки Claude) [tabId]. Звать из любого потока. */
+        fun continueAgent(tabId: String) { inst?.continueTask(tabId) }
 
         /** Номер вкладки Claude в её ряду (1 — «main», дальше по порядку создания) — это и есть «номер агента» в острове. */
         fun numberOf(ctx: Context, id: String): Int {
@@ -37,6 +42,13 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
 
     init {
         tabs[ClaudeTab.MAIN_ID] = ClaudeTab(activity, host, ClaudeTab.MAIN_ID)
+        inst = this
+    }
+
+    /** Отправить «Далее» в текущий чат вкладки [id]; плашка агента снова «идёт», когда отправка удалась. */
+    fun continueTask(id: String) {
+        val tab = synchronized(this) { tabs[id] } ?: return
+        activity.runOnUiThread { tab.continueTask() }
     }
 
     @Synchronized private fun cur(): ClaudeTab = tabs[curId] ?: tabs.getValue(ClaudeTab.MAIN_ID)

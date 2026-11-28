@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 26.0 (28.11)
 // Версия: 25.1 (25.11) — нажатия на остров внутри приложения: плавающее окно видео (FloatingVideo) создаётся позже острова и лежало выше него — перекрывало капсулу/карточку и забирало тапы; теперь после показа окна видео остров поднимается выше (`raiseOverlay`); тап по капсуле не теряется во время анимации сворачивания и при «залипшем» состоянии «раскрыта». Откат: InAppIsland.kt 25.0.
 // Версия: 25.0 (25.11) — занятие «агент Claude» (`K_AGENT`, `agentItem`; ТЗ TASK_AGENT_ISLAND.md): номер агента слева от камеры, кольцо шага 1–4 справа (`pillRing`, `Item.ringFn`), карточка с шагом и подробностью, нажатие открывает вкладку Claude. Откат: InAppIsland.kt 24.3.
 // Версия: 24.3 (22.11) — разрешение «Поверх других приложений»: на Xiaomi/Redmi/POCO кнопка открывает страницу разрешений именно этого приложения (редактор MIUI/HyperOS), а не общий список; запрос показывается сразу после обновления APK (не ждёт 12 часов); в запросе добавлена кнопка «Общий экран». Откат: InAppIsland.kt 24.2.
@@ -80,6 +81,7 @@ private class Item(val key: String, val kind: Int) {
     var tabKey: String? = null // вкладка, откуда запущено занятие (скачивание): нажатие на карточку открывает её
     var ringKey = "" // кольцо шага агента (справа от камеры и в карточке вместо значка); меняется, когда его надо перерисовать
     var ringFn: ((Int) -> Bitmap)? = null // null — у занятия обычное время справа
+    var onRing: (() -> Unit)? = null // нажатие на кружок занятия (агент Claude: «Далее»); null — кружок ничего не делает, нажатие раскрывает карточку как обычно
     var onDone: (() -> Unit)? = null // сработавший таймер: капсула висит прежнего размера, одинарное нажатие гасит вибрацию и убирает её; карточки нет
 
     /** Есть карточка, которая листается смахиванием: у всех занятий. Нажатием на капсулу раскрываются все ([activate]). */
@@ -363,6 +365,8 @@ class InAppIsland private constructor(private val appCtx: Context) {
             ellipsize = TextUtils.TruncateAt.END
         }
         pauseBtn.setOnClickListener { onPauseClick() }
+        cardIcon.setOnClickListener { onRingClick() }
+        cardIcon.isClickable = false // нажимается только у занятия с onRing (bindCard), иначе нажатие по значку, как и раньше, открывает вкладку
         plusBtn.setImageBitmap(XiaomiIsland.pomoButtonBitmap(2))
         plusBtn.setOnClickListener { onExtraClick() }
         modeBtn.setOnClickListener { onModeClick() }
@@ -791,6 +795,32 @@ class InAppIsland private constructor(private val appCtx: Context) {
         refresh()
     }
 
+    /** Нажатие на кружок в раскрытой карточке (агент Claude: круг с треугольником — «Далее»). */
+    private fun onRingClick() {
+        val m = selItem() ?: return
+        val f = m.onRing ?: return
+        f()
+        expandedAt = System.currentTimeMillis()
+        handler.postDelayed({ refresh() }, 150L)
+        refresh()
+    }
+
+    /** Нажатие на кружок свёрнутой капсулы: действие кружка вместо раскрытия карточки. */
+    private fun ringTap(m: Item) {
+        m.onRing?.invoke()
+        handler.postDelayed({ refresh() }, 150L)
+        refresh()
+    }
+
+    /** Попало ли нажатие (экранные координаты) в кружок справа от камеры в капсуле. */
+    private fun hitsRing(rx: Float, ry: Float): Boolean {
+        if (pillRing.visibility != View.VISIBLE || pillRing.width <= 0) return false
+        val loc = IntArray(2)
+        pillRing.getLocationOnScreen(loc)
+        val pad = dp(6f)
+        return rx >= loc[0] - pad && rx <= loc[0] + pillRing.width + pad && ry >= loc[1] - pad && ry <= loc[1] + pillRing.height + pad
+    }
+
     private fun onStopClick() {
         val m = selItem() ?: return
         val end = m.onEnd
@@ -972,7 +1002,9 @@ class InAppIsland private constructor(private val appCtx: Context) {
                 val m = tapItem
                 val fire = tapArmed && !expanded && (!animating || animTo == 0f) && inPill(ev.x, ev.y)
                 tapArmed = false
-                if (fire && m != null) activate(m)
+                if (fire && m != null) {
+                    if (m.onRing != null && hitsRing(ev.rawX, ev.rawY)) ringTap(m) else activate(m)
+                }
             }
             MotionEvent.ACTION_CANCEL -> {
                 handler.removeCallbacks(longStopTask)
@@ -1246,7 +1278,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
 
     /**
      * Занятие «агент Claude» (ТЗ TASK_AGENT_ISLAND.md): слева от камеры номер агента, справа кольцо с номером шага 1–4
-     * (1, 2 — кольцо-загрузка; 3, 4 — круговой прогресс; готово — галочка). Карточка: шаг и подробность одной строкой каждая, нажатие открывает
+     * (1, 2 — кольцо-загрузка; 3, 4 — круговой прогресс; готово — галочка; токены кончились — крестик и «Задача не выполнена»; кончились инструменты — треугольник в круге, нажатие по кругу отправляет «Далее»). Карточка: шаг и подробность одной строкой каждая, нажатие открывает
      * вкладку Claude, крестик (и долгое нажатие на капсулу) убирает плашку, не прерывая работу.
      */
     private fun agentItem(r: AgentRuns.Run, now: Long): Item {
@@ -1265,6 +1297,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         m.big = AgentRuns.title(r)
         m.sub = AgentRuns.detail(r, num)
         m.onStop = { AgentRuns.dismiss(id) }
+        if (state == AgentRuns.ST_NEXT) m.onRing = { ClaudeTabs.continueAgent(r.tabId) } // круг с треугольником: «Далее» в чат этого агента
         return m
     }
 
@@ -1435,6 +1468,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         }
         val hasMode = sel.onMode != null
         cardIcon.visibility = if (hasMode) View.INVISIBLE else View.VISIBLE
+        cardIcon.isClickable = sel.onRing != null
         modeBtn.visibility = if (hasMode) View.VISIBLE else View.GONE
         if (hasMode) {
             val mk = sel.key + "|" + sel.modeKey

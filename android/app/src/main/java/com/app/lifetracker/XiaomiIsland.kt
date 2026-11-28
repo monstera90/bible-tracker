@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.5 (28.11)
 // Версия: 12.4 (25.11) — `agentBadgeBitmap` / `agentRingBitmap`: значки плашки агента Claude в приложении (номер агента, кольцо шага 1–4). Откат: XiaomiIsland.kt 12.3.
 // Версия: 12.3 (22.11) — кнопка «Открыть» у скачанного файла в системном острове (downloadExtras, TOGGLE_OPEN). Откат: XiaomiIsland.kt 12.2.
 // Версия: 12.2 (22.11) — `downloadExtras`: системный остров загрузок (ТЗ скачивания файлов, этап 3): свёрнутый — кольцо и «45 %», раскрытый — имя, скорость, кнопки «Пауза/Продолжить/Повторить» и «Стоп». Откат: XiaomiIsland.kt 12.1.
@@ -912,7 +913,8 @@ object XiaomiIsland {
     /**
      * Кольцо шага справа от камеры: тёмный круг, в центре номер шага (1–4). [fraction] — доля шага от верха по часовой;
      * < 0 — доли нет, по кольцу бежит дуга ([phase] — её поворот, шаги по 45°). [state]: [AgentRuns.ST_RUN] — идёт;
-     * [AgentRuns.ST_DONE] / [AgentRuns.ST_NOTHING] — вместо цифры галочка (второе — серая); [AgentRuns.ST_ERROR] — красное кольцо и «!».
+     * [AgentRuns.ST_DONE] / [AgentRuns.ST_NOTHING] — вместо цифры галочка (второе — серая); [AgentRuns.ST_ERROR] — красное кольцо и «!»;
+     * [AgentRuns.ST_NO_TOKENS] — красное кольцо и крестик; [AgentRuns.ST_NEXT] — янтарное кольцо и треугольник («Далее»).
      */
     fun agentRingBitmap(step: Int, fraction: Float, state: Int, size: Int = 96, phase: Int = 0): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -925,7 +927,8 @@ object XiaomiIsland {
         val color = when (state) {
             AgentRuns.ST_DONE -> AGENT_OK_COLOR
             AgentRuns.ST_NOTHING -> 0xFF8A8A8A.toInt()
-            AgentRuns.ST_ERROR -> 0xFFE53935.toInt()
+            AgentRuns.ST_ERROR, AgentRuns.ST_NO_TOKENS -> 0xFFE53935.toInt()
+            AgentRuns.ST_NEXT -> 0xFFFFB300.toInt()
             else -> AGENT_COLOR
         }
         val ring = RectF(10f, 10f, 86f, 86f)
@@ -951,6 +954,18 @@ object XiaomiIsland {
                 c.drawLine(48f, 30f, 48f, 52f, paint)
                 paint.style = Paint.Style.FILL
                 c.drawCircle(48f, 65f, 4.5f, paint)
+            }
+            AgentRuns.ST_NO_TOKENS -> {
+                paint.color = Color.WHITE
+                paint.strokeWidth = 7f
+                c.drawLine(36f, 36f, 60f, 60f, paint)
+                c.drawLine(60f, 36f, 36f, 60f, paint)
+            }
+            AgentRuns.ST_NEXT -> {
+                paint.color = Color.WHITE
+                paint.style = Paint.Style.FILL_AND_STROKE
+                paint.strokeWidth = 5f
+                c.drawPath(Path().apply { moveTo(41f, 34f); lineTo(41f, 62f); lineTo(63f, 48f); close() }, paint)
             }
             else -> agentDigit(c, step.coerceIn(1, 4).toString(), Color.WHITE)
         }

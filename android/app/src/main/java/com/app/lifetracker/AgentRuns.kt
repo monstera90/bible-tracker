@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.0 (28.11)
 // Версия: 1.0 (25.11) — ТЗ «прогресс агента в плавающем острове» (TASK_AGENT_ISLAND.md): состояние запусков агента Claude по четырём шагам (репозиторий → Claude думает → fix.zip → коммит) для плашки InAppIsland.
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -23,10 +24,14 @@ object AgentRuns {
     const val ST_DONE = 1
     const val ST_NOTHING = 2 // коммитить было нечего
     const val ST_ERROR = 3
+    const val ST_NO_TOKENS = 4 // у Claude кончились токены: задача не выполнена (крестик)
+    const val ST_NEXT = 5 // у Claude кончились инструменты, нужно нажать «Далее» (треугольник в круге)
 
     const val DONE_HOLD_MS = 8_000L // «готово» висит в острове столько, потом исчезает
     const val ERROR_HOLD_MS = 10L * 60_000L // ошибка висит, пока её не закроют, но не дольше
     const val STALE_MS = 45L * 60_000L // идёт без движения дольше — считаем, что ответа не будет
+    const val STOP_HOLD_MS = 6L * 3_600_000L // плашка, которая ждёт человека (токены / «Далее»), висит, пока её не закроют, но не дольше
+    const val RESUME_GRACE_MS = 12_000L // после «Далее» страница ещё несколько секунд показывает прежнее состояние — ему не верим
     private const val MAX_KEPT = 20
 
     class Run(val id: Long, val tabId: String, val reqId: String, val startedAt: Long) {
@@ -37,6 +42,7 @@ object AgentRuns {
         @Volatile var changedAt = startedAt
         @Volatile var finishedAt = 0L
         @Volatile var hidden = false
+        @Volatile var resumedAt = 0L // когда после остановки работа пошла дальше
     }
 
     private val list = CopyOnWriteArrayList<Run>()
@@ -64,10 +70,49 @@ object AgentRuns {
      * (например, задачу отправили руками) — заводим запуск без задачи. Дальше он на шаге 3.
      */
     fun beginFix(tabId: String, now: Long = System.currentTimeMillis()): Run {
-        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_RUN && it.step == STEP_THINK }
-            ?: start(tabId, "", now)
+        val r = list.firstOrNull {
+            it.tabId == tabId && ((it.state == ST_RUN && it.step == STEP_THINK) || it.state == ST_NO_TOKENS || it.state == ST_NEXT)
+        } ?: start(tabId, "", now)
+        if (r.state != ST_RUN) { // остановленный запуск довели руками или он доработал сам — снова идёт
+            r.state = ST_RUN
+            r.finishedAt = 0L
+        }
         setStep(r, STEP_DOWNLOAD, -1f, now)
         return r
+    }
+
+    /**
+     * Состояние чата вкладки [tabId] (assets/claude/agent_state.js): [kind] — "tokens" (токены кончились), "tools" (инструменты кончились,
+     * ждёт «Далее») или "" (ничего); [gen] — Claude пишет ответ. Запуск, который ждал ответа (шаг 2), встаёт на «не выполнена» / «Далее»;
+     * остановленный запуск, у которого ответ снова пошёл (человек нажал сам или сработала автоотправка), опять «идёт».
+     */
+    fun pageState(tabId: String, kind: String, gen: Boolean, now: Long = System.currentTimeMillis()) {
+        if (gen) {
+            list.firstOrNull { it.tabId == tabId && (it.state == ST_NO_TOKENS || it.state == ST_NEXT) }?.let { resume(it, now) }
+            return
+        }
+        if (kind != "tokens" && kind != "tools") return
+        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_RUN && it.step == STEP_THINK } ?: return
+        if (r.resumedAt != 0L && now - r.resumedAt < RESUME_GRACE_MS) return
+        r.state = if (kind == "tokens") ST_NO_TOKENS else ST_NEXT
+        r.text = ""
+        r.finishedAt = now
+        r.changedAt = now
+    }
+
+    /** Нажали «Далее» (круг с треугольником): самый давний запуск вкладки, ждущий «Далее», снова идёт. */
+    fun resumeTab(tabId: String, now: Long = System.currentTimeMillis()) {
+        list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT }?.let { resume(it, now) }
+    }
+
+    private fun resume(r: Run, now: Long) {
+        if (r.state != ST_NO_TOKENS && r.state != ST_NEXT) return
+        r.state = ST_RUN
+        r.step = STEP_THINK
+        r.frac = -1f
+        r.finishedAt = 0L
+        r.resumedAt = now
+        r.changedAt = now
     }
 
     fun setStep(r: Run, step: Int, frac: Float, now: Long = System.currentTimeMillis()) {
@@ -116,6 +161,7 @@ object AgentRuns {
             !it.hidden && when (it.state) {
                 ST_RUN -> true
                 ST_ERROR -> now - it.finishedAt < ERROR_HOLD_MS
+                ST_NO_TOKENS, ST_NEXT -> now - it.finishedAt < STOP_HOLD_MS
                 else -> now - it.finishedAt < DONE_HOLD_MS
             }
         }
@@ -135,6 +181,8 @@ object AgentRuns {
         ST_DONE -> "Закоммичено"
         ST_NOTHING -> "Нечего коммитить"
         ST_ERROR -> "Ошибка · " + stepName(r.step)
+        ST_NO_TOKENS -> "Задача не выполнена"
+        ST_NEXT -> "Нужно нажать «Далее»"
         else -> stepName(r.step)
     }
 
@@ -155,6 +203,8 @@ object AgentRuns {
             }
             ST_ERROR -> head + " · " + r.text.ifEmpty { "сбой" }
             ST_NOTHING -> head + " · файлы не изменились"
+            ST_NO_TOKENS -> head + " · токены закончились"
+            ST_NEXT -> head + " · инструменты закончились, нажмите на круг"
             else -> head + (if (r.text.isNotEmpty()) " · " + r.text else "")
         }
     }

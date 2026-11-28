@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.0 (28.11)
 // Версия: 2.7 (28.11) — «Обычная задача»: задача уходит без архива репозитория (TaskJob.zip может быть null, TaskJob.plain), а чат, созданный такой отправкой, запоминается ([markPlainChat], SharedPreferences): fix.zip в нём не скачивается автоматически (auto_fix.js выключается для адреса чата) и автокоммитом не забирается (скачивание идёт как у любого файла). Откат: ClaudeTab.kt 2.6.
 // Версия: 2.6 (27.11) — отправка задачи не дублируется: (а) у попытки свой номер (TaskJob.attempt) — скрипт отправки по нему не даёт отправить одно и то же дважды, даже после перезагрузки страницы; (б) если страница ушла в чат (/chat/…) или скрипт дошёл до «Отправить» (sentSeen), страницу заново не грузим — раньше при потере состояния скрипта через 40 с срабатывал restartJob и задача уходила в новый чат ещё раз (до трёх раз); (в) уход в чат считается успешной отправкой. Откат: ClaudeTab.kt 2.5.
 // Версия: 2.5 (25.11) — к задаче из сундучка можно приложить картинки: они уходят в чат вместе с архивом (TaskJob.images, startUpload передаёт каждый файл кусками; предупреждение скрипта при успехе доходит до страницы). Откат: ClaudeTab.kt 2.4.
@@ -195,6 +196,25 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
     fun disarm() { view?.evaluateJavascript("window.__ltAuto&&window.__ltAuto.disarm()", null) }
 
     fun sendNow() { view?.evaluateJavascript("window.__ltAuto&&window.__ltAuto.sendNow()", null) }
+
+    /**
+     * «Далее» в текущий чат вкладки (круг с треугольником в острове): нажимает «Продолжить» в чате или отправляет текст автоотправки
+     * ([autoText]). Удалось — плашка агента снова «идёт»; не удалось (нет страницы, в поле ввода чужой текст) — короткое сообщение.
+     */
+    fun continueTask() {
+        val v = view
+        if (v == null) {
+            toast("Вкладка Claude не открыта")
+            return
+        }
+        v.evaluateJavascript("window.__ltAutoCfg=" + cfgJson() + ";(window.__ltAgent?window.__ltAgent.next():false)") { raw ->
+            if (raw?.trim() == "true") AgentRuns.resumeTab(tabId) else toast("Не удалось нажать «Далее»: проверьте поле ввода в чате")
+        }
+    }
+
+    private fun toast(msg: String) {
+        try { android.widget.Toast.makeText(activity, msg, android.widget.Toast.LENGTH_SHORT).show() } catch (e: Exception) { }
+    }
 
     /** JSON для вкладки: настройки + последний прочитанный из страницы статус. */
     fun stateJson(): String = JSONObject()
@@ -569,6 +589,7 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 injectDownloadHook(view)
                 injectAuto(view)
                 injectAutoFix(view)
+                injectAgentState(view)
                 onTaskPageFinished(view, url)
             }
 
@@ -616,6 +637,15 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                 v.evaluateJavascript("(window.__ltAuto?window.__ltAuto.status():null)") { raw ->
                     if (raw != null && raw != "null" && raw.startsWith("{")) lastStatus = raw
                 }
+                // Состояние чата для плашки агента в острове (agent_state.js): токены кончились / инструменты кончились / идёт ответ.
+                v.evaluateJavascript("(window.__ltAgent?window.__ltAgent.status():null)") { raw ->
+                    try {
+                        if (raw != null && raw.startsWith("{")) {
+                            val o = JSONObject(raw)
+                            AgentRuns.pageState(tabId, o.optString("kind", ""), o.optBoolean("gen", false))
+                        }
+                    } catch (e: Exception) { }
+                }
                 // Автоскачивание fix.zip (auto_fix.js): свежая настройка в страницу и ошибка скрипта — в «Последний результат».
                 v.evaluateJavascript("window.__ltFixCfg={enabled:" + (AutoCommit.autoClickReady(activity) && !inPlainChat(v)) + "};(window.__ltFix?window.__ltFix.status():null)") { raw ->
                     try {
@@ -649,6 +679,17 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
             return
         }
         v.evaluateJavascript("window.__ltFixCfg={enabled:" + (AutoCommit.autoClickReady(activity) && !inPlainChat(v)) + "};\n" + script, null)
+    }
+
+    /** Скрипт состояния чата (agent_state.js): токены кончились / инструменты кончились — для плашки агента в острове. */
+    private fun injectAgentState(v: WebView?) {
+        if (v == null) return
+        val script = try {
+            activity.assets.open("claude/agent_state.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        } catch (e: Exception) {
+            return
+        }
+        v.evaluateJavascript(script, null)
     }
 
     private fun injectAuto(v: WebView?) {
