@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 3.2 (28.11) — автопродление после токенов: опрос страницы передаёт AgentRuns время снятия лимита (resetAt из agent_state.js) и спрашивает [AgentRuns.autoRenewStep]: в назначенное время страница перезагружается (если плашка лимита ещё нарисована), а когда её нет — отправляется «Дальше» (continueTask(afterTokens = true)). Откат: ClaudeTab.kt 3.1.
 // Версия: 3.1 (28.11) — «Далее» нажимается само: после каждого опроса состояния чата спрашиваем AgentRuns.autoNextDue и, если пора (инструменты кончились, fix.zip ещё не пришёл), зовём continueTask(quiet = true) — без сообщения об ошибке на каждую попытку. Откат: ClaudeTab.kt 3.0.
 // Версия: 3.0 (28.11)
 // Версия: 2.7 (28.11) — «Обычная задача»: задача уходит без архива репозитория (TaskJob.zip может быть null, TaskJob.plain), а чат, созданный такой отправкой, запоминается ([markPlainChat], SharedPreferences): fix.zip в нём не скачивается автоматически (auto_fix.js выключается для адреса чата) и автокоммитом не забирается (скачивание идёт как у любого файла). Откат: ClaudeTab.kt 2.6.
@@ -202,14 +203,14 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
      * «Далее» в текущий чат вкладки (круг с треугольником в острове): нажимает «Продолжить» в чате или отправляет текст автоотправки
      * ([autoText]). Удалось — плашка агента снова «идёт»; не удалось (нет страницы, в поле ввода чужой текст) — короткое сообщение.
      */
-    fun continueTask(quiet: Boolean = false) {
+    fun continueTask(quiet: Boolean = false, afterTokens: Boolean = false) {
         val v = view
         if (v == null) {
             if (!quiet) toast("Вкладка Claude не открыта")
             return
         }
         v.evaluateJavascript("window.__ltAutoCfg=" + cfgJson() + ";(window.__ltAgent?window.__ltAgent.next():false)") { raw ->
-            if (raw?.trim() == "true") AgentRuns.resumeTab(tabId) else if (!quiet) toast("Не удалось нажать «Далее»: проверьте поле ввода в чате")
+            if (raw?.trim() == "true") AgentRuns.resumeTab(tabId, fromTokens = afterTokens) else if (!quiet) toast("Не удалось нажать «Далее»: проверьте поле ввода в чате")
         }
     }
 
@@ -643,9 +644,15 @@ class ClaudeTab(private val activity: MainActivity, private val host: FrameLayou
                     try {
                         if (raw != null && raw.startsWith("{")) {
                             val o = JSONObject(raw)
-                            AgentRuns.pageState(tabId, o.optString("kind", ""), o.optBoolean("gen", false))
+                            val pageKind = o.optString("kind", "")
+                            AgentRuns.pageState(tabId, pageKind, o.optBoolean("gen", false), resetAt = o.optLong("resetAt", 0L))
                             // инструменты кончились, а fix.zip ещё не отдан — сами отправляем «Далее» (если fix.zip уже пришёл, запуск сюда не попадёт)
                             if (AgentRuns.autoNextDue(tabId)) continueTask(quiet = true)
+                            // токены кончились: пришло время снятия лимита (+ минута) — перезагрузить страницу или отправить «Дальше», если автопродление включено
+                            when (AgentRuns.autoRenewStep(tabId, pageKind, o.optBoolean("chat", false))) {
+                                AgentRuns.RENEW_RELOAD -> v.reload()
+                                AgentRuns.RENEW_SEND -> continueTask(quiet = true, afterTokens = true)
+                            }
                         }
                     } catch (e: Exception) { }
                 }

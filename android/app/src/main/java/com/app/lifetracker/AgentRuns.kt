@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.4 (28.11) — автопродление: у запуска, остановленного токенами («Задача не выполнена») или инструментами («Далее»), есть флажок [Run.autoRenew] (по умолчанию включён, снимается кнопкой-петлёй на карточке острова). Для токенов запоминается время и дата, когда лимит снимется ([Run.resumeAt] = время из плашки страницы + минута, нет времени — 5 часов + минута); [autoRenewStep] в это время просит вкладку перезагрузить страницу (плашка могла остаться), а когда плашки лимита нет — отправить «Дальше». Выключенное автопродление отключает и автонажатие «Далее». Плашка «Бесплатные сообщения недоступны до …» больше не принимается за «ждёт Далее»: [pageState] переводит запуск из «Далее» в «токены», если страница показывает токены. Откат: AgentRuns.kt 2.3.
 // Версия: 2.3 (28.11) — «Далее» нажимается само: если инструменты кончились, а fix.zip у запуска ещё не пришёл (запуск на шаге «Claude думает», не «Обычная задача»), [autoNextDue] через AUTO_NEXT_DELAY_MS говорит вкладке отправить «Далее». Если fix.zip уже пришёл (шаг 3–4 или закончено), а Claude всё равно просит «Далее» — не нажимается: архив получен и закоммичен, задача выполнена. Откат: AgentRuns.kt 2.2.
 // Версия: 2.2 (28.11) — история агентов: у запуска список отметок (начал, токены/инструменты кончились, продолжил, закончил, ошибка), по каждой зовётся onMark, а historyText собирает фразу для журнала событий («Агент 2 начал работать над задачей в 09:24 и закончил в 09:30»). Откат: AgentRuns.kt 2.1.
 // Версия: 2.1 (28.11) — «Обычная задача» (plain): плашка с одним шагом «Claude думает» и галочкой, когда Claude закончил ответ (без шагов репозитория, fix.zip и коммита). Откат: AgentRuns.kt 2.0.
@@ -41,6 +42,16 @@ object AgentRuns {
     const val AUTO_NEXT_DELAY_MS = 20_000L // «Далее» само нажимается не сразу: за это время успевает прийти fix.zip (автоскачивание → beginFix) — тогда нажимать уже не нужно
     const val AUTO_NEXT_RETRY_MS = 30_000L // не вышло нажать (например, в поле ввода чужой текст) — пробуем снова не чаще, чем раз в столько
     const val AUTO_NEXT_MAX = 20 // защита от бесконечной переписки: больше стольких автонажатий на один запуск — дальше только руками (круг в острове)
+    const val RENEW_AFTER_MS = 60_000L // запас после времени, когда лимит должен сняться
+    const val RENEW_FALLBACK_MS = 5L * 3_600_000L // время снятия не прочитано из страницы — ждём столько (окно лимита)
+    const val RENEW_MAX_AHEAD_MS = 30L * 3_600_000L // время снятия дальше этого — считаем нераспознанным
+    const val RENEW_SETTLE_MS = 20_000L // после перезагрузки страницы столько ждём, пока она покажет, снят ли лимит
+    const val RENEW_RELOAD_RETRY_MS = 5L * 60_000L // лимит ещё на странице — перезагружаем не чаще, чем раз в столько
+    const val RENEW_SEND_RETRY_MS = 60_000L // «Дальше» не ушло — повтор не чаще, чем раз в столько
+    const val RENEW_MAX = 6 // попыток автопродления на одну остановку; потом — только руками
+    const val RENEW_NONE = 0
+    const val RENEW_RELOAD = 1 // перезагрузить страницу чата
+    const val RENEW_SEND = 2 // отправить «Дальше»
     private const val MAX_KEPT = 20
 
     // отметки в жизни запуска — из них собирается запись в журнале событий приложения
@@ -71,6 +82,11 @@ object AgentRuns {
         @Volatile var idleSince = 0L // обычная задача: с какого момента ответ не идёт (0 — идёт или не начинался)
         @Volatile var autoNexts = 0 // сколько раз приложение само пыталось нажать «Далее» в этом запуске
         @Volatile var autoNextAt = 0L // когда была последняя такая попытка
+        @Volatile var autoRenew = true // автопродление (кнопка-петля на карточке): по умолчанию включено у любого невыполненного запуска
+        @Volatile var resumeAt = 0L // токены кончились: когда можно запускать снова (мс, с датой); 0 — не ждём
+        @Volatile var renewTries = 0 // попыток автопродления на текущую остановку
+        @Volatile var renewAt = 0L // когда была последняя попытка
+        @Volatile var renewKind = RENEW_NONE // какой была последняя попытка
         val marks = CopyOnWriteArrayList<Mark>() // отметки для истории
     }
 
@@ -128,7 +144,7 @@ object AgentRuns {
      * ждёт «Далее») или "" (ничего); [gen] — Claude пишет ответ. Запуск, который ждал ответа (шаг 2), встаёт на «не выполнена» / «Далее»;
      * остановленный запуск, у которого ответ снова пошёл (человек нажал сам или сработала автоотправка), опять «идёт».
      */
-    fun pageState(tabId: String, kind: String, gen: Boolean, now: Long = System.currentTimeMillis()) {
+    fun pageState(tabId: String, kind: String, gen: Boolean, now: Long = System.currentTimeMillis(), resetAt: Long = 0L) {
         if (gen) {
             list.firstOrNull { it.tabId == tabId && (it.state == ST_NO_TOKENS || it.state == ST_NEXT) }?.let { resume(it, now) }
             // обычная задача: Claude пишет ответ — запоминаем это, «простой» сбрасывается
@@ -146,18 +162,62 @@ object AgentRuns {
             }
             return
         }
-        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_RUN && it.step == STEP_THINK } ?: return
-        if (r.resumedAt != 0L && now - r.resumedAt < RESUME_GRACE_MS) return
+        // «токены» важнее «Далее»: запуск, который по ошибке встал на «Далее», а страница показывает лимит, переходит на «не выполнена»
+        val r = list.firstOrNull { it.tabId == tabId && ((it.state == ST_RUN && it.step == STEP_THINK) || (kind == "tokens" && it.state == ST_NEXT)) } ?: return
+        if (r.state == ST_RUN && r.resumedAt != 0L && now - r.resumedAt < RESUME_GRACE_MS) return
         r.state = if (kind == "tokens") ST_NO_TOKENS else ST_NEXT
+        r.resumeAt = if (kind == "tokens") resumeTime(resetAt, now) else 0L
+        r.renewTries = 0
+        r.renewAt = 0L
+        r.renewKind = RENEW_NONE
         r.text = ""
         r.finishedAt = now
         r.changedAt = now
         mark(r, if (kind == "tokens") M_TOKENS else M_NEXT, now)
     }
 
-    /** Нажали «Далее» (круг с треугольником): самый давний запуск вкладки, ждущий «Далее», снова идёт. */
-    fun resumeTab(tabId: String, now: Long = System.currentTimeMillis()) {
-        list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT }?.let { resume(it, now) }
+    /** Когда запускать после токенов: время снятия лимита со страницы + минута; не прочитано (или нелепое) — 5 часов + минута. */
+    private fun resumeTime(resetAt: Long, now: Long): Long =
+        if (resetAt > now && resetAt - now <= RENEW_MAX_AHEAD_MS) resetAt + RENEW_AFTER_MS else now + RENEW_FALLBACK_MS + RENEW_AFTER_MS
+
+    /**
+     * Нажали «Далее» (круг с треугольником): самый давний запуск вкладки, ждущий «Далее», снова идёт. [fromTokens] — «Дальше» ушло само
+     * после снятия лимита ([autoRenewStep]): так же продолжается запуск, остановленный токенами.
+     */
+    fun resumeTab(tabId: String, now: Long = System.currentTimeMillis(), fromTokens: Boolean = false) {
+        list.firstOrNull { it.tabId == tabId && (it.state == ST_NEXT || (fromTokens && it.state == ST_NO_TOKENS)) }?.let { resume(it, now) }
+    }
+
+    /** Кнопка-петля на карточке: включить / выключить автопродление у запуска [id]. */
+    fun setAutoRenew(id: Long, on: Boolean) {
+        list.firstOrNull { it.id == id }?.autoRenew = on
+    }
+
+    /**
+     * Автопродление запуска, остановленного токенами: что делать вкладке [tabId] сейчас. [pageKind] / [inChat] — что видно на странице.
+     * [RENEW_NONE] — ничего (автопродление выключено, время ещё не пришло, ждём страницу, попытки кончились); [RENEW_RELOAD] — лимит ещё
+     * нарисован на странице (старая плашка или время ошибочное) — перезагрузить её; [RENEW_SEND] — плашки лимита нет, чат открыт — отправить «Дальше».
+     * Зовётся при каждом опросе страницы; возвращает действие один раз на попытку.
+     */
+    fun autoRenewStep(tabId: String, pageKind: String, inChat: Boolean, now: Long = System.currentTimeMillis()): Int {
+        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_NO_TOKENS && it.autoRenew && it.resumeAt > 0L } ?: return RENEW_NONE
+        if (now < r.resumeAt || r.renewTries >= RENEW_MAX) return RENEW_NONE
+        if (r.renewAt != 0L) {
+            val gap = if (r.renewKind == RENEW_SEND) RENEW_SEND_RETRY_MS else RENEW_SETTLE_MS
+            if (now - r.renewAt < gap) return RENEW_NONE
+        }
+        if (pageKind == "tokens") {
+            if (r.renewAt != 0L && now - r.renewAt < RENEW_RELOAD_RETRY_MS) return RENEW_NONE
+            r.renewAt = now
+            r.renewKind = RENEW_RELOAD
+            r.renewTries++
+            return RENEW_RELOAD
+        }
+        if (!inChat) return RENEW_NONE // страница не в чате — «Дальше» ушло бы в чужой (новый) диалог
+        r.renewAt = now
+        r.renewKind = RENEW_SEND
+        r.renewTries++
+        return RENEW_SEND
     }
 
     /**
@@ -168,7 +228,7 @@ object AgentRuns {
      * Зовётся при каждом опросе страницы; возвращает true один раз на попытку.
      */
     fun autoNextDue(tabId: String, now: Long = System.currentTimeMillis()): Boolean {
-        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT && !it.plain } ?: return false
+        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT && !it.plain && it.autoRenew } ?: return false
         if (now - r.finishedAt < AUTO_NEXT_DELAY_MS) return false
         if (r.autoNexts >= AUTO_NEXT_MAX) return false
         if (r.autoNextAt != 0L && now - r.autoNextAt < AUTO_NEXT_RETRY_MS) return false
@@ -185,6 +245,10 @@ object AgentRuns {
         r.finishedAt = 0L
         r.resumedAt = now
         r.changedAt = now
+        r.resumeAt = 0L
+        r.renewTries = 0
+        r.renewAt = 0L
+        r.renewKind = RENEW_NONE
         mark(r, M_RESUME, now)
     }
 
@@ -235,7 +299,8 @@ object AgentRuns {
             !it.hidden && when (it.state) {
                 ST_RUN -> true
                 ST_ERROR -> now - it.finishedAt < ERROR_HOLD_MS
-                ST_NO_TOKENS, ST_NEXT -> now - it.finishedAt < STOP_HOLD_MS
+                ST_NO_TOKENS -> now - maxOf(it.finishedAt, it.resumeAt) < STOP_HOLD_MS // ждущий времени запуска висит и после него
+                ST_NEXT -> now - it.finishedAt < STOP_HOLD_MS
                 else -> now - it.finishedAt < DONE_HOLD_MS
             }
         }
@@ -268,7 +333,7 @@ object AgentRuns {
     }
 
     /** Вторая строка карточки: агент, шаг и подробность («Агент 2 · шаг 3 из 4 · 62 %»). */
-    fun detail(r: Run, agentNumber: Int): String {
+    fun detail(r: Run, agentNumber: Int, now: Long = System.currentTimeMillis()): String {
         val head = "Агент $agentNumber"
         return when (r.state) {
             ST_RUN -> if (r.plain) head + " · обычная задача" else {
@@ -277,10 +342,26 @@ object AgentRuns {
             }
             ST_ERROR -> head + " · " + r.text.ifEmpty { "сбой" }
             ST_NOTHING -> head + " · файлы не изменились"
-            ST_NO_TOKENS -> head + " · токены закончились"
-            ST_NEXT -> head + (if (r.plain) " · инструменты закончились, нажмите на круг" else " · инструменты закончились, нажму «Далее» сам")
+            ST_NO_TOKENS -> head + " · токены закончились" + renewTail(r, now)
+            ST_NEXT -> head + (if (r.plain || !r.autoRenew) " · инструменты закончились, нажмите на круг" else " · инструменты закончились, нажму «Далее» сам")
             else -> if (r.plain) head + " · задача выполнена" else head + (if (r.text.isNotEmpty()) " · " + r.text else "")
         }
+    }
+
+    /** Хвост строки «токены закончились»: когда продолжу сам («продолжу в 22:01», «продолжу 29.11 в 03:01») или почему не продолжу. */
+    private fun renewTail(r: Run, now: Long): String = when {
+        !r.autoRenew -> " · автопродление выключено"
+        r.renewTries >= RENEW_MAX -> " · автопродление не сработало"
+        r.resumeAt > 0L -> " · продолжу " + whenText(r.resumeAt, now)
+        else -> ""
+    }
+
+    /** «в 22:01» — если это сегодня, иначе «29.11 в 03:01» (по часовому поясу телефона). */
+    fun whenText(at: Long, now: Long): String {
+        val a = java.util.Calendar.getInstance().apply { timeInMillis = at }
+        val b = java.util.Calendar.getInstance().apply { timeInMillis = now }
+        val sameDay = a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) && a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+        return if (sameDay) "в " + clockOf(at) else SimpleDateFormat("dd.MM", Locale.US).format(java.util.Date(at)) + " в " + clockOf(at)
     }
 
     // ---------- история агентов (журнал событий) ----------

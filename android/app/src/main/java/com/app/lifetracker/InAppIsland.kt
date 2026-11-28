@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 26.1 (28.11) — карточка агента: круглая кнопка-петля «автопродление» у остановленной задачи (токены кончились / «Далее»): нажатие включает и выключает AgentRuns.autoRenew, в строке карточки — когда продолжу. Откат: InAppIsland.kt 26.0.
 // Версия: 26.0 (28.11)
 // Версия: 25.1 (25.11) — нажатия на остров внутри приложения: плавающее окно видео (FloatingVideo) создаётся позже острова и лежало выше него — перекрывало капсулу/карточку и забирало тапы; теперь после показа окна видео остров поднимается выше (`raiseOverlay`); тап по капсуле не теряется во время анимации сворачивания и при «залипшем» состоянии «раскрыта». Откат: InAppIsland.kt 25.0.
 // Версия: 25.1 (28.11) — карточка агента Claude открывает именно ту вкладку Claude, где работает агент (`Item.tabKey` = `set2s_10` или `set2s_10_<id>`, `tabKeyOf`), на любом шаге; «Обычная задача» — без цифры шага в кольце. Откат: InAppIsland.kt 25.0.
@@ -1296,9 +1297,16 @@ class InAppIsland private constructor(private val appCtx: Context) {
         m.ringKey = (if (r.plain) "p" else "") + state + "/" + step + "/" + (if (frac < 0f) -1 else (frac * 50f).roundToInt()) + "/" + phase
         m.ringFn = { s -> XiaomiIsland.agentRingBitmap(step, frac, state, s, phase, r.plain) }
         m.big = AgentRuns.title(r)
-        m.sub = AgentRuns.detail(r, num)
+        m.sub = AgentRuns.detail(r, num, now)
         m.onStop = { AgentRuns.dismiss(id) }
         if (state == AgentRuns.ST_NEXT) m.onRing = { ClaudeTabs.continueAgent(r.tabId) } // круг с треугольником: «Далее» в чат этого агента
+        // круглая кнопка-петля «автопродление» у остановленной задачи (токены / инструменты): горит — продолжу сам, не горит — только руками
+        if (state == AgentRuns.ST_NO_TOKENS || (state == AgentRuns.ST_NEXT && !r.plain)) {
+            val renewOn = r.autoRenew
+            m.btnKey = "ar" + renewOn
+            m.btnFn = { XiaomiIsland.renewBitmap(renewOn) }
+            m.onToggle = { AgentRuns.setAutoRenew(id, !r.autoRenew) }
+        }
         return m
     }
 

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.5 (28.11) — тесты автопродления: время и дата снятия лимита, перезагрузка и «Дальше» в назначенное время, выключенное автопродление, «токены» важнее «Далее». Откат: AgentRunsTest.kt 1.4.
 // Версия: 1.4 (28.11) — тесты автонажатия «Далее» (autoNextDue): нажимается, пока fix.zip не пришёл; после fix.zip, у «Обычной задачи» и при токенах — нет. Откат: AgentRunsTest.kt 1.3.
 // Версия: 1.3 (28.11) — тесты истории агентов: фразы для журнала событий (закончил, кончились токены, продолжил, ошибка) и вызов onMark. Откат: AgentRunsTest.kt 1.2.
 // Версия: 1.2 (28.11) — тесты «Обычной задачи»: один шаг «Claude думает», галочка после конца ответа, fix.zip её не трогает. Откат: AgentRunsTest.kt 1.1.
@@ -116,7 +117,7 @@ class AgentRunsTest {
         AgentRuns.pageState("main", "tokens", false, 100L)
         assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
         assertEquals("Задача не выполнена", AgentRuns.title(r))
-        assertEquals("Агент 1 · токены закончились", AgentRuns.detail(r, 1))
+        assertTrue(AgentRuns.detail(r, 1, 100L).startsWith("Агент 1 · токены закончились · продолжу "))
     }
 
     @Test fun toolsRanOutWaitsForNext() {
@@ -183,7 +184,9 @@ class AgentRunsTest {
         AgentRuns.pageState("main", "tokens", false, 1000L)
         AgentRuns.pageState("x1", "tools", false, 1000L)
         assertEquals(2, AgentRuns.visible(1000L + AgentRuns.ERROR_HOLD_MS + 5L).size)
-        assertTrue(AgentRuns.visible(1000L + AgentRuns.STOP_HOLD_MS + 1L).isEmpty())
+        // «Далее» (b) висит до STOP_HOLD_MS, «токены» (a) — ещё и до времени запуска + STOP_HOLD_MS
+        assertEquals(listOf(a.id), AgentRuns.visible(1000L + AgentRuns.STOP_HOLD_MS + 1L).map { it.id })
+        assertTrue(AgentRuns.visible(1000L + AgentRuns.RENEW_FALLBACK_MS + AgentRuns.RENEW_AFTER_MS + AgentRuns.STOP_HOLD_MS + 1L).isEmpty())
         AgentRuns.dismiss(a.id)
         assertEquals(1, AgentRuns.visible(2000L).size)
         assertEquals(AgentRuns.ST_NEXT, b.state)
@@ -334,5 +337,101 @@ class AgentRunsTest {
         }
         assertEquals(AgentRuns.AUTO_NEXT_MAX, presses)
         assertEquals(AgentRuns.ST_NEXT, r.state) // дальше — руками, плашка остаётся
+    }
+
+    // ---------- автопродление ----------
+
+    private fun tokensRun(tab: String, req: String, resetAt: Long, now: Long): AgentRuns.Run {
+        val r = AgentRuns.start(tab, req, 0L)
+        AgentRuns.taskResult(req, true, "", 1L)
+        AgentRuns.pageState(tab, "tokens", false, now, resetAt)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+        return r
+    }
+
+    @Test fun autoRenewIsOnByDefaultAndResumeTimeIsResetPlusMinute() {
+        val r = tokensRun("main", "r1", 10_000_000L, 1_000L)
+        assertTrue(r.autoRenew)
+        assertEquals(10_000_000L + AgentRuns.RENEW_AFTER_MS, r.resumeAt)
+    }
+
+    @Test fun unknownResetTimeFallsBackToFiveHours() {
+        val r = tokensRun("main", "r2", 0L, 1_000L)
+        assertEquals(1_000L + AgentRuns.RENEW_FALLBACK_MS + AgentRuns.RENEW_AFTER_MS, r.resumeAt)
+    }
+
+    @Test fun nothingBeforeResumeTime() {
+        val r = tokensRun("main", "r3", 10_000_000L, 1_000L)
+        assertEquals(AgentRuns.RENEW_NONE, AgentRuns.autoRenewStep("main", "tokens", true, r.resumeAt - 1))
+    }
+
+    @Test fun reloadsWhileLimitStillShownThenSendsWhenGone() {
+        val r = tokensRun("main", "r4", 10_000_000L, 1_000L)
+        val t0 = r.resumeAt
+        assertEquals(AgentRuns.RENEW_RELOAD, AgentRuns.autoRenewStep("main", "tokens", true, t0))
+        assertEquals(AgentRuns.RENEW_NONE, AgentRuns.autoRenewStep("main", "", true, t0 + 1_000L)) // страница ещё грузится
+        assertEquals(AgentRuns.RENEW_SEND, AgentRuns.autoRenewStep("main", "", true, t0 + AgentRuns.RENEW_SETTLE_MS))
+        AgentRuns.resumeTab("main", t0 + AgentRuns.RENEW_SETTLE_MS + 500L, fromTokens = true)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        assertEquals(0L, r.resumeAt)
+    }
+
+    @Test fun sendsImmediatelyIfPageAlreadyClean() {
+        val r = tokensRun("main", "r5", 10_000_000L, 1_000L)
+        assertEquals(AgentRuns.RENEW_SEND, AgentRuns.autoRenewStep("main", "", true, r.resumeAt))
+        assertEquals(AgentRuns.RENEW_NONE, AgentRuns.autoRenewStep("main", "", true, r.resumeAt + 1L))
+        assertEquals(AgentRuns.RENEW_SEND, AgentRuns.autoRenewStep("main", "", true, r.resumeAt + AgentRuns.RENEW_SEND_RETRY_MS)) // не ушло — повтор
+    }
+
+    @Test fun doesNotSendOutsideChat() {
+        val r = tokensRun("main", "r6", 10_000_000L, 1_000L)
+        assertEquals(AgentRuns.RENEW_NONE, AgentRuns.autoRenewStep("main", "", false, r.resumeAt))
+    }
+
+    @Test fun switchedOffRenewNeverActsAndShowsInDetail() {
+        val r = tokensRun("main", "r7", 10_000_000L, 1_000L)
+        AgentRuns.setAutoRenew(r.id, false)
+        assertEquals(AgentRuns.RENEW_NONE, AgentRuns.autoRenewStep("main", "", true, r.resumeAt + 1_000_000L))
+        assertTrue(AgentRuns.detail(r, 1, 2_000L).contains("автопродление выключено"))
+        AgentRuns.setAutoRenew(r.id, true)
+        assertTrue(AgentRuns.detail(r, 1, 2_000L).contains("продолжу"))
+    }
+
+    @Test fun renewHasLimit() {
+        val r = tokensRun("main", "r8", 10_000_000L, 1_000L)
+        var now = r.resumeAt
+        var acts = 0
+        repeat(AgentRuns.RENEW_MAX + 5) {
+            if (AgentRuns.autoRenewStep("main", "tokens", true, now) != AgentRuns.RENEW_NONE) acts++
+            now += AgentRuns.RENEW_RELOAD_RETRY_MS
+        }
+        assertEquals(AgentRuns.RENEW_MAX, acts)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+        assertTrue(AgentRuns.detail(r, 1, now).contains("не сработало"))
+    }
+
+    @Test fun switchedOffRenewStopsAutoNext() {
+        val r = AgentRuns.start("main", "r9", 0L)
+        AgentRuns.taskResult("r9", true, "", 1L)
+        AgentRuns.pageState("main", "tools", false, 100L)
+        AgentRuns.setAutoRenew(r.id, false)
+        assertFalse(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS * 3))
+        assertTrue(AgentRuns.detail(r, 1, 200L).contains("нажмите на круг"))
+    }
+
+    @Test fun tokensBeatNextWhenPageShowsLimit() {
+        val r = AgentRuns.start("main", "r10", 0L)
+        AgentRuns.taskResult("r10", true, "", 1L)
+        AgentRuns.pageState("main", "tools", false, 100L)
+        assertEquals(AgentRuns.ST_NEXT, r.state)
+        AgentRuns.pageState("main", "tokens", false, 200L, 5_000_000L)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+        assertEquals(5_000_000L + AgentRuns.RENEW_AFTER_MS, r.resumeAt)
+        assertFalse(AgentRuns.autoNextDue("main", 200L + AgentRuns.AUTO_NEXT_DELAY_MS * 3))
+    }
+
+    @Test fun stoppedByTokensStaysVisibleUntilAfterResumeTime() {
+        val r = tokensRun("main", "r11", 0L, 1_000L)
+        assertTrue(AgentRuns.visible(r.resumeAt).any { it.id == r.id })
     }
 }

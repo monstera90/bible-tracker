@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 12.6 (28.11) — `renewBitmap(on)`: круглая кнопка-петля «автопродление» для карточки агента. Откат: XiaomiIsland.kt 12.5.
 // Версия: 12.5 (28.11)
 // Версия: 12.5 (28.11) — `agentRingBitmap(plain)`: у «Обычной задачи» в кольце нет цифры шага (бегущая дуга, затем галочка). Откат: XiaomiIsland.kt 12.4.
 // Версия: 12.4 (25.11) — `agentBadgeBitmap` / `agentRingBitmap`: значки плашки агента Claude в приложении (номер агента, кольцо шага 1–4). Откат: XiaomiIsland.kt 12.3.
@@ -444,6 +445,36 @@ object XiaomiIsland {
                 c.drawRect(60f, 30f, 66f, 66f, paint)
                 c.drawPath(Path().apply { moveTo(28f, 30f); lineTo(28f, 66f); lineTo(56f, 48f); close() }, paint)
             }
+        }
+        return bmp
+    }
+
+    /** Круглая кнопка «автопродление» карточки агента: петля из двух стрелок. [on] — янтарная на тёмном круге (включено), иначе серая с чертой наискосок. */
+    fun renewBitmap(on: Boolean): Bitmap {
+        val size = 96
+        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.style = Paint.Style.FILL
+        paint.color = 0xFF2A2A2A.toInt()
+        c.drawCircle(48f, 48f, 48f, paint)
+        val color = if (on) 0xFFFFB300.toInt() else 0xFF8A8A8A.toInt()
+        paint.color = color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 6f
+        paint.strokeCap = Paint.Cap.ROUND
+        val oval = RectF(27f, 27f, 69f, 69f)
+        c.drawArc(oval, 200f, 140f, false, paint) // верхняя дуга петли
+        c.drawArc(oval, 20f, 140f, false, paint) // нижняя дуга петли
+        paint.style = Paint.Style.FILL
+        // наконечники стрелок на концах дуг (по часовой стрелке)
+        c.drawPath(Path().apply { moveTo(69f, 36f); lineTo(70f, 49f); lineTo(58f, 45f); close() }, paint)
+        c.drawPath(Path().apply { moveTo(27f, 60f); lineTo(26f, 47f); lineTo(38f, 51f); close() }, paint)
+        if (!on) {
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 6f
+            paint.color = 0xFFE0E0E0.toInt()
+            c.drawLine(28f, 68f, 68f, 28f, paint)
         }
         return bmp
     }
