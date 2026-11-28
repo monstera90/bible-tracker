@@ -1,8 +1,11 @@
 package com.app.lifetracker
+// Версия: 2.2 (28.11) — история агентов: у запуска список отметок (начал, токены/инструменты кончились, продолжил, закончил, ошибка), по каждой зовётся onMark, а historyText собирает фразу для журнала событий («Агент 2 начал работать над задачей в 09:24 и закончил в 09:30»). Откат: AgentRuns.kt 2.1.
 // Версия: 2.1 (28.11) — «Обычная задача» (plain): плашка с одним шагом «Claude думает» и галочкой, когда Claude закончил ответ (без шагов репозитория, fix.zip и коммита). Откат: AgentRuns.kt 2.0.
 // Версия: 2.0 (28.11)
 // Версия: 1.0 (25.11) — ТЗ «прогресс агента в плавающем острове» (TASK_AGENT_ISLAND.md): состояние запусков агента Claude по четырём шагам (репозиторий → Claude думает → fix.zip → коммит) для плашки InAppIsland.
 
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.roundToInt
@@ -36,6 +39,20 @@ object AgentRuns {
     const val PLAIN_IDLE_MS = 8_000L // обычная задача: ответ не идёт столько подряд — Claude закончил, плашка получает галочку
     private const val MAX_KEPT = 20
 
+    // отметки в жизни запуска — из них собирается запись в журнале событий приложения
+    const val M_START = 0 // начал работать
+    const val M_TOKENS = 1 // кончились токены
+    const val M_NEXT = 2 // кончились инструменты, нужно «Далее»
+    const val M_RESUME = 3 // после остановки продолжил работу
+    const val M_DONE = 4 // закончил
+    const val M_NOTHING = 5 // закончил, коммитить было нечего
+    const val M_ERROR = 6 // ошибка
+
+    class Mark(val kind: Int, val at: Long)
+
+    /** Зовётся при каждой новой отметке запуска (из любого потока); ставит [AgentHistory]. */
+    @Volatile var onMark: ((Run) -> Unit)? = null
+
     class Run(val id: Long, val tabId: String, val reqId: String, val startedAt: Long, val plain: Boolean = false) {
         @Volatile var step = STEP_REPO
         @Volatile var frac = -1f // доля шага 0..1; -1 — неизвестна (кольцо-загрузка)
@@ -48,6 +65,7 @@ object AgentRuns {
         @Volatile var sent = false // обычная задача: сообщение ушло в чат (итог отправки пришёл)
         @Volatile var sawGen = false // обычная задача: после отправки видели, как Claude пишет ответ
         @Volatile var idleSince = 0L // обычная задача: с какого момента ответ не идёт (0 — идёт или не начинался)
+        val marks = CopyOnWriteArrayList<Mark>() // отметки для истории
     }
 
     private val list = CopyOnWriteArrayList<Run>()
@@ -59,7 +77,13 @@ object AgentRuns {
         if (plain) r.step = STEP_THINK // у обычной задачи один шаг — «Claude думает»
         list.add(r)
         while (list.size > MAX_KEPT) list.removeAt(0)
+        mark(r, M_START, now)
         return r
+    }
+
+    private fun mark(r: Run, kind: Int, now: Long) {
+        r.marks.add(Mark(kind, now))
+        try { onMark?.invoke(r) } catch (e: Exception) { }
     }
 
     private fun byReq(reqId: String): Run? =
@@ -87,6 +111,7 @@ object AgentRuns {
         if (r.state != ST_RUN) { // остановленный запуск довели руками или он доработал сам — снова идёт
             r.state = ST_RUN
             r.finishedAt = 0L
+            mark(r, M_RESUME, now)
         }
         setStep(r, STEP_DOWNLOAD, -1f, now)
         return r
@@ -121,6 +146,7 @@ object AgentRuns {
         r.text = ""
         r.finishedAt = now
         r.changedAt = now
+        mark(r, if (kind == "tokens") M_TOKENS else M_NEXT, now)
     }
 
     /** Нажали «Далее» (круг с треугольником): самый давний запуск вкладки, ждущий «Далее», снова идёт. */
@@ -136,6 +162,7 @@ object AgentRuns {
         r.finishedAt = 0L
         r.resumedAt = now
         r.changedAt = now
+        mark(r, M_RESUME, now)
     }
 
     fun setStep(r: Run, step: Int, frac: Float, now: Long = System.currentTimeMillis()) {
@@ -170,6 +197,7 @@ object AgentRuns {
         if (state != ST_ERROR) r.step = STEP_COMMIT
         r.finishedAt = now
         r.changedAt = now
+        mark(r, when (state) { ST_ERROR -> M_ERROR; ST_NOTHING -> M_NOTHING; else -> M_DONE }, now)
     }
 
     /** Крестик на карточке / долгое нажатие на капсулу: плашка убирается, работа не прерывается. */
@@ -230,5 +258,34 @@ object AgentRuns {
             ST_NEXT -> head + " · инструменты закончились, нажмите на круг"
             else -> if (r.plain) head + " · задача выполнена" else head + (if (r.text.isNotEmpty()) " · " + r.text else "")
         }
+    }
+
+    // ---------- история агентов (журнал событий) ----------
+
+    /** Время для журнала: «09:24» (по часовому поясу телефона). */
+    fun clockOf(ms: Long): String = SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(ms))
+
+    /**
+     * Одна запись журнала на запуск, меняется по ходу дела: «Агент 2 начал работать над задачей в 09:24 и закончил в 09:30»,
+     * «Агент 3 начал работать над задачей в 10:23 и в 10:30 у него закончились токены». Время обёрнуто в ⟦…⟧ — страница показывает его жирным.
+     */
+    fun historyText(r: Run, agentNumber: Int, clock: (Long) -> String = ::clockOf): String {
+        val parts = ArrayList<String>()
+        for (m in r.marks) {
+            val t = "⟦" + clock(m.at) + "⟧"
+            parts.add(when (m.kind) {
+                M_START -> "начал работать над задачей в $t"
+                M_TOKENS -> "в $t у него закончились токены"
+                M_NEXT -> "в $t у него закончились инструменты, нужно было нажать «Далее»"
+                M_RESUME -> "в $t продолжил работу"
+                M_DONE -> "закончил в $t"
+                M_NOTHING -> "закончил в $t (коммитить было нечего)"
+                else -> "в $t произошла ошибка" + (if (r.text.isNotEmpty()) ": " + r.text else "")
+            })
+        }
+        if (parts.isEmpty()) return ""
+        val sb = StringBuilder("Агент ").append(agentNumber).append(' ').append(parts[0])
+        for (i in 1 until parts.size) sb.append(if (i == parts.size - 1) " и " else ", ").append(parts[i])
+        return sb.toString()
     }
 }

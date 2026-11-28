@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.3 (28.11) — тесты истории агентов: фразы для журнала событий (закончил, кончились токены, продолжил, ошибка) и вызов onMark. Откат: AgentRunsTest.kt 1.2.
 // Версия: 1.2 (28.11) — тесты «Обычной задачи»: один шаг «Claude думает», галочка после конца ответа, fix.zip её не трогает. Откат: AgentRunsTest.kt 1.1.
 // Версия: 1.1 (28.11)
 // Версия: 1.0 (25.11) — проверка шагов плашки агента Claude в острове (AgentRuns): порядок шагов, доли, итоги, исчезновение.
@@ -13,6 +14,7 @@ class AgentRunsTest {
 
     @Before fun reset() {
         AgentRuns.clear()
+        AgentRuns.onMark = null
     }
 
     @Test fun fullChain() {
@@ -220,5 +222,56 @@ class AgentRunsTest {
         AgentRuns.taskResult("p3", false, "нет сети", 5L)
         assertEquals(AgentRuns.ST_ERROR, r.state)
         assertEquals("Ошибка", AgentRuns.title(r))
+    }
+
+    private val clock: (Long) -> String = { "t$it" }
+
+    @Test fun historyDone() {
+        val r = AgentRuns.start("main", "h1", 1000L)
+        assertEquals("Агент 2 начал работать над задачей в ⟦t1000⟧", AgentRuns.historyText(r, 2, clock))
+        AgentRuns.taskResult("h1", true, "", 1500L)
+        AgentRuns.beginFix("main", 2000L)
+        AgentRuns.done(r, "3 файлов, abcdef0", 6000L)
+        assertEquals("Агент 2 начал работать над задачей в ⟦t1000⟧ и закончил в ⟦t6000⟧", AgentRuns.historyText(r, 2, clock))
+    }
+
+    @Test fun historyNoTokens() {
+        val r = AgentRuns.start("main", "h2", 1000L)
+        AgentRuns.taskResult("h2", true, "", 1500L)
+        AgentRuns.pageState("main", "tokens", false, 2000L)
+        assertEquals(AgentRuns.ST_NO_TOKENS, r.state)
+        assertEquals("Агент 3 начал работать над задачей в ⟦t1000⟧ и в ⟦t2000⟧ у него закончились токены", AgentRuns.historyText(r, 3, clock))
+    }
+
+    @Test fun historyResumeAfterStop() {
+        val r = AgentRuns.start("main", "h3", 1000L)
+        AgentRuns.taskResult("h3", true, "", 1500L)
+        AgentRuns.pageState("main", "tokens", false, 2000L)
+        AgentRuns.pageState("main", "", true, 3000L) // ответ снова пошёл
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.beginFix("main", 4000L)
+        AgentRuns.done(r, "1 файлов, abcdef0", 5000L)
+        assertEquals(
+            "Агент 1 начал работать над задачей в ⟦t1000⟧, в ⟦t2000⟧ у него закончились токены, в ⟦t3000⟧ продолжил работу и закончил в ⟦t5000⟧",
+            AgentRuns.historyText(r, 1, clock)
+        )
+    }
+
+    @Test fun historyError() {
+        val r = AgentRuns.start("main", "h4", 1000L)
+        AgentRuns.taskResult("h4", false, "нет сети", 1005L)
+        assertEquals("Агент 1 начал работать над задачей в ⟦t1000⟧ и в ⟦t1005⟧ произошла ошибка: нет сети", AgentRuns.historyText(r, 1, clock))
+    }
+
+    @Test fun onMarkIsCalledForEveryMark() {
+        var calls = 0
+        AgentRuns.onMark = { calls++ }
+        val r = AgentRuns.start("main", "h5", 0L)
+        AgentRuns.taskResult("h5", true, "", 1L)
+        AgentRuns.pageState("main", "tools", false, 2L)
+        assertEquals(AgentRuns.ST_NEXT, r.state)
+        assertEquals(2, calls) // начал + кончились инструменты
+        AgentRuns.resumeTab("main", 3L)
+        assertEquals(3, calls)
     }
 }

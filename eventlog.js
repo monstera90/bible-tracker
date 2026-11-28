@@ -1,5 +1,6 @@
 /* ===========================================================================
    eventlog.js
+   Версия: 4.2 (28.11) — история агентов Claude: `drainAgentRuns` забирает у оболочки (мост ≥ 45: `agentHistoryTake`/`agentHistoryAck`) записи вида «Агент 2 начал работать над задачей в **09:24** и закончил в **09:30**» — одна запись на запуск, её текст меняется по ходу дела (ключ `agent:…`); вызывается при старте, раз в 2 секунды и при возврате на страницу. Откат: eventlog.js 4.1.
    Версия: 4.1 (14.11)
    Версия: 2.2 (25.10) — заголовки дней: «ПН 26.10.2026» (день недели + дата). Откат: eventlog.js 2.1
    Версия: 2.1 (25.10) — предстоящее у будильника: серой строкой показывается только ближайший звонок (первый; сработал — появляется второй повтор, и так далее), а не все сразу. Откат: eventlog.js 2.0.
@@ -531,12 +532,33 @@
   function onChange(fn){ if(typeof fn === "function") listeners.push(fn); }
   listeners.push(function(){ if(document.getElementById("eventCenterList")) refreshOpenScreen(); });
 
+  // Записи об агентах Claude (вкладка Claude, остров): оболочка складывает их в очередь, страница вносит в журнал и подтверждает.
+  // Запись одна на запуск, поэтому у уже внесённой текст обновляется по ключу.
+  function drainAgentRuns(){
+    var n = window.LifeTrackerNative;
+    if(!n || typeof n.agentHistoryTake !== "function" || typeof n.agentHistoryAck !== "function") return;
+    var arr;
+    try{ arr = JSON.parse(String(n.agentHistoryTake())); }catch(e){ return; }
+    if(!Array.isArray(arr) || !arr.length) return;
+    var ack = [];
+    arr.forEach(function(ev){
+      if(!ev || typeof ev.n !== "number" || typeof ev.key !== "string" || typeof ev.text !== "string") return;
+      try{
+        var at = Number(ev.at) || 0;
+        if(!update(ev.key, ev.text, { bold: true })) add(ev.text, { at: at, key: ev.key, bold: true });
+      }catch(e){}
+      ack.push(ev.n);
+    });
+    if(ack.length){ try{ n.agentHistoryAck(JSON.stringify(ack)); }catch(e){} }
+  }
+
   function start(){
     if(started) return;
     started = true;
     try{ reconcileTimers(); }catch(e){}
-    setInterval(function(){ try{ reconcileTimers(); }catch(e){} }, RECONCILE_MS);
-    document.addEventListener("visibilitychange", function(){ try{ reconcileTimers(); }catch(e){} });
+    try{ drainAgentRuns(); }catch(e){}
+    setInterval(function(){ try{ reconcileTimers(); }catch(e){} try{ drainAgentRuns(); }catch(e){} }, RECONCILE_MS);
+    document.addEventListener("visibilitychange", function(){ try{ reconcileTimers(); }catch(e){} try{ drainAgentRuns(); }catch(e){} });
   }
 
   window.EventLog = {
@@ -552,6 +574,7 @@
     alarmStarted: alarmStarted,
     alarmCancelled: alarmCancelled,
     reconcileAlarms: reconcileAlarms,
+    drainAgentRuns: drainAgentRuns,
     setUpcomingProvider: setUpcomingProvider,
     onChange: onChange,
     start: start,

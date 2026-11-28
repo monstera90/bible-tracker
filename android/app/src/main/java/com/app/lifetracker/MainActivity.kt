@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 18.9 (28.11) — `AgentHistory.install` при создании: записи об агентах Claude попадают в журнал событий. Откат: MainActivity.kt 18.8.
 // Версия: 18.8 (25.11)
 // Версия: 18.7 (22.11) — `WebUpdater.appContext` задаётся при создании (общий движок скачивания, ТЗ TZ_downloads.md, этап 5). Откат: MainActivity.kt 18.6.
 // Версия: 18.6 (22.11) — вкладка «Сохранение загрузок»: системное окно выбора папки для типа файла (`downloadFolderLauncher`, `pickDownloadFolder`; ТЗ TZ_downloads.md, этап 4). Откат: MainActivity.kt 18.5.
@@ -418,6 +419,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setupLegacySystemBars()
 
+        AgentHistory.install(applicationContext) // записи об агентах Claude → журнал событий
         fileSaver = FileSaver(applicationContext)
         fileSaver.cleanStale()
         SharedInbox.cleanStale(applicationContext)

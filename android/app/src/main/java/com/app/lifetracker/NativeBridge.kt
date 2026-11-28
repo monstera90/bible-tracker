@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 30.13 (28.11) — `agentHistoryTake()` / `agentHistoryAck(ns)` (мост 45): записи об агентах Claude («Агент 2 начал работать над задачей в 09:24 и закончил в 09:30») для журнала событий; очередь — AgentHistory. Откат: NativeBridge.kt 30.12.
 // Версия: 30.12 (28.11) — `claudeSendTaskPlain(tabId, reqId, text, imagesJson)`: «Обычная задача» из сундучка — текст и картинки уходят в новый диалог как есть, без архива репозитория и без автокоммита fix.zip в этом чате. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.11.
 // Версия: 30.11 (25.11) — `claudeSendTaskImages(tabId, reqId, text, imagesJson)`: то же, что `claudeSendTask`, но с картинками задачи (JSON [{name, mime, b64}]) — они прикрепляются в чате рядом с архивом. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.10.
 // Версия: 30.10 (24.11) — `autoCommitGet` / `autoCommitSave` / `autoCommitSetToken`: настройки автокоммита fix.zip (AutoCommit); токен в страницу не отдаётся. Версию моста не меняет. Откат: NativeBridge.kt 30.9.
@@ -77,6 +78,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 20: вкладка «Система»: усиление громкости всей системы (volumeBoostGet / volumeBoostSet; 100/125/150/200 %).
          * 19: поиск по PDF (pdfGetFolder / pdfPickFolder / pdfListAll): папка с PDF и список файлов; сами файлы страница читает по https://localhost/__pdflib/<docId>.
          * 18: группа QR «Комбинированный» (comboGroupBegin / comboGroupEnd): таймеры, музыка и тренировка кода — одно целое (пауза и стоп общие, уведомления не смахиваются).
+         * 45: `agentHistoryTake()` / `agentHistoryAck(ns)` — записи об работе агентов Claude (начал, токены кончились, закончил) для журнала событий страницы.
          * 44: `downloadStart(url, optsJson)` / `downloadStatus(req)` / `downloadCancel(req)` / `downloadRelease(req)` — скачивание по запросу страницы (Flibusta): движок + остров, готовый файл страница забирает по https://localhost/__dl/<req> (WebAssetServer, PageHandoff).
          * 43: «Сохранение загрузок» (`downloadFoldersGet` / `downloadFolderPick` / `downloadFolderSetEnabled` / `downloadFolderReset` / `downloadFolderUseLibrary` / `downloadRuleAdd` / `downloadRuleRemove`; DownloadFolders): папки по типам файлов и «свои форматы»; `finishSave` отдаёт странице `where` и `note`.
          * 42: `downloadThreadsGet()` / `downloadThreadsSet(n)` — число потоков скачивания по умолчанию, 2–8 (вкладка «Система»; FileDownloads).
@@ -87,7 +89,7 @@ class NativeBridge(private val activity: MainActivity) {
          * 14: `musicPlayTrack(trackId, loop, volumePct)` / `musicPlayFolder(folderId, loop, volumePct)` — трек или папка по id из QR «Комбинированный».
          * 13: вкладка «Музыка» (musicGetFolder / musicPickFolder / musicList / musicPlay / musicToggle / musicNext / musicPrev / musicClose / musicState).
          */
-        const val BRIDGE_VERSION = 44
+        const val BRIDGE_VERSION = 45
     }
 
     /** JSON: {"shell":"kotlin","versionName":"...","versionCode":N,"sdk":N}. Пустой объект, если страница не доверенная. */
@@ -1543,6 +1545,28 @@ class NativeBridge(private val activity: MainActivity) {
             QrWidgets.ackNoteRemove(activity.applicationContext, json)
         } catch (e: Exception) {
             // повторится
+        }
+    }
+
+    /** JSON-массив {n,key,text,at} — записи об работе агентов Claude, ещё не внесённые страницей в журнал событий. */
+    @JavascriptInterface
+    fun agentHistoryTake(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try {
+            AgentHistory.take(activity.applicationContext)
+        } catch (e: Exception) {
+            "[]"
+        }
+    }
+
+    /** Страница внесла записи с номерами `n` (JSON-массив) — убираем их из очереди. */
+    @JavascriptInterface
+    fun agentHistoryAck(nsJson: String?) {
+        if (!activity.pageTrusted) return
+        try {
+            AgentHistory.ack(activity.applicationContext, nsJson)
+        } catch (e: Exception) {
+            // повторим
         }
     }
 
