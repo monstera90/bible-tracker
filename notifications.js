@@ -1,5 +1,6 @@
 /* ===========================================================================
    notifications.js
+   Версия: 5.0 (28.11) — структурная правка: срок у ЗАДАЧИ (не карточки) больше не напоминание, а время отправки задачи свободному агенту Claude. Новый dep `sendDueTask(task, at)` (my.js) → `{state: "sent" | "skip" | "wait", retryAt}`; новая функция `runSends` (зовётся в начале каждого `tick`, в том числе когда приложение не на экране) вызывает его для наступивших сроков; "wait" (нет свободного агента) — повтор в `retryAt`, срок «показанным» не помечается. Уведомления и карточки-напоминания по задачам не показываются, в оболочку (`pushNative`) задачи не уходят — только карточки вкладки 9, их напоминания прежние. Без dep `sendDueTask` всё работает как в 4.5. Откат: notifications.js 4.5.
    Версия: 4.5 (24.10) — в журнале событий у карточек «Было/Будет показано напоминание «…»» без «по карточке».
    Версия: 4.4 (24.10) — `pushNative` передаёт оболочке `repeatKind` (карточка «Напоминание»).
    Версия: 4.3 (24.10) — события для центра событий (`eventlog.js`): `logReminderShown`, провайдер предстоящих напоминаний (`EventLog.setUpcomingProvider`), запись напоминаний, показанных оболочкой.
@@ -88,7 +89,8 @@
    закрытом — при следующем открытии. Доставка при закрытом приложении —
    отдельная задача (нужен серверный компонент).
 
-   Данные: c.remindAt у задачи (число, мс; null/нет — напоминания нет).
+   С 5.0 у ЗАДАЧ срок — время отправки свободному агенту Claude (runSends), уведомления по задачам не показываются; напоминания остались только у карточек вкладки 9.
+   Данные: c.remindAt у задачи (число, мс; null/нет — срока нет).
    Какие уведомления УЖЕ показаны — localStorage "taskRemindersFired_v1"
    ({id: remindAt}, только на этом устройстве): если срок поменяли — значение
    отличается и уведомление сработает заново.
@@ -112,9 +114,12 @@ window.initNotificationsModule = function(deps){
   var openTaskFromReminder = deps.openTaskFromReminder || function(){};
   var openCardFromReminder = deps.openCardFromReminder || function(){}; // напоминания карточек (id «card:<id>»)
   function isCardId(id){ return String(id || "").indexOf("card:") === 0; }
+  // срок задачи (не карточки) — время отправки агенту, а не напоминание (см. runSends)
+  function isSendTask(t){ return !!sendDueTask && !!t && !isCardId(t.id); }
   var snoozeTask = deps.snoozeTask || function(){};
   var completeTask = deps.completeTask || function(){};
   var getGroupWatch = deps.getGroupWatch || function(){ return null; };
+  var sendDueTask = deps.sendDueTask || null; // отправка задачи агенту в заданное время (my.js); null — задачи напоминают, как раньше
 
   // Нативная оболочка (APK): уведомления показывает она. null — обычный браузер/PWA.
   var NT = (window.LTNotify && window.LTNotify.available) ? window.LTNotify : null;
@@ -492,7 +497,7 @@ window.initNotificationsModule = function(deps){
       tasks.forEach(function(t){
         var at = getRemindAt(t);
         if(at == null || at <= now || (t.c && t.c.checked === true) || fired[t.id] === at) return;
-        out.push({at: at, text: "Будет показано " + reminderPhrase(t.id, cleanText(t.c && t.c.text))});
+        out.push({at: at, text: isSendTask(t) ? "Будет отправлена агенту задача «" + cleanText(t.c && t.c.text) + "»" : "Будет показано " + reminderPhrase(t.id, cleanText(t.c && t.c.text))});
       });
       return out;
     });
@@ -551,6 +556,7 @@ window.initNotificationsModule = function(deps){
   }
 
   var timer = null;
+  var sendRetry = {}; // id задачи → когда повторить отправку (свободного агента не было); только в памяти
 
   function schedule(){
     if(timer){ clearTimeout(timer); timer = null; }
@@ -562,6 +568,7 @@ window.initNotificationsModule = function(deps){
     tasks.forEach(function(t){
       var at = getRemindAt(t);
       if(at == null || (t.c && t.c.checked === true) || fired[t.id] === at) return;
+      if(isSendTask(t) && (sendRetry[t.id] || 0) > at) at = sendRetry[t.id]; // ждём освобождения агента
       if(nextDue == null || at < nextDue) nextDue = at;
     });
     var delay = TICK_MAX_MS;
@@ -591,6 +598,7 @@ window.initNotificationsModule = function(deps){
       tasks.forEach(function(t){
         var at = getRemindAt(t);
         if(at == null || (t.c && t.c.checked === true) || fired[t.id] === at) return;
+        if(isSendTask(t)) return; // отправка по времени идёт из страницы, оболочка уведомление по задаче не показывает
         var item = {id: t.id, at: at, text: cleanText(t.c && t.c.text)};
         var rd = t.c && t.c.repeatDays;
         if(typeof rd === "number" && rd > 0) item.repeatDays = rd; // повторяющееся напоминание карточки: оболочка сама сдвигает срок
@@ -636,7 +644,41 @@ window.initNotificationsModule = function(deps){
     }catch(e){ log("syncFromNative: " + (e && e.message ? e.message : e)); }
   }
 
+  // Наступившие сроки задач: отправка свободному агенту (my.js, sendDueTask). Не зависит от того, на экране страница или нет.
+  // Срок помечается «обработанным» только когда итог окончательный (отправлено / отправлять нельзя); «wait» — повтор позже.
+  function runSends(){
+    if(!sendDueTask) return;
+    var now = Date.now();
+    var fired = loadFired();
+    var changed = false;
+    var due = [];
+    var tasks = [];
+    try{ tasks = getRemindableTasks() || []; }catch(e){}
+    tasks.forEach(function(t){
+      if(!isSendTask(t)) return;
+      var at = getRemindAt(t);
+      if(at == null || (t.c && t.c.checked === true) || at > now || fired[t.id] === at) return;
+      if((sendRetry[t.id] || 0) > now) return;
+      due.push({task: t, at: at});
+    });
+    due.sort(function(a, b){ return a.at - b.at; });
+    due.forEach(function(d){
+      var r = null;
+      try{ r = sendDueTask(d.task, d.at); }
+      catch(e){ log("sendDueTask: " + (e && e.message ? e.message : e)); r = {state: "skip"}; }
+      if(r && r.state === "wait"){
+        sendRetry[d.task.id] = (typeof r.retryAt === "number" && r.retryAt > now) ? r.retryAt : now + 30000;
+      }else{
+        delete sendRetry[d.task.id];
+        fired[d.task.id] = d.at;
+        changed = true;
+      }
+    });
+    if(changed) saveFired(fired);
+  }
+
   function tick(){
+    runSends();
     if(NT){
       syncFromNative();
       // приложение не на экране: напоминания показывает оболочка, карточка покажется при возврате
@@ -651,6 +693,7 @@ window.initNotificationsModule = function(deps){
     tasks.forEach(function(t){
       var at = getRemindAt(t);
       if(at == null || (t.c && t.c.checked === true)) return;
+      if(isSendTask(t)) return; // это отправка агенту — runSends
       if(at <= now && fired[t.id] !== at) due.push({task: t, at: at});
     });
     Object.keys(fired).forEach(function(k){

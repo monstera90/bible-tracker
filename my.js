@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 156.0 (28.11) — структурная правка: часы у задачи — больше не напоминание, а отправка задачи свободному агенту Claude в заданное время (`sendDueTaskToFreeClaude`, `claudeLastMode`; dep `sendDueTask` модуля уведомлений 5.0). Срок по-прежнему в `c.remindAt` и выбирается той же плашкой; в назначенный момент задача уходит вкладке Claude, которой не давали задач последние 5 ч 1 мин (`ClaudeTabMod.pickFreeTab(skip)`, claudetab.js 2.3), режим — тот, каким отправляли в прошлый раз (`claudeTaskLastMode_v1`, по умолчанию fix.zip). Нет свободного агента — ждёт первого освободившегося; срок старше суток не отправляется. После отправки срок снимается. Подсказка и справка у часов переписаны. Откат: my.js 155.0.
    Версия: 155.0 (28.11) — сундучок с цифрой агента: когда fix.zip этой задачи успешно скачан и закоммичен (оболочка → `ClaudeTabMod.onTaskCommit`, `onClaudeTaskCommit`), в круге появляется тонкая белая окантовка (`.committed`, modals.css 23.10); размер кнопки не меняется. Отметка хранится в записи `claudeTaskTabs_v1` (`done`), снимается новой отправкой и сбросом сундучка. «Нечего коммитить» и ошибка окантовку не дают. Откат: my.js 154.9.
    Версия: 154.9 (28.11) — сундучок: долгое нажатие на НЕАКТИВНЫЙ чемоданчик (состояние «off») отправляет задачу любому свободному агенту — вкладке Claude, которой не давали задач последние 5 ч 1 мин (`sendTaskToFreeClaude`, `ClaudeTabMod.pickFreeTab`/`nextFreeAt`; claudetab.js 2.1): показывается плашка режима («fix.zip» / «Обычная задача»), вкладка выбирается сама; свободных нет — сообщение, когда освободится ближайший. Долгое нажатие на активный чемоданчик по-прежнему сбрасывает отметку. Откат: my.js 154.8.
    Версия: 154.8 (28.11) — кнопка-колесо в нижнем ряду вкладки «В работе» (`#taskWorkSettingsBtn`, слот 2 — место снятой «+», слева от полноэкранного режима): видимость в `syncTaskFabRowForTab`, обработчик в `initTaskGlobalToolbar`, экран «Дополнительные настройки вкладки «В работе»» — `renderWorkTabSettingsScreen` (пока пустой, `#taskWorkSettingsBody`). Откат: my.js 154.7.
@@ -7594,6 +7595,8 @@
     bindClose: bindClose,
     closeModal: closeModal,
     getRemindableTasks: getRemindableTasks,
+    // срок задачи = время отправки свободному агенту Claude (не напоминание)
+    sendDueTask: sendDueTaskToFreeClaude,
     openTaskFromReminder: openReminderTask,
     openCardFromReminder: openCardFromReminder,
     // «Завтра» и пузыри отсрочки: новый срок напоминания (общая задача — тем же путём, setTaskReminder сам знает про права)
@@ -24211,6 +24214,7 @@
       bt.addEventListener("click", function(e){
         e.stopPropagation();
         closeClaudeTaskPicker();
+        claudeLastModeSave(m[0]); // по часам задача уходит в этом же режиме
         onPick(m[0]);
       });
       list.appendChild(bt);
@@ -24335,6 +24339,74 @@
     }catch(e){}
   }
   try{ if(window.ClaudeTabMod){ window.ClaudeTabMod.onTaskResult = onClaudeTaskResult; window.ClaudeTabMod.onTaskCommit = onClaudeTaskCommit; } }catch(e){}
+  // ---- отправка задачи агенту по часам ----
+  // Часы у задачи — больше не напоминание, а «поставить задачу в работу в это время». Срок хранится в прежнем поле c.remindAt (плашка даты и
+  // времени, вид кнопки, вкладка с чемоданчиком, облако — как раньше); когда срок наступает, notifications.js (runSends) зовёт
+  // sendDueTaskToFreeClaude: задача уходит ЛЮБОМУ свободному агенту — вкладке Claude, которой не давали задач последние 5 ч 1 мин
+  // (ClaudeTabMod.pickFreeTab) — тем же путём, что долгое нажатие на чемоданчик (sendTaskToClaude). Режим («fix.zip» / «Обычная задача»)
+  // тот, каким задачу отправляли в прошлый раз (по умолчанию fix.zip). Нет свободного агента — ждём первого освободившегося.
+  // Работает, пока приложение запущено; наступивший при закрытом приложении срок отправляется при следующем запуске, но не позже суток.
+  var CLAUDE_LAST_MODE_KEY = "claudeTaskLastMode_v1";
+  var AUTO_SEND_LATE_MAX_MS = 24 * 3600 * 1000; // срок старше — не отправляем (старые напоминания, забытое приложение)
+  var AUTO_SEND_HOLD_MS = 2 * 60 * 1000;        // вкладка, которой только что отдали задачу по часам: пока оболочка не отметила её занятой, второй не даём
+  var autoSendHold = {};                         // id вкладки → когда отдали
+  var autoSendWaitToast = {};                    // «id:срок» → показали ли «свободных агентов нет»
+  function claudeLastMode(){
+    try{ return localStorage.getItem(CLAUDE_LAST_MODE_KEY) === "plain" ? "plain" : "fix"; }catch(e){ return "fix"; }
+  }
+  function claudeLastModeSave(mode){
+    try{ localStorage.setItem(CLAUDE_LAST_MODE_KEY, mode === "plain" ? "plain" : "fix"); }catch(e){}
+  }
+  function autoSendShortText(task){
+    var t = String(task && task.c && task.c.text || "").replace(/!\[\[[^\[\]\n]+\]\]/g, "").replace(/\s+/g, " ").trim();
+    return t.length > 60 ? t.slice(0, 60) + "…" : t;
+  }
+  // task — {id, c}; at — срок (мс). Возвращает {state: "sent" | "skip"} (итог окончательный) или {state: "wait", retryAt} (агентов нет — повторить позже)
+  function sendDueTaskToFreeClaude(task, at){
+    var id = task.id, mod = window.ClaudeTabMod, now = Date.now();
+    var cur = getTaskById(id);
+    if(!cur || cur.c.checked === true) return {state: "skip"};
+    var label = autoSendShortText(cur);
+    var q = label ? "«" + label + "»" : "";
+    // итог окончательный — снимаем срок, чтобы часы не показывали старое время; строка перерисовывается, если она на экране
+    function finish(state, msg, ms){
+      if(msg) showShortToast(msg, ms || 6000);
+      try{ clearTaskReminder(id); }catch(e){}
+      try{
+        if(document.querySelector('.task-reminder-btn[data-id="' + id + '"]') && TASK_TAB_IDS[currentSettingsTab]) renderTaskTabList(currentSettingsTab, id);
+      }catch(e){}
+      return {state: state};
+    }
+    if(isGroupTaskId(id) && isGroupTasksReadOnly()) return finish("skip", "Задача " + q + " не отправлена агенту: общие задачи сейчас только для чтения");
+    if(now - at > AUTO_SEND_LATE_MAX_MS) return finish("skip", "Задача " + q + " не отправлена агенту: время прошло больше суток назад");
+    if(getTaskWorkState(cur) !== "off") return finish("skip", "Задача " + q + " уже в работе — по часам повторно не отправляю");
+    if(!mod || typeof mod.pickFreeTab !== "function" || typeof mod.canSendTask !== "function" || !mod.canSendTask()){
+      return finish("skip", "Отправка задачи агенту работает только в приложении (APK) с обновлённой оболочкой");
+    }
+    var skip = Object.keys(autoSendHold).filter(function(tid){
+      if(now - autoSendHold[tid] >= AUTO_SEND_HOLD_MS){ delete autoSendHold[tid]; return false; }
+      return true;
+    });
+    var tabId = mod.pickFreeTab(skip);
+    if(!tabId){
+      var nf = typeof mod.nextFreeAt === "function" ? mod.nextFreeAt() : 0;
+      var wkey = id + ":" + at;
+      if(!autoSendWaitToast[wkey]){
+        autoSendWaitToast[wkey] = true;
+        var d = nf ? new Date(nf) : null;
+        var hhmm = d ? ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) : "";
+        showShortToast("Свободных агентов нет — задача " + q + " уйдёт, как только освободится первый" + (hhmm ? " (в " + hhmm + ")" : ""), 6000);
+      }
+      return {state: "wait", retryAt: nf ? nf + 1000 : now + 15000};
+    }
+    autoSendHold[tabId] = now;
+    if(!sendTaskToClaude(id, tabId, claudeLastMode())){ delete autoSendHold[tabId]; return finish("skip"); } // причину показал sendTaskToClaude
+    var n = mod.tabIds().indexOf(tabId) + 1;
+    try{
+      if(window.EventLog) window.EventLog.add("Задача «" + label + "» поставлена в работу агенту Claude" + (n ? " " + n : "") + " по часам", {at: now, key: "task-autosend:" + id + ":" + at});
+    }catch(e){}
+    return finish("sent");
+  }
   // ---- напоминание для задачи ----
   // c.remindAt — время напоминания в мс (локальное время устройства); null/нет поля — напоминания
   // нет. Состояния кнопки: нет (часы) / стоит на другую дату (часы в закрашенном круге, как «в
@@ -24398,7 +24470,7 @@
     var at = getTaskReminderAt(task);
     var p = reminderBtnParts(at);
     return '<button type="button" class="task-icon-btn task-reminder-btn' + (at ? ' active' : '') + p.cls + '" data-id="' + task.id + '" title="' +
-      (at ? escapeHtml('Напоминание: ' + Notifications.formatReminder(at)) : 'Напоминание') + '">' + p.inner + '</button>';
+      (at ? escapeHtml('Отправка агенту: ' + Notifications.formatReminder(at)) : 'Отправить агенту в заданное время') + '">' + p.inner + '</button>';
   }
   // открывает диалог даты/времени; onDone — перерисовка строки/списка
   function openTaskReminderDialog(id, onDone){
@@ -26132,12 +26204,12 @@
     );
     html += iconRow(
       CLOCK_ICON_SVG, false,
-      "Напоминание на конкретные дату и время. Нажатие на часы сразу ставит напоминание на «сегодня + 30 минут» и открывает плашку с датой и временем: подтверждать ничего не нужно, а если нужно другое — просто поменяйте дату и/или время (сохраняются сразу; клик или свайп мимо плашки закрывает её). Повторное нажатие на уже стоящем напоминании открывает плашку для изменения. Долгое нажатие снимает напоминание. Состояния: " +
-      '<span class="task-icon-btn task-reminder-btn">' + CLOCK_ICON_SVG + '</span> напоминания нет, ' +
+      "Отправка задачи агенту в заданные дату и время (это не напоминание). Нажатие на часы сразу ставит время «сегодня + 30 минут» и открывает плашку с датой и временем: подтверждать ничего не нужно, а если нужно другое — просто поменяйте дату и/или время (сохраняются сразу; клик или свайп мимо плашки закрывает её). Повторное нажатие на уже стоящем времени открывает плашку для изменения. Долгое нажатие снимает время. В назначенный момент задача уходит любому свободному агенту — вкладке Claude, которой не давали задач последние 5 ч 1 мин — так же, как при долгом нажатии на чемоданчик, в том же режиме («fix.zip» или «Обычная задача»), в каком задачу отправляли в прошлый раз. Если свободных агентов нет, задача уйдёт, как только освободится первый. Отправка идёт, пока приложение запущено: если время наступило при закрытом приложении, задача уйдёт при следующем запуске (но не позже суток). После отправки время снимается, а задача переходит на «Задачи в работе». Состояния: " +
+      '<span class="task-icon-btn task-reminder-btn">' + CLOCK_ICON_SVG + '</span> время не стоит, ' +
       '<span class="task-icon-btn task-reminder-btn active has-time"><span class="rb-time">8:00</span></span> стоит на сегодня — только время, ' +
       '<span class="task-icon-btn task-reminder-btn active has-time has-date"><span class="rb-date">30</span><span class="rb-time">8:00</span></span> стоит на другой день ближайшего месяца — число и время, ' +
       '<span class="task-icon-btn task-reminder-btn active"><span class="rb-circle">' + CLOCK_ICON_SVG + '</span></span> стоит позже (то же число следующего месяца и дальше) — просто залитые часы. ' +
-      "Все задачи с напоминанием дополнительно показываются на вкладке с чемоданчиком."
+      "Все задачи с назначенной отправкой дополнительно показываются на вкладке с чемоданчиком."
     );
     html += iconRow(SORT_FLAG_ICON_SVG, false, "Кнопка в нижнем ряду только на вкладке «Red»: включает сортировку списка — сначала красные отметки, потом жёлтые. Повторное нажатие возвращает обычный порядок по дате добавления.");
 

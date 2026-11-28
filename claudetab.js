@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 2.3 (28.11) — `pickFreeTab(skip)`: необязательный список id вкладок, которые не брать (нужен отправке задачи по часам: пока предыдущая отправка ещё не отметила вкладку занятой, второй задаче она не достаётся). Без аргумента всё как раньше. Откат: claudetab.js 2.2.
    Версия: 2.2 (28.11) — опрос успешных коммитов fix.zip (мост `claudeTaskCommits`, раз в 3 с и при возврате на страницу): `ClaudeTabMod.onTaskCommit(taskId, tabId)` — my.js рисует у сундучка белую окантовку. Откат: claudetab.js 2.1.
    Версия: 2.1 (28.11) — учёт «когда вкладке Claude последний раз давали задачу через приложение» (localStorage `claudeTabLastSent_v1`, {id вкладки: время}, только это устройство) и выбор свободного агента: `pickFreeTab()` — вкладка, которой не давали задач последние 5 ч 1 мин (из нескольких — та, что простаивает дольше всех; не бывало задач — раньше всех), `nextFreeAt()` — когда освободится ближайшая. Время ставится при принятой оболочкой отправке и откатывается, если пришёл итог «не отправлено». Откат: claudetab.js 2.0.
    Версия: 2.0 (28.11) — `focusTab(id)`: выбрать вкладку ряда перед показом вкладки Claude (нажатие на карточку агента в острове открывает вкладку, где он работает). Откат: claudetab.js 1.9.
@@ -494,9 +495,10 @@
   function lastSave(m){ try{ localStorage.setItem(LAST_KEY, JSON.stringify(m)); }catch(e){} }
   function lastOf(m, id){ var v = m[id]; return (typeof v === "number" && isFinite(v) && v > 0) ? v : 0; }
   // свободная вкладка (id) или null; из нескольких — та, что простаивает дольше всех (при равенстве — первая в ряду)
-  function pickFreeTab(){
+  function pickFreeTab(skip){
     var m = lastLoad(), now = Date.now(), best = null, bestT = Infinity;
     tabIds().forEach(function(id){
+      if(skip && skip.indexOf(id) >= 0) return;
       var t = lastOf(m, id);
       if(now - t > FREE_MS && t < bestT){ best = id; bestT = t; }
     });
