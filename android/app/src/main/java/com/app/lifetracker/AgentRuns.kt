@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.3 (28.11) — «Далее» нажимается само: если инструменты кончились, а fix.zip у запуска ещё не пришёл (запуск на шаге «Claude думает», не «Обычная задача»), [autoNextDue] через AUTO_NEXT_DELAY_MS говорит вкладке отправить «Далее». Если fix.zip уже пришёл (шаг 3–4 или закончено), а Claude всё равно просит «Далее» — не нажимается: архив получен и закоммичен, задача выполнена. Откат: AgentRuns.kt 2.2.
 // Версия: 2.2 (28.11) — история агентов: у запуска список отметок (начал, токены/инструменты кончились, продолжил, закончил, ошибка), по каждой зовётся onMark, а historyText собирает фразу для журнала событий («Агент 2 начал работать над задачей в 09:24 и закончил в 09:30»). Откат: AgentRuns.kt 2.1.
 // Версия: 2.1 (28.11) — «Обычная задача» (plain): плашка с одним шагом «Claude думает» и галочкой, когда Claude закончил ответ (без шагов репозитория, fix.zip и коммита). Откат: AgentRuns.kt 2.0.
 // Версия: 2.0 (28.11)
@@ -37,6 +38,9 @@ object AgentRuns {
     const val STOP_HOLD_MS = 6L * 3_600_000L // плашка, которая ждёт человека (токены / «Далее»), висит, пока её не закроют, но не дольше
     const val RESUME_GRACE_MS = 12_000L // после «Далее» страница ещё несколько секунд показывает прежнее состояние — ему не верим
     const val PLAIN_IDLE_MS = 8_000L // обычная задача: ответ не идёт столько подряд — Claude закончил, плашка получает галочку
+    const val AUTO_NEXT_DELAY_MS = 20_000L // «Далее» само нажимается не сразу: за это время успевает прийти fix.zip (автоскачивание → beginFix) — тогда нажимать уже не нужно
+    const val AUTO_NEXT_RETRY_MS = 30_000L // не вышло нажать (например, в поле ввода чужой текст) — пробуем снова не чаще, чем раз в столько
+    const val AUTO_NEXT_MAX = 20 // защита от бесконечной переписки: больше стольких автонажатий на один запуск — дальше только руками (круг в острове)
     private const val MAX_KEPT = 20
 
     // отметки в жизни запуска — из них собирается запись в журнале событий приложения
@@ -65,6 +69,8 @@ object AgentRuns {
         @Volatile var sent = false // обычная задача: сообщение ушло в чат (итог отправки пришёл)
         @Volatile var sawGen = false // обычная задача: после отправки видели, как Claude пишет ответ
         @Volatile var idleSince = 0L // обычная задача: с какого момента ответ не идёт (0 — идёт или не начинался)
+        @Volatile var autoNexts = 0 // сколько раз приложение само пыталось нажать «Далее» в этом запуске
+        @Volatile var autoNextAt = 0L // когда была последняя такая попытка
         val marks = CopyOnWriteArrayList<Mark>() // отметки для истории
     }
 
@@ -152,6 +158,23 @@ object AgentRuns {
     /** Нажали «Далее» (круг с треугольником): самый давний запуск вкладки, ждущий «Далее», снова идёт. */
     fun resumeTab(tabId: String, now: Long = System.currentTimeMillis()) {
         list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT }?.let { resume(it, now) }
+    }
+
+    /**
+     * Пора ли приложению самому нажать «Далее» в чате вкладки [tabId] ([ClaudeTab.continueTask]). Да — только если у запуска кончились инструменты
+     * ([ST_NEXT]) и fix.zip ещё не пришёл: запуск остаётся на шаге «Claude думает», потому что пришедший fix.zip ([beginFix]) переводит его
+     * на шаг 3 и [pageState] такой запуск уже не останавливает. Поэтому если fix.zip отдан, а Claude всё равно просит «Далее», сюда дело не доходит:
+     * архив получен и закоммичен, задача выполнена. «Обычная задача» ([Run.plain]) без fix.zip — тоже не наш случай, её двигает человек.
+     * Зовётся при каждом опросе страницы; возвращает true один раз на попытку.
+     */
+    fun autoNextDue(tabId: String, now: Long = System.currentTimeMillis()): Boolean {
+        val r = list.firstOrNull { it.tabId == tabId && it.state == ST_NEXT && !it.plain } ?: return false
+        if (now - r.finishedAt < AUTO_NEXT_DELAY_MS) return false
+        if (r.autoNexts >= AUTO_NEXT_MAX) return false
+        if (r.autoNextAt != 0L && now - r.autoNextAt < AUTO_NEXT_RETRY_MS) return false
+        r.autoNexts++
+        r.autoNextAt = now
+        return true
     }
 
     private fun resume(r: Run, now: Long) {
@@ -255,7 +278,7 @@ object AgentRuns {
             ST_ERROR -> head + " · " + r.text.ifEmpty { "сбой" }
             ST_NOTHING -> head + " · файлы не изменились"
             ST_NO_TOKENS -> head + " · токены закончились"
-            ST_NEXT -> head + " · инструменты закончились, нажмите на круг"
+            ST_NEXT -> head + (if (r.plain) " · инструменты закончились, нажмите на круг" else " · инструменты закончились, нажму «Далее» сам")
             else -> if (r.plain) head + " · задача выполнена" else head + (if (r.text.isNotEmpty()) " · " + r.text else "")
         }
     }

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (28.11) — тесты автонажатия «Далее» (autoNextDue): нажимается, пока fix.zip не пришёл; после fix.zip, у «Обычной задачи» и при токенах — нет. Откат: AgentRunsTest.kt 1.3.
 // Версия: 1.3 (28.11) — тесты истории агентов: фразы для журнала событий (закончил, кончились токены, продолжил, ошибка) и вызов onMark. Откат: AgentRunsTest.kt 1.2.
 // Версия: 1.2 (28.11) — тесты «Обычной задачи»: один шаг «Claude думает», галочка после конца ответа, fix.zip её не трогает. Откат: AgentRunsTest.kt 1.1.
 // Версия: 1.1 (28.11)
@@ -273,5 +274,65 @@ class AgentRunsTest {
         assertEquals(2, calls) // начал + кончились инструменты
         AgentRuns.resumeTab("main", 3L)
         assertEquals(3, calls)
+    }
+
+    @Test fun autoNextWhenToolsRanOutAndNoFix() {
+        val r = AgentRuns.start("main", "a1", 0L)
+        AgentRuns.taskResult("a1", true, "", 1L)
+        assertFalse(AgentRuns.autoNextDue("main", 5L)) // инструменты ещё не кончились
+        AgentRuns.pageState("main", "tools", false, 100L)
+        assertEquals(AgentRuns.ST_NEXT, r.state)
+        assertFalse(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS - 1)) // ждём: вдруг fix.zip ещё придёт
+        assertTrue(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS))
+        assertFalse(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS + 1)) // попытка уже была
+        assertTrue(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS + AgentRuns.AUTO_NEXT_RETRY_MS)) // не вышло — повтор
+    }
+
+    @Test fun autoNextNotAfterFixDelivered() {
+        val r = AgentRuns.start("main", "a2", 0L)
+        AgentRuns.taskResult("a2", true, "", 1L)
+        AgentRuns.beginFix("main", 10L) // fix.zip пришёл
+        AgentRuns.pageState("main", "tools", false, 100L) // Claude всё равно просит «Далее»
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        assertFalse(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS * 10))
+        AgentRuns.done(r, "1 файлов, abcdef0", 200L) // закоммичено — задача выполнена
+        AgentRuns.pageState("main", "tools", false, 300L)
+        assertFalse(AgentRuns.autoNextDue("main", 300L + AgentRuns.AUTO_NEXT_DELAY_MS * 10))
+    }
+
+    @Test fun autoNextCancelledWhenFixArrivesDuringWait() {
+        val r = AgentRuns.start("main", "a3", 0L)
+        AgentRuns.taskResult("a3", true, "", 1L)
+        AgentRuns.pageState("main", "tools", false, 100L)
+        AgentRuns.beginFix("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS - 1) // fix.zip успел прийти
+        assertEquals(AgentRuns.STEP_DOWNLOAD, r.step)
+        assertFalse(AgentRuns.autoNextDue("main", 100L + AgentRuns.AUTO_NEXT_DELAY_MS * 3))
+    }
+
+    @Test fun autoNextNotForPlainTaskNorTokens() {
+        val plain = AgentRuns.start("p", "a4", 0L, plain = true)
+        AgentRuns.taskResult("a4", true, "", 1L)
+        AgentRuns.pageState("p", "tools", false, 100L)
+        assertEquals(AgentRuns.ST_NEXT, plain.state)
+        assertFalse(AgentRuns.autoNextDue("p", 100L + AgentRuns.AUTO_NEXT_DELAY_MS * 3))
+        val t = AgentRuns.start("t", "a5", 0L)
+        AgentRuns.taskResult("a5", true, "", 1L)
+        AgentRuns.pageState("t", "tokens", false, 100L)
+        assertEquals(AgentRuns.ST_NO_TOKENS, t.state)
+        assertFalse(AgentRuns.autoNextDue("t", 100L + AgentRuns.AUTO_NEXT_DELAY_MS * 3))
+    }
+
+    @Test fun autoNextHasLimit() {
+        val r = AgentRuns.start("main", "a6", 0L)
+        AgentRuns.taskResult("a6", true, "", 1L)
+        AgentRuns.pageState("main", "tools", false, 100L)
+        var now = 100L + AgentRuns.AUTO_NEXT_DELAY_MS
+        var presses = 0
+        repeat(AgentRuns.AUTO_NEXT_MAX + 5) {
+            if (AgentRuns.autoNextDue("main", now)) presses++
+            now += AgentRuns.AUTO_NEXT_RETRY_MS
+        }
+        assertEquals(AgentRuns.AUTO_NEXT_MAX, presses)
+        assertEquals(AgentRuns.ST_NEXT, r.state) // дальше — руками, плашка остаётся
     }
 }
