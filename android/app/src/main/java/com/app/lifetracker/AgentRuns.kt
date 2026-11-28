@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (28.11) — «Обычная задача» (plain): плашка с одним шагом «Claude думает» и галочкой, когда Claude закончил ответ (без шагов репозитория, fix.zip и коммита). Откат: AgentRuns.kt 2.0.
 // Версия: 2.0 (28.11)
 // Версия: 1.0 (25.11) — ТЗ «прогресс агента в плавающем острове» (TASK_AGENT_ISLAND.md): состояние запусков агента Claude по четырём шагам (репозиторий → Claude думает → fix.zip → коммит) для плашки InAppIsland.
 
@@ -32,9 +33,10 @@ object AgentRuns {
     const val STALE_MS = 45L * 60_000L // идёт без движения дольше — считаем, что ответа не будет
     const val STOP_HOLD_MS = 6L * 3_600_000L // плашка, которая ждёт человека (токены / «Далее»), висит, пока её не закроют, но не дольше
     const val RESUME_GRACE_MS = 12_000L // после «Далее» страница ещё несколько секунд показывает прежнее состояние — ему не верим
+    const val PLAIN_IDLE_MS = 8_000L // обычная задача: ответ не идёт столько подряд — Claude закончил, плашка получает галочку
     private const val MAX_KEPT = 20
 
-    class Run(val id: Long, val tabId: String, val reqId: String, val startedAt: Long) {
+    class Run(val id: Long, val tabId: String, val reqId: String, val startedAt: Long, val plain: Boolean = false) {
         @Volatile var step = STEP_REPO
         @Volatile var frac = -1f // доля шага 0..1; -1 — неизвестна (кольцо-загрузка)
         @Volatile var state = ST_RUN
@@ -43,14 +45,18 @@ object AgentRuns {
         @Volatile var finishedAt = 0L
         @Volatile var hidden = false
         @Volatile var resumedAt = 0L // когда после остановки работа пошла дальше
+        @Volatile var sent = false // обычная задача: сообщение ушло в чат (итог отправки пришёл)
+        @Volatile var sawGen = false // обычная задача: после отправки видели, как Claude пишет ответ
+        @Volatile var idleSince = 0L // обычная задача: с какого момента ответ не идёт (0 — идёт или не начинался)
     }
 
     private val list = CopyOnWriteArrayList<Run>()
     private val seq = AtomicLong(0L)
 
     /** Задача ушла в работу: шаг 1. */
-    fun start(tabId: String, reqId: String, now: Long = System.currentTimeMillis()): Run {
-        val r = Run(seq.incrementAndGet(), tabId, reqId, now)
+    fun start(tabId: String, reqId: String, now: Long = System.currentTimeMillis(), plain: Boolean = false): Run {
+        val r = Run(seq.incrementAndGet(), tabId, reqId, now, plain)
+        if (plain) r.step = STEP_THINK // у обычной задачи один шаг — «Claude думает»
         list.add(r)
         while (list.size > MAX_KEPT) list.removeAt(0)
         return r
@@ -62,7 +68,12 @@ object AgentRuns {
     /** Итог отправки задачи в чат ([ClaudeTaskResults.add]): успех — Claude думает (шаг 2), сбой — ошибка на текущем шаге. */
     fun taskResult(reqId: String, ok: Boolean, msg: String, now: Long = System.currentTimeMillis()) {
         val r = byReq(reqId) ?: return
-        if (ok) setStep(r, STEP_THINK, -1f, now) else fail(r, msg.ifEmpty { "не удалось отправить задачу" }, now)
+        if (ok) {
+            r.sent = true
+            r.sawGen = false
+            r.idleSince = 0L
+            setStep(r, STEP_THINK, -1f, now)
+        } else fail(r, msg.ifEmpty { "не удалось отправить задачу" }, now)
     }
 
     /**
@@ -71,7 +82,7 @@ object AgentRuns {
      */
     fun beginFix(tabId: String, now: Long = System.currentTimeMillis()): Run {
         val r = list.firstOrNull {
-            it.tabId == tabId && ((it.state == ST_RUN && it.step == STEP_THINK) || it.state == ST_NO_TOKENS || it.state == ST_NEXT)
+            !it.plain && it.tabId == tabId && ((it.state == ST_RUN && it.step == STEP_THINK) || it.state == ST_NO_TOKENS || it.state == ST_NEXT)
         } ?: start(tabId, "", now)
         if (r.state != ST_RUN) { // остановленный запуск довели руками или он доработал сам — снова идёт
             r.state = ST_RUN
@@ -89,9 +100,21 @@ object AgentRuns {
     fun pageState(tabId: String, kind: String, gen: Boolean, now: Long = System.currentTimeMillis()) {
         if (gen) {
             list.firstOrNull { it.tabId == tabId && (it.state == ST_NO_TOKENS || it.state == ST_NEXT) }?.let { resume(it, now) }
+            // обычная задача: Claude пишет ответ — запоминаем это, «простой» сбрасывается
+            for (r in list) if (r.plain && r.tabId == tabId && r.state == ST_RUN && r.sent) {
+                r.sawGen = true
+                r.idleSince = 0L
+            }
             return
         }
-        if (kind != "tokens" && kind != "tools") return
+        if (kind != "tokens" && kind != "tools") {
+            // обычная задача: ответ шёл и не идёт уже давно — задача сделана (галочка)
+            for (r in list) if (r.plain && r.tabId == tabId && r.state == ST_RUN && r.sent && r.sawGen) {
+                if (r.idleSince == 0L) r.idleSince = now
+                else if (now - r.idleSince >= PLAIN_IDLE_MS) finish(r, ST_DONE, "", now)
+            }
+            return
+        }
         val r = list.firstOrNull { it.tabId == tabId && it.state == ST_RUN && it.step == STEP_THINK } ?: return
         if (r.resumedAt != 0L && now - r.resumedAt < RESUME_GRACE_MS) return
         r.state = if (kind == "tokens") ST_NO_TOKENS else ST_NEXT
@@ -178,9 +201,9 @@ object AgentRuns {
 
     /** Крупная строка карточки: что происходит сейчас. */
     fun title(r: Run): String = when (r.state) {
-        ST_DONE -> "Закоммичено"
+        ST_DONE -> if (r.plain) "Готово" else "Закоммичено"
         ST_NOTHING -> "Нечего коммитить"
-        ST_ERROR -> "Ошибка · " + stepName(r.step)
+        ST_ERROR -> if (r.plain) "Ошибка" else "Ошибка · " + stepName(r.step)
         ST_NO_TOKENS -> "Задача не выполнена"
         ST_NEXT -> "Нужно нажать «Далее»"
         else -> stepName(r.step)
@@ -197,7 +220,7 @@ object AgentRuns {
     fun detail(r: Run, agentNumber: Int): String {
         val head = "Агент $agentNumber"
         return when (r.state) {
-            ST_RUN -> {
+            ST_RUN -> if (r.plain) head + " · обычная задача" else {
                 val p = percent(r)
                 head + " · шаг " + r.step + " из 4" + (if (p >= 0) " · $p %" else "")
             }
@@ -205,7 +228,7 @@ object AgentRuns {
             ST_NOTHING -> head + " · файлы не изменились"
             ST_NO_TOKENS -> head + " · токены закончились"
             ST_NEXT -> head + " · инструменты закончились, нажмите на круг"
-            else -> head + (if (r.text.isNotEmpty()) " · " + r.text else "")
+            else -> if (r.plain) head + " · задача выполнена" else head + (if (r.text.isNotEmpty()) " · " + r.text else "")
         }
     }
 }

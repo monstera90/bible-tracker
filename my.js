@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 154.7 (28.11) — нажатие на раскрытую карточку агента Claude в острове открывает вкладку Claude (`set2s_10` добавлена в `ISLAND_OPEN_TABS`) и именно ту вкладку ряда, где работает агент (`__ltOpenTab` понимает `set2s_10_<id>`, `ClaudeTabMod.focusTab`). Откат: my.js 154.6.
    Версия: 154.6 (28.11) — сундучок: после выбора вкладки Claude появляется вторая плашка с режимом — «fix.zip» (как раньше: архив репозитория + задача, потом скачивание fix.zip и коммит) и «Обычная задача» (текст и картинки уходят как есть, без архива и без автокоммита; `openClaudeTaskModePicker`, `sendTaskToClaude(id, tabId, mode)`, `ClaudeTabMod.sendTask(..., plain)`). Откат: 154.5.
    Версия: 154.5 (27.11) — вкладка «Задачи в работе» (сундучок): убрана кнопка «+» (`syncTaskFabRowForTab`, `renderTaskTabList`); задачи появляются там только после отправки агенту. Откат: 154.4.
    Версия: 154.4 (25.11) — сундучок: картинки задачи («![[имя]]» в тексте) теперь уходят агенту вместе с текстом и архивом репозитория (`collectTaskImagesForClaude` читает файлы из images/ через MdEditor.getImageBlobUrl → `ClaudeTabMod.sendTask(tab, id, text, images)`). В тексте «![[имя]]» заменяется пометкой «[приложено изображение: имя]»; картинка, которой нет на этом устройстве, или не влезшая в лимит (10 шт., 16 МБ), не прикладывается, о чём говорит сообщение. Отметка «в работе» ставится сразу, при сбое сундучок возвращается как раньше. Откат: my.js 154.3.
@@ -4675,10 +4676,16 @@
   };
   // APK: кнопка «развернуть» плавающего видео (FloatingVideo.kt) — открыть вкладку-сайт `utab_<id>`; сама вкладка, показавшись, забирает видео обратно.
   // APK: нажатие на раскрытую карточку острова (InAppIsland) — открыть вкладку занятия: «Помодоро», «Музыка», «Тренировки» или вкладку-сайт с видео.
-  var ISLAND_OPEN_TABS = { set2s_16: 1, set2s_11: 1, workouts: 1 };
+  var ISLAND_OPEN_TABS = { set2s_16: 1, set2s_11: 1, workouts: 1, set2s_10: 1 };
   window.__ltOpenTab = function(key){
     try{
       key = String(key || "");
+      // «Claude»: ключ set2s_10 (первая вкладка) или set2s_10_<id> (вкладка ряда агента) — открывается именно та вкладка Claude, где работает агент
+      var cm = /^set2s_10(?:_([a-z0-9]{1,24}))?$/.exec(key);
+      if(cm){
+        key = "set2s_10";
+        try{ if(window.ClaudeTabMod && typeof window.ClaudeTabMod.focusTab === "function") window.ClaudeTabMod.focusTab(cm[1] || "main"); }catch(e){}
+      }
       var ok = ISLAND_OPEN_TABS.hasOwnProperty(key) || (key.indexOf("utab_") === 0 && window.UserTabsMod && window.UserTabsMod.isKey(key));
       if(!ok) return false;
       openSettingsTabDirect(key);

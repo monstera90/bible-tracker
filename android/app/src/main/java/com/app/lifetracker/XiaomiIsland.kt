@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 12.5 (28.11)
+// Версия: 12.5 (28.11) — `agentRingBitmap(plain)`: у «Обычной задачи» в кольце нет цифры шага (бегущая дуга, затем галочка). Откат: XiaomiIsland.kt 12.4.
 // Версия: 12.4 (25.11) — `agentBadgeBitmap` / `agentRingBitmap`: значки плашки агента Claude в приложении (номер агента, кольцо шага 1–4). Откат: XiaomiIsland.kt 12.3.
 // Версия: 12.3 (22.11) — кнопка «Открыть» у скачанного файла в системном острове (downloadExtras, TOGGLE_OPEN). Откат: XiaomiIsland.kt 12.2.
 // Версия: 12.2 (22.11) — `downloadExtras`: системный остров загрузок (ТЗ скачивания файлов, этап 3): свёрнутый — кольцо и «45 %», раскрытый — имя, скорость, кнопки «Пауза/Продолжить/Повторить» и «Стоп». Откат: XiaomiIsland.kt 12.1.
@@ -916,7 +917,7 @@ object XiaomiIsland {
      * [AgentRuns.ST_DONE] / [AgentRuns.ST_NOTHING] — вместо цифры галочка (второе — серая); [AgentRuns.ST_ERROR] — красное кольцо и «!»;
      * [AgentRuns.ST_NO_TOKENS] — красное кольцо и крестик; [AgentRuns.ST_NEXT] — янтарное кольцо и треугольник («Далее»).
      */
-    fun agentRingBitmap(step: Int, fraction: Float, state: Int, size: Int = 96, phase: Int = 0): Bitmap {
+    fun agentRingBitmap(step: Int, fraction: Float, state: Int, size: Int = 96, phase: Int = 0, plain: Boolean = false): Bitmap {
         val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.scale(size / 96f, size / 96f)
@@ -967,7 +968,7 @@ object XiaomiIsland {
                 paint.strokeWidth = 5f
                 c.drawPath(Path().apply { moveTo(41f, 34f); lineTo(41f, 62f); lineTo(63f, 48f); close() }, paint)
             }
-            else -> agentDigit(c, step.coerceIn(1, 4).toString(), Color.WHITE)
+            else -> if (!plain) agentDigit(c, step.coerceIn(1, 4).toString(), Color.WHITE)
         }
         return bmp
     }

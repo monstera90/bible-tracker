@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.2 (28.11) — тесты «Обычной задачи»: один шаг «Claude думает», галочка после конца ответа, fix.zip её не трогает. Откат: AgentRunsTest.kt 1.1.
 // Версия: 1.1 (28.11)
 // Версия: 1.0 (25.11) — проверка шагов плашки агента Claude в острове (AgentRuns): порядок шагов, доли, итоги, исчезновение.
 
@@ -183,5 +184,41 @@ class AgentRunsTest {
         AgentRuns.dismiss(a.id)
         assertEquals(1, AgentRuns.visible(2000L).size)
         assertEquals(AgentRuns.ST_NEXT, b.state)
+    }
+
+    @Test fun plainTaskHasOneStepAndGetsCheckmark() {
+        val r = AgentRuns.start("main", "p1", 0L, plain = true)
+        assertEquals(AgentRuns.STEP_THINK, r.step)
+        assertEquals("Claude думает", AgentRuns.title(r))
+        assertEquals("Агент 1 · обычная задача", AgentRuns.detail(r, 1))
+        AgentRuns.pageState("main", "", false, 100L) // ещё не отправлено — ничего не меняется
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.taskResult("p1", true, "", 200L)
+        AgentRuns.pageState("main", "", false, 300L) // ответ ещё не шёл
+        AgentRuns.pageState("main", "", false, 20_000L)
+        assertEquals(AgentRuns.ST_RUN, r.state)
+        AgentRuns.pageState("main", "", true, 21_000L) // Claude пишет
+        AgentRuns.pageState("main", "", false, 22_000L)
+        assertEquals(AgentRuns.ST_RUN, r.state) // пауза между вызовами инструментов ещё не конец
+        AgentRuns.pageState("main", "", true, 24_000L)
+        AgentRuns.pageState("main", "", false, 25_000L)
+        AgentRuns.pageState("main", "", false, 25_000L + AgentRuns.PLAIN_IDLE_MS)
+        assertEquals(AgentRuns.ST_DONE, r.state)
+        assertEquals("Готово", AgentRuns.title(r))
+    }
+
+    @Test fun fixZipDoesNotTouchPlainRun() {
+        val p = AgentRuns.start("main", "p2", 0L, plain = true)
+        AgentRuns.taskResult("p2", true, "", 1L)
+        val f = AgentRuns.beginFix("main", 2L)
+        assertTrue(f !== p)
+        assertEquals(AgentRuns.STEP_THINK, p.step)
+    }
+
+    @Test fun plainSendFailureIsError() {
+        val r = AgentRuns.start("main", "p3", 0L, plain = true)
+        AgentRuns.taskResult("p3", false, "нет сети", 5L)
+        assertEquals(AgentRuns.ST_ERROR, r.state)
+        assertEquals("Ошибка", AgentRuns.title(r))
     }
 }

@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 2.1 (28.11) — обычная задача тоже получает плашку агента в острове (один шаг «Claude думает», затем галочка). Откат: ClaudeTabs.kt 2.0.
 // Версия: 2.0 (28.11)
 // Версия: 1.5 (28.11) — [sendTask] с plain = true («Обычная задача»): архив репозитория не скачивается, плашка агента не заводится, в чат уходят только текст и картинки. Откат: ClaudeTabs.kt 1.4.
 // Версия: 1.4 (27.11) — [sendTask]: задача, которая уже отправляется (тот же id), второй раз не принимается (ClaudeTaskResults.begin). Откат: ClaudeTabs.kt 1.3.
@@ -104,10 +105,8 @@ class ClaudeTabs(private val activity: MainActivity, private val host: FrameLayo
             obtain(want) ?: return false
         }
         if (!ClaudeTaskResults.begin(rid)) return true // эта задача уже отправляется: вторую отправку не ставим
-        if (!plain) {
-            AgentRuns.start(want, rid) // плашка агента в острове: шаг 1 (у обычной задачи шагов репозитория и коммита нет — плашки нет)
-            InAppIsland.ensureBackground(activity)
-        }
+        AgentRuns.start(want, rid, plain = plain) // плашка агента в острове: шаг 1; у обычной задачи один шаг — «Claude думает», потом галочка
+        InAppIsland.ensureBackground(activity)
         Thread {
             try {
                 val images = try {

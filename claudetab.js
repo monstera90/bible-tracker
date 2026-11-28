@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 2.0 (28.11) — `focusTab(id)`: выбрать вкладку ряда перед показом вкладки Claude (нажатие на карточку агента в острове открывает вкладку, где он работает). Откат: claudetab.js 1.9.
    Версия: 1.9 (28.11) — режим «Обычная задача»: `canSendPlain()` и `sendTask(tabId, taskId, text, images, plain)` — при plain задача уходит как есть (текст + картинки), без архива репозитория и без автокоммита (мост `claudeSendTaskPlain`). Стили второй плашки выбора режима. Откат: claudetab.js 1.8.
    Версия: 1.8 (27.11) — `sendTask`: пока задача с этим id отправляется (итог ещё не пришёл), повторный вызов не отправляет её второй раз и не увеличивает счётчик ожидания (защита от дубля сообщения в чате). Откат: claudetab.js 1.7.
    Версия: 1.7 (25.11) — отправка задачи с картинками: `sendTask(tabId, taskId, text, images)`, где images — [{name, mime, b64}] (мост `claudeSendTaskImages`); `canSendImages()` — есть ли такой метод в оболочке. Без картинок всё как раньше. Откат: claudetab.js 1.6.
@@ -517,7 +518,18 @@
   // итоги прежних отправок (страницу могли перезагрузить, пока шла отправка)
   setTimeout(function(){ if(canSendTask()){ taskPendingCount = 1; taskPoll(); } }, 3000);
 
-  var api = { render: render, onSwitch: onSwitch, hide: hide,
+  // выбрать вкладку ряда (id или «main») без перерисовки: показ вкладки Claude (switchSettingsTab → render) подхватит выбор; неизвестный id — первая вкладка
+  function focusTab(id){
+    id = String(id || MAIN);
+    if(id !== MAIN && extra.indexOf(id) < 0) loadTabs();
+    if(id !== MAIN && extra.indexOf(id) < 0) id = MAIN;
+    if(id === curId) return;
+    if(active) hideNative();
+    curId = id;
+    saveTabs();
+  }
+
+  var api = { focusTab: focusTab, render: render, onSwitch: onSwitch, hide: hide,
     tabIds: tabIds, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
   window.ClaudeTabMod = api;
 })();

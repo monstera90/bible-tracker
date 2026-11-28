@@ -1,6 +1,7 @@
 package com.app.lifetracker
 // Версия: 26.0 (28.11)
 // Версия: 25.1 (25.11) — нажатия на остров внутри приложения: плавающее окно видео (FloatingVideo) создаётся позже острова и лежало выше него — перекрывало капсулу/карточку и забирало тапы; теперь после показа окна видео остров поднимается выше (`raiseOverlay`); тап по капсуле не теряется во время анимации сворачивания и при «залипшем» состоянии «раскрыта». Откат: InAppIsland.kt 25.0.
+// Версия: 25.1 (28.11) — карточка агента Claude открывает именно ту вкладку Claude, где работает агент (`Item.tabKey` = `set2s_10` или `set2s_10_<id>`, `tabKeyOf`), на любом шаге; «Обычная задача» — без цифры шага в кольце. Откат: InAppIsland.kt 25.0.
 // Версия: 25.0 (25.11) — занятие «агент Claude» (`K_AGENT`, `agentItem`; ТЗ TASK_AGENT_ISLAND.md): номер агента слева от камеры, кольцо шага 1–4 справа (`pillRing`, `Item.ringFn`), карточка с шагом и подробностью, нажатие открывает вкладку Claude. Откат: InAppIsland.kt 24.3.
 // Версия: 24.3 (22.11) — разрешение «Поверх других приложений»: на Xiaomi/Redmi/POCO кнопка открывает страницу разрешений именно этого приложения (редактор MIUI/HyperOS), а не общий список; запрос показывается сразу после обновления APK (не ждёт 12 часов); в запросе добавлена кнопка «Общий экран». Откат: InAppIsland.kt 24.2.
 // Версия: 24.2 (22.11) — этап 5: у загрузки-обновления в капсуле имя `title` («Обновление приложения» / «Обновление веб-части»). Откат: InAppIsland.kt 24.1.
@@ -934,7 +935,7 @@ class InAppIsland private constructor(private val appCtx: Context) {
         K_WORKOUT -> "workouts"
         K_VIDEO -> SiteMedia.tabId.takeIf { it.isNotEmpty() }?.let { "utab_$it" }
         K_DOWNLOAD -> m.tabKey?.takeIf { it.isNotEmpty() }
-        K_AGENT -> "set2s_10" // вкладка Claude
+        K_AGENT -> m.tabKey?.takeIf { it.isNotEmpty() } ?: "set2s_10" // вкладка Claude: та, где работает агент (set2s_10_<id> для добавленных вкладок ряда)
         else -> null
     }
 
@@ -1289,11 +1290,11 @@ class InAppIsland private constructor(private val appCtx: Context) {
         val step = r.step
         val frac = r.frac
         val phase = if (state == AgentRuns.ST_RUN && frac < 0f) ((now / 500L) % 8L).toInt() else 0 // дуга кольца-загрузки сдвигается на каждом тике
-        m.tabKey = "set2s_10"
+        m.tabKey = if (r.tabId == ClaudeTab.MAIN_ID) "set2s_10" else "set2s_10_" + r.tabId
         m.iconKey = "a$num"
         m.iconFn = { s -> XiaomiIsland.agentBadgeBitmap(num, s) }
-        m.ringKey = "" + state + "/" + step + "/" + (if (frac < 0f) -1 else (frac * 50f).roundToInt()) + "/" + phase
-        m.ringFn = { s -> XiaomiIsland.agentRingBitmap(step, frac, state, s, phase) }
+        m.ringKey = (if (r.plain) "p" else "") + state + "/" + step + "/" + (if (frac < 0f) -1 else (frac * 50f).roundToInt()) + "/" + phase
+        m.ringFn = { s -> XiaomiIsland.agentRingBitmap(step, frac, state, s, phase, r.plain) }
         m.big = AgentRuns.title(r)
         m.sub = AgentRuns.detail(r, num)
         m.onStop = { AgentRuns.dismiss(id) }
