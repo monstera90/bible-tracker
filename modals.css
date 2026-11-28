@@ -1,6 +1,7 @@
 /* ===========================================================================
    modals.css
    Версия: 23.10 (28.11) — колесо «Дополнительные настройки вкладки «В работе»» `.task-worktabset-wrap` (слот 2, место снятой «+»): позиция, левша, ползунок ряда, перетаскивание, размер. Откат: modals.css 23.9.
+   Версия: 23.10 (28.11) — сундучок с цифрой агента, fix.zip закоммичен (`.committed`, my.js 155.0): тонкая белая окантовка внутри круга (inset box-shadow: тонкий край цвета темы, белое кольцо, заливка с цифрой); размер кнопки не меняется. Откат: modals.css 23.9.
    Версия: 23.9 (24.11) — сундучок у задачи с цифрой вкладки Claude: `.task-worktasks-btn .task-claude-num` (my.js 154.0). Откат: modals.css 23.8.
    Версия: 23.8 (22.11) — красная строка в режиме правки задачи: `.task-editable .ed-para::before` (1ch, как `.fmt-para` в обычном виде; my.js 153.8, `taskEditFill`). Откат: modals.css 23.7.
    Версия: 23.7 (22.11) — `#taskFabHomeStub`: «домик» на вкладках задач стал кнопкой (pointer-events:auto, cursor:pointer). Откат: modals.css 23.6.
@@ -1851,6 +1852,10 @@
     font-variant-numeric:tabular-nums;
     pointer-events:none;
   }
+  /* fix.zip задачи успешно закоммичен: внутри того же круга — тонкий край цвета темы, белое кольцо, дальше заливка с цифрой (размер не меняется) */
+  .task-icon-btn.task-worktasks-btn.active.has-claude-num.committed{
+    box-shadow:inset 0 0 0 1px var(--wood), inset 0 0 0 2.5px #fff;
+  }
   /* пиктограмма-часы "напоминание" (.task-reminder-btn, notifications.js) —
      два состояния, третьего нет: обычное (нет напоминания) — как остальные
      кнопки строки; стоит напоминание (.active) — часы в закрашенном круге,
@@ -3181,6 +3186,9 @@ html.lefty .task-joint-menu-popup > *{ direction:ltr; }
   color:var(--ink);
 }
 .task-body.task-card .task-worktasks-btn .task-claude-num{ font-size:calc(var(--tc-btn) * .5); }
+.task-body.task-card .task-icon-btn.task-worktasks-btn.active.has-claude-num.committed{
+  box-shadow:inset 0 0 0 1px var(--wood), inset 0 0 0 3px #fff;
+}
 /* напоминание: без напоминания — обычная круглая кнопка с часами; стоит — овал с часами и временем (число слева — если другой день) */
 .task-body.task-card .task-icon-btn.task-reminder-btn.has-time,
 .task-body.task-card .task-icon-btn.task-reminder-btn.has-date{

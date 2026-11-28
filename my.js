@@ -1,6 +1,7 @@
 /* ===========================================================================
    my.js
    Основная логика приложения «График чтения Библии»
+   Версия: 155.0 (28.11) — сундучок с цифрой агента: когда fix.zip этой задачи успешно скачан и закоммичен (оболочка → `ClaudeTabMod.onTaskCommit`, `onClaudeTaskCommit`), в круге появляется тонкая белая окантовка (`.committed`, modals.css 23.10); размер кнопки не меняется. Отметка хранится в записи `claudeTaskTabs_v1` (`done`), снимается новой отправкой и сбросом сундучка. «Нечего коммитить» и ошибка окантовку не дают. Откат: my.js 154.9.
    Версия: 154.9 (28.11) — сундучок: долгое нажатие на НЕАКТИВНЫЙ чемоданчик (состояние «off») отправляет задачу любому свободному агенту — вкладке Claude, которой не давали задач последние 5 ч 1 мин (`sendTaskToFreeClaude`, `ClaudeTabMod.pickFreeTab`/`nextFreeAt`; claudetab.js 2.1): показывается плашка режима («fix.zip» / «Обычная задача»), вкладка выбирается сама; свободных нет — сообщение, когда освободится ближайший. Долгое нажатие на активный чемоданчик по-прежнему сбрасывает отметку. Откат: my.js 154.8.
    Версия: 154.8 (28.11) — кнопка-колесо в нижнем ряду вкладки «В работе» (`#taskWorkSettingsBtn`, слот 2 — место снятой «+», слева от полноэкранного режима): видимость в `syncTaskFabRowForTab`, обработчик в `initTaskGlobalToolbar`, экран «Дополнительные настройки вкладки «В работе»» — `renderWorkTabSettingsScreen` (пока пустой, `#taskWorkSettingsBody`). Откат: my.js 154.7.
    Версия: 154.7 (28.11) — нажатие на раскрытую карточку агента Claude в острове открывает вкладку Claude (`set2s_10` добавлена в `ISLAND_OPEN_TABS`) и именно ту вкладку ряда, где работает агент (`__ltOpenTab` понимает `set2s_10_<id>`, `ClaudeTabMod.focusTab`). Откат: my.js 154.6.
@@ -24078,7 +24079,7 @@
   }
   function claudeTaskMapSet(id, tabId, prev){
     var m = claudeTaskMapLoad();
-    m[id] = {tab: tabId, prev: prev === undefined ? false : prev, t: Date.now()};
+    m[id] = {tab: tabId, prev: prev === undefined ? false : prev, t: Date.now()}; // новая отправка — отметка «закоммичено» (done) сбрасывается
     claudeTaskMapSave(m);
   }
   function claudeTaskMapDel(id){
@@ -24095,10 +24096,38 @@
     var i = mod.tabIds().indexOf(rec.tab);
     return i >= 0 ? i + 1 : 0;
   }
+  // fix.zip этой задачи успешно закоммичен (только у кнопки с цифрой агента)
+  function claudeTaskCommitted(id){
+    var rec = claudeTaskMapLoad()[id];
+    return !!(rec && rec.done);
+  }
+  // оболочка сообщила об успешном коммите fix.zip: taskId — задача (пусто, если запуск не от задачи), tabId — вкладка Claude.
+  // Пустой taskId: берём самую свежую задачу, отправленную в эту вкладку за последние сутки и ещё не закоммиченную
+  function onClaudeTaskCommit(taskId, tabId){
+    var m = claudeTaskMapLoad(), id = null;
+    if(taskId && m[taskId]) id = taskId;
+    else if(!taskId && tabId){
+      var best = 0, now = Date.now();
+      Object.keys(m).forEach(function(k){
+        var r = m[k];
+        if(r && r.tab === tabId && !r.done && r.t > best && now - r.t < 24 * 3600 * 1000){ best = r.t; id = k; }
+      });
+    }
+    if(!id || m[id].done) return;
+    m[id].done = Date.now();
+    claudeTaskMapSave(m);
+    try{
+      var task = getTaskById(id);
+      if(task && getTaskWorkState(task) !== "off"){
+        var btns = document.querySelectorAll('.task-worktasks-btn.has-claude-num[data-id="' + id + '"]');
+        for(var i = 0; i < btns.length; i++) btns[i].classList.add("committed");
+      }
+    }catch(e){}
+  }
   // кнопка-сундучок строки задачи (одна на все места, где она рисуется); с цифрой — вместо пиктограммы
   function taskWorktasksBtnHtml(task, id){
     var n = claudeTaskNumber(task, id);
-    return '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + (n ? ' has-claude-num' : '') + '" data-id="' + id + '" title="' +
+    return '<button type="button" class="task-icon-btn task-worktasks-btn' + taskWorktasksBtnClass(task) + (n ? ' has-claude-num' : '') + (n && claudeTaskCommitted(id) ? ' committed' : '') + '" data-id="' + id + '" title="' +
       (n ? 'В работе: отправлено в Claude ' + n : 'В работе') + '">' + (n ? '<span class="task-claude-num">' + n + '</span>' : TASK_MOVE_ICON_SVG("worktasks")) + '</button>';
   }
   // долгое нажатие на неактивный чемоданчик: задача уходит свободному агенту (вкладке Claude без задач последние 5 ч 1 мин).
@@ -24305,7 +24334,7 @@
       if(document.querySelector('.task-worktasks-btn[data-id="' + taskId + '"]') && currentSettingsTab) renderTaskTabList(currentSettingsTab, taskId);
     }catch(e){}
   }
-  try{ if(window.ClaudeTabMod) window.ClaudeTabMod.onTaskResult = onClaudeTaskResult; }catch(e){}
+  try{ if(window.ClaudeTabMod){ window.ClaudeTabMod.onTaskResult = onClaudeTaskResult; window.ClaudeTabMod.onTaskCommit = onClaudeTaskCommit; } }catch(e){}
   // ---- напоминание для задачи ----
   // c.remindAt — время напоминания в мс (локальное время устройства); null/нет поля — напоминания
   // нет. Состояния кнопки: нет (часы) / стоит на другую дату (часы в закрашенном круге, как «в

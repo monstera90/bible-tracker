@@ -1,4 +1,5 @@
 package com.app.lifetracker
+// Версия: 1.4 (28.11) — успешный коммит (не «нечего коммитить» и не ошибка) запоминает id задачи и вкладку ([noteTaskCommit]); страница забирает их через [takeTaskCommits] (мост claudeTaskCommits) и рисует у сундучка задачи белую окантовку. Очередь в SharedPreferences — переживает перезапуск приложения. Откат: AutoCommit.kt 1.3.
 // Версия: 1.3 (25.11) — плашка агента в острове (AgentRuns): fix.zip пришёл — шаг 3 с долей по Content-Length (blob: — без доли), коммит — шаг 4 с долей по запросам GitHubCommit; итог — галочка / «нечего коммитить» / ошибка. `intercept(..., tabId)`. Откат: AutoCommit.kt 1.2.
 // Версия: 1.2 (24.11) — intercept(expected): скачивание zip сразу после автонажатия на карточку считается fix.zip даже без имени. Откат: AutoCommit.kt 1.1.
 // Версия: 1.1 (24.11) — autoClickReady / recordNote для автоскачивания карточки fix.zip (auto_fix.js). Откат: AutoCommit.kt 1.0.
@@ -125,6 +126,32 @@ object AutoCommit {
         return try {
             s.edit().putString(K_TOKEN, value?.trim().orEmpty()).commit()
         } catch (e: Throwable) { false }
+    }
+
+    private const val K_COMMITS = "task_commits"
+    private const val MAX_COMMITS = 50
+
+    /** Успешный коммит fix.zip: запоминаем задачу ([reqId], пусто — если запуск не от задачи) и вкладку Claude, пока страница не заберёт. */
+    private fun noteTaskCommit(ctx: Context, reqId: String, tabId: String) {
+        synchronized(this) {
+            val p = plain(ctx)
+            val arr = try { org.json.JSONArray(p.getString(K_COMMITS, "[]") ?: "[]") } catch (e: Exception) { org.json.JSONArray() }
+            arr.put(JSONObject().put("id", reqId).put("tab", tabId).put("t", System.currentTimeMillis()))
+            val out = org.json.JSONArray()
+            for (i in maxOf(0, arr.length() - MAX_COMMITS) until arr.length()) out.put(arr.get(i))
+            p.edit().putString(K_COMMITS, out.toString()).apply()
+        }
+    }
+
+    /** Накопленные успешные коммиты одним JSON-массивом [{id, tab, t}]; очередь очищается. */
+    fun takeTaskCommits(ctx: Context): String {
+        synchronized(this) {
+            val p = plain(ctx)
+            val s = p.getString(K_COMMITS, "[]") ?: "[]"
+            if (s == "[]") return s
+            p.edit().putString(K_COMMITS, "[]").commit()
+            return s
+        }
     }
 
     private fun record(ctx: Context, status: String, text: String) {
@@ -269,6 +296,7 @@ object AutoCommit {
             is GitHubCommit.Result.Committed -> {
                 val skip = if (content.skipped.isEmpty()) "" else "; пропущено небезопасных путей: ${content.skipped.size}"
                 AgentRuns.done(run, "${r.files} файлов, ${r.sha.take(7)}")
+                try { noteTaskCommit(activity, run.reqId, run.tabId) } catch (e: Exception) { }
                 record(activity, "ok", "${r.files} файлов, ${r.sha.take(7)}$skip")
                 toast(activity, "Закоммичено: ${r.files} файлов" + (if (content.skipped.isEmpty()) "" else "\nПропущено небезопасных путей: ${content.skipped.size}"))
             }

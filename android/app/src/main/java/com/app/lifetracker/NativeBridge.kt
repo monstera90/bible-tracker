@@ -1,5 +1,6 @@
 package com.app.lifetracker
 // Версия: 30.13 (28.11) — `agentHistoryTake()` / `agentHistoryAck(ns)` (мост 45): записи об агентах Claude («Агент 2 начал работать над задачей в 09:24 и закончил в 09:30») для журнала событий; очередь — AgentHistory. Откат: NativeBridge.kt 30.12.
+// Версия: 30.13 (28.11) — `claudeTaskCommits()`: успешные коммиты fix.zip [{id, tab, t}] для белой окантовки сундучка (AutoCommit.takeTaskCommits). Версию моста не меняет. Откат: NativeBridge.kt 30.12.
 // Версия: 30.12 (28.11) — `claudeSendTaskPlain(tabId, reqId, text, imagesJson)`: «Обычная задача» из сундучка — текст и картинки уходят в новый диалог как есть, без архива репозитория и без автокоммита fix.zip в этом чате. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.11.
 // Версия: 30.11 (25.11) — `claudeSendTaskImages(tabId, reqId, text, imagesJson)`: то же, что `claudeSendTask`, но с картинками задачи (JSON [{name, mime, b64}]) — они прикрепляются в чате рядом с архивом. Версию моста не меняет — страница проверяет наличие метода. Откат: NativeBridge.kt 30.10.
 // Версия: 30.10 (24.11) — `autoCommitGet` / `autoCommitSave` / `autoCommitSetToken`: настройки автокоммита fix.zip (AutoCommit); токен в страницу не отдаётся. Версию моста не меняет. Откат: NativeBridge.kt 30.9.
@@ -1000,6 +1001,13 @@ class NativeBridge(private val activity: MainActivity) {
     fun claudeTaskResults(): String {
         if (!activity.pageTrusted) return "[]"
         return try { ClaudeTaskResults.take() } catch (e: Exception) { "[]" }
+    }
+
+    /** Успешные коммиты fix.zip, которых страница ещё не видела: JSON-массив [{id, tab, t}], очередь очищается. */
+    @JavascriptInterface
+    fun claudeTaskCommits(): String {
+        if (!activity.pageTrusted) return "[]"
+        return try { AutoCommit.takeTaskCommits(activity.applicationContext) } catch (e: Exception) { "[]" }
     }
 
     /** Проверка: отправить текст в чат прямо сейчас. */

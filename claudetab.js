@@ -1,5 +1,6 @@
 /* ===========================================================================
    claudetab.js
+   Версия: 2.2 (28.11) — опрос успешных коммитов fix.zip (мост `claudeTaskCommits`, раз в 3 с и при возврате на страницу): `ClaudeTabMod.onTaskCommit(taskId, tabId)` — my.js рисует у сундучка белую окантовку. Откат: claudetab.js 2.1.
    Версия: 2.1 (28.11) — учёт «когда вкладке Claude последний раз давали задачу через приложение» (localStorage `claudeTabLastSent_v1`, {id вкладки: время}, только это устройство) и выбор свободного агента: `pickFreeTab()` — вкладка, которой не давали задач последние 5 ч 1 мин (из нескольких — та, что простаивает дольше всех; не бывало задач — раньше всех), `nextFreeAt()` — когда освободится ближайшая. Время ставится при принятой оболочкой отправке и откатывается, если пришёл итог «не отправлено». Откат: claudetab.js 2.0.
    Версия: 2.0 (28.11) — `focusTab(id)`: выбрать вкладку ряда перед показом вкладки Claude (нажатие на карточку агента в острове открывает вкладку, где он работает). Откат: claudetab.js 1.9.
    Версия: 1.9 (28.11) — режим «Обычная задача»: `canSendPlain()` и `sendTask(tabId, taskId, text, images, plain)` — при plain задача уходит как есть (текст + картинки), без архива репозитория и без автокоммита (мост `claudeSendTaskPlain`). Стили второй плашки выбора режима. Откат: claudetab.js 1.8.
@@ -559,6 +560,21 @@
     }
     return ok;
   }
+  // успешные коммиты fix.zip: оболочка копит их, пока страница не заберёт (пережили и перезапуск приложения)
+  function commitPoll(){
+    var b = window.LifeTrackerNative;
+    if(!b || typeof b.claudeTaskCommits !== "function") return;
+    var arr = [];
+    try{ arr = JSON.parse(b.claudeTaskCommits() || "[]"); }catch(e){ arr = []; }
+    if(!Array.isArray(arr)) return;
+    arr.forEach(function(r){
+      if(!r) return;
+      try{ if(typeof api.onTaskCommit === "function") api.onTaskCommit(String(r.id || ""), String(r.tab || ""), Number(r.t) || 0); }catch(e){}
+    });
+  }
+  setInterval(commitPoll, 3000);
+  setTimeout(commitPoll, 1500);
+  try{ document.addEventListener("visibilitychange", function(){ if(!document.hidden) commitPoll(); }); }catch(e){}
   // итоги прежних отправок (страницу могли перезагрузить, пока шла отправка)
   setTimeout(function(){ if(canSendTask()){ taskPendingCount = 1; taskPoll(); } }, 3000);
 
@@ -574,6 +590,6 @@
   }
 
   var api = { focusTab: focusTab, render: render, onSwitch: onSwitch, hide: hide,
-    tabIds: tabIds, pickFreeTab: pickFreeTab, nextFreeAt: nextFreeAt, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null };
+    tabIds: tabIds, pickFreeTab: pickFreeTab, nextFreeAt: nextFreeAt, canSendTask: canSendTask, canSendImages: canSendImages, canSendPlain: canSendPlain, sendTask: sendTask, ensureStyle: ensureStyle, tabIconHtml: tabIconHtml, onTaskResult: null, onTaskCommit: null };
   window.ClaudeTabMod = api;
 })();
